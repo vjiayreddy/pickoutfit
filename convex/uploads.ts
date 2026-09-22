@@ -25,8 +25,8 @@ export const generateUploadUrl = mutation({
 });
 
 /**
- * Registers a batch of uploaded photos: one `uploads` row + one ingest job per photo.
- * Detect workflow starts in Phase 3.
+ * Registers a batch of uploaded photos: one `uploads` row + one ingest job +
+ * detect workflow per photo.
  */
 export const createBatch = mutation({
   args: {
@@ -178,8 +178,7 @@ export const remove = mutation({
   handler: async (ctx, { uploadId }) => {
     const user = await requireUser(ctx);
     const upload = assertOwner(await ctx.db.get(uploadId), user, "upload");
-    // `queued` is idle until Phase 3 detect starts; only block in-flight work.
-    if (["detecting", "extracting"].includes(upload.status)) {
+    if (["queued", "detecting", "extracting"].includes(upload.status)) {
       throw appError(
         "ITEM_BUSY",
         "Wait for this photo's scan or import to finish before removing it.",

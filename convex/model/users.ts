@@ -1,8 +1,10 @@
+import type { WorkflowId } from "@convex-dev/workflow";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { appError } from "../lib/errors";
 import { dayKey } from "../shared/credits";
 import { ITEM_STATUSES } from "../shared/wardrobe";
+import { workflow } from "../workflows/manager";
 import { completeJob } from "./jobs";
 import { bumpSystemCounter } from "./stats";
 
@@ -89,7 +91,7 @@ const ACTIVE_JOB_STATUSES = ["queued", "running"] as const;
 
 /**
  * Stops anything still running for this user before their rows disappear.
- * Workflow cancel lands in Phase 3; until then we only mark jobs cancelled.
+ * Cancels the durable workflow first so onComplete can refund while the ledger exists.
  */
 export async function cancelActiveJobs(
   ctx: MutationCtx,
@@ -107,6 +109,16 @@ export async function cancelActiveJobs(
   );
   const active = lists.flat();
   for (const job of active) {
+    if (job.workflowId) {
+      try {
+        await workflow.cancel(ctx, job.workflowId as WorkflowId);
+      } catch (error) {
+        console.warn(
+          `Could not cancel workflow ${job.workflowId} for job ${job._id}`,
+          error,
+        );
+      }
+    }
     const current = await ctx.db.get(job._id);
     if (current && (current.status === "queued" || current.status === "running")) {
       await completeJob(ctx, job._id, {

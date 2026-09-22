@@ -1,20 +1,33 @@
+import { start } from "@convex-dev/workflow";
 import type { Infer } from "convex/values";
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { assertOwner } from "../lib/auth";
 import { appError } from "../lib/errors";
-import { detectUsageToUsd, LIMITS } from "../shared/credits";
+import {
+  CREDIT_COSTS,
+  detectUsageToUsd,
+  extractionCreditCost,
+  LIMITS,
+} from "../shared/credits";
 import { INGEST_STEPS, isTerminalJobStatus } from "../shared/jobs";
 import type { vDetectedItem } from "../shared/validators";
 import { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from "../shared/wardrobe";
 import type { UploadView } from "../views";
+import { reserve, shortfallError } from "./credits";
 import {
+  addSteps,
+  assertAffordable,
   assertBelowJobLimit,
   completeJob,
   createJob,
   getJob,
   setStep,
+  setWorkflowId,
+  type StepInput,
 } from "./jobs";
+import { insertDetectedItem, markItemPending } from "./items";
 import { bumpDailyStats } from "./stats";
 
 type Ctx = QueryCtx | MutationCtx;
@@ -25,9 +38,6 @@ export type UploadFileInput = {
   mimeType: string;
   sizeBytes: number;
 };
-
-const PIPELINES_UNAVAILABLE =
-  "AI pipelines are not enabled yet. Detect and extract land in Phase 3.";
 
 export async function toUploadView(
   ctx: Ctx,
@@ -128,24 +138,79 @@ export async function listBatch(
 }
 
 /**
- * Reserves credits and would start extraction — gated until Phase 3 workflows land.
+ * Reserves credits and starts the extraction workflow.
  * Shared by uploads.resume and items.reextract.
  */
 export async function startExtractionJob(
-  _ctx: MutationCtx,
-  _user: Doc<"users">,
+  ctx: MutationCtx,
+  user: Doc<"users">,
   itemIds: Id<"items">[],
-  _uploadId?: Id<"uploads">,
+  uploadId?: Id<"uploads">,
 ): Promise<Id<"jobs">> {
   if (itemIds.length === 0) {
     throw appError("INVALID_INPUT", "There's nothing left to extract here.");
   }
-  throw appError("UPSTREAM_FAILED", PIPELINES_UNAVAILABLE);
+  if (uploadId) {
+    const upload = assertOwner(await ctx.db.get(uploadId), user, "upload");
+    if (upload.status === "extracting") {
+      throw appError(
+        "ITEM_BUSY",
+        "Wait for this photo's current import to finish.",
+      );
+    }
+  }
+  await assertBelowJobLimit(ctx, user._id);
+
+  const needed = extractionCreditCost(itemIds.length);
+  assertAffordable(user, needed);
+
+  const steps: StepInput[] = [
+    { key: INGEST_STEPS.reserve },
+    ...itemIds.map((itemId, index) => ({
+      key: `${INGEST_STEPS.extract}:${index}`,
+      meta: { itemId },
+    })),
+    { key: INGEST_STEPS.finalize },
+  ];
+  const jobId = await createJob(ctx, user, { type: "ingest", steps, uploadId });
+
+  const result = await reserve(ctx, user, needed, jobId);
+  if (result.granted < needed) throw shortfallError(result, needed);
+  await setStep(ctx, jobId, INGEST_STEPS.reserve, {
+    status: "done",
+    meta: { credits: needed },
+  });
+
+  const now = Date.now();
+  for (const itemId of itemIds) {
+    const item = await ctx.db.get(itemId);
+    if (!item) continue;
+    if (item.status === "ready") await markItemPending(ctx, itemId, jobId);
+    else
+      await ctx.db.patch(itemId, {
+        status: "extracting",
+        pendingJobId: undefined,
+        updatedAt: now,
+      });
+  }
+
+  const workflowId = await start(
+    ctx,
+    internal.workflows.ingest.extractItems,
+    { jobId, itemIds },
+    {
+      onComplete: internal.workflows.ingest.onIngestComplete,
+      context: { jobId },
+    },
+  );
+  await setWorkflowId(ctx, jobId, workflowId);
+  if (uploadId) await ctx.db.patch(uploadId, { status: "extracting", jobId });
+  return jobId;
 }
 
 /**
- * Registers uploaded photos as one batch with an ingest job per photo.
- * Detect workflow starts in Phase 3 — jobs stay queued after the upload step.
+ * Registers uploaded photos as one batch: an `uploads` row plus an ingest job
+ * + detect workflow per photo.
  */
 export async function createBatch(
   ctx: MutationCtx,
@@ -187,15 +252,18 @@ export async function createBatch(
       batchId,
     });
     await setStep(ctx, jobId, INGEST_STEPS.upload, { status: "done" });
-    // Phase 3 starts detect here. Until then, skip remaining steps so jobs
-    // don't sit in `queued`/`running` and burn the per-user job limit.
-    await setStep(ctx, jobId, INGEST_STEPS.detect, {
-      status: "skipped",
-      label: "Detect pending (Phase 3)",
-    });
-    await setStep(ctx, jobId, INGEST_STEPS.review, { status: "skipped" });
-    await completeJob(ctx, jobId, { status: "done" });
     await ctx.db.patch(uploadId, { jobId });
+
+    const workflowId = await start(
+      ctx,
+      internal.workflows.ingest.scanUpload,
+      { uploadId, jobId },
+      {
+        onComplete: internal.workflows.ingest.onScanComplete,
+        context: { jobId },
+      },
+    );
+    await setWorkflowId(ctx, jobId, workflowId);
     uploads.push({ uploadId, jobId });
   }
 
@@ -253,9 +321,7 @@ export async function recordCandidates(
   return candidates.length;
 }
 
-/**
- * Selection validation ready for Phase 3; extract/reserve path needs workflows.
- */
+/** Selection, credit reservation, item creation and workflow start commit as one transaction. */
 export async function confirmSelection(
   ctx: MutationCtx,
   user: Doc<"users">,
@@ -294,5 +360,85 @@ export async function confirmSelection(
   if (upload.status !== "awaiting_selection") {
     throw appError("CONFLICT", "This photo isn't ready for selection.");
   }
-  throw appError("UPSTREAM_FAILED", PIPELINES_UNAVAILABLE);
+  await assertBelowJobLimit(ctx, user._id);
+  const existing = await ctx.db
+    .query("items")
+    .withIndex("by_user_status", (q) => q.eq("userId", user._id))
+    .take(LIMITS.maxItemsPerUser + 1);
+  if (existing.length + selectedIndices.length > LIMITS.maxItemsPerUser) {
+    throw appError(
+      "WARDROBE_FULL",
+      `Your wardrobe is full (${LIMITS.maxItemsPerUser} items). Delete a few before adding more.`,
+    );
+  }
+  const jobId = await createJob(ctx, user, {
+    type: "ingest",
+    uploadId,
+    batchId: upload.batchId,
+    steps: [{ key: INGEST_STEPS.reserve }],
+  });
+  const result = await reserve(
+    ctx,
+    user,
+    extractionCreditCost(selectedIndices.length),
+    jobId,
+  );
+  const grantedCount = Math.floor(result.granted / CREDIT_COSTS.extractItem);
+  const itemIds: Id<"items">[] = [];
+  for (const [position, index] of selectedIndices.entries()) {
+    const { bbox, ...attrs } = candidates[index];
+    const itemId = await insertDetectedItem(ctx, {
+      userId: user._id,
+      uploadId,
+      attrs,
+      bbox,
+      status: position < grantedCount ? "extracting" : "needsCredits",
+    });
+    if (position < grantedCount) itemIds.push(itemId);
+  }
+  await addSteps(ctx, jobId, [
+    ...itemIds.map((itemId, index) => ({
+      key: `${INGEST_STEPS.extract}:${index}`,
+      meta: { itemId },
+    })),
+    { key: INGEST_STEPS.finalize },
+  ]);
+  await setStep(ctx, jobId, INGEST_STEPS.reserve, {
+    status: "done",
+    meta: {
+      granted: result.granted,
+      shortfall: result.shortfall,
+      ...(result.reason ? { reason: result.reason } : {}),
+    },
+  });
+  await ctx.db.patch(uploadId, {
+    selectedIndices,
+    selectionConfirmedAt: Date.now(),
+    selectionJobId: jobId,
+    jobId,
+    status: itemIds.length > 0 ? "extracting" : "partial",
+  });
+  if (itemIds.length > 0) {
+    const workflowId = await start(
+      ctx,
+      internal.workflows.ingest.extractItems,
+      { jobId, itemIds },
+      {
+        onComplete: internal.workflows.ingest.onIngestComplete,
+        context: { jobId },
+      },
+    );
+    await setWorkflowId(ctx, jobId, workflowId);
+  } else {
+    await setStep(ctx, jobId, INGEST_STEPS.finalize, {
+      status: "done",
+      meta: {
+        extracted: 0,
+        failed: 0,
+        needsCredits: selectedIndices.length,
+      },
+    });
+    await completeJob(ctx, jobId, { status: "partial" });
+  }
+  return jobId;
 }

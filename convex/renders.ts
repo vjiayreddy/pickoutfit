@@ -18,8 +18,7 @@ import { vRenderQuality } from "./shared/validators";
 import { vItemSummary, vOutfitView, vPaginated, vRenderView } from "./views";
 
 /**
- * Validates → would reserve → create pending renders → start workflow.
- * Workflows land in Phase 3; until then start throws UPSTREAM_FAILED after validation.
+ * Validates → reserve → create pending renders → start workflow.
  */
 export const start = mutation({
   args: {
