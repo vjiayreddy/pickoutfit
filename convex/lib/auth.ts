@@ -1,5 +1,6 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { requireEnv } from "./env";
 import { appError } from "./errors";
 
 type Ctx = QueryCtx | MutationCtx;
@@ -53,4 +54,27 @@ export function assertOwner<T extends { userId: Id<"users"> }>(
     throw appError("NOT_FOUND", `That ${what} doesn't exist.`);
   }
   return doc;
+}
+
+/** Service-to-service auth for the stylist agent: shared secret + Better Auth user id. */
+export async function requireServiceUser(
+  ctx: Ctx,
+  args: { serviceKey: string; authId: string },
+): Promise<Doc<"users">> {
+  if (!safeEqual(args.serviceKey, requireEnv("AGENT_SERVICE_KEY"))) {
+    throw appError("FORBIDDEN", "Invalid service key.");
+  }
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_authId", (q) => q.eq("authId", args.authId))
+    .unique();
+  if (!user) throw appError("NOT_FOUND", "Unknown user.");
+  return user;
+}
+
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }

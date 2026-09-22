@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as agent from "../agent.js";
 import type * as ai_colours from "../ai/colours.js";
 import type * as ai_image_input from "../ai/image_input.js";
 import type * as ai_openai from "../ai/openai.js";
@@ -55,6 +56,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  agent: typeof agent;
   "ai/colours": typeof ai_colours;
   "ai/image_input": typeof ai_image_input;
   "ai/openai": typeof ai_openai;

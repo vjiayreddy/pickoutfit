@@ -4,6 +4,8 @@ AI wardrobe & virtual try-on app (Next.js + Convex + Better Auth).
 
 ## Setup
 
+Requires **Node.js ≥ 24** (Eve). With nvm: `nvm install && nvm use`.
+
 ```bash
 pnpm install
 cp .env.example .env.local
