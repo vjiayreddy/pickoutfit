@@ -336,13 +336,22 @@ export function ItemDetail({ itemId }: { itemId: string }) {
             </h2>
             {outfits.length === 0 ? (
               <p className="text-sm text-mute">
-                Not in an outfit yet. Outfit builder lands in Phase 5.
+                Not in an outfit yet.{" "}
+                <Link href={routes.outfits} className="font-medium underline">
+                  Build one
+                </Link>
+                .
               </p>
             ) : (
               <ul className="space-y-2">
                 {outfits.map((outfit) => (
-                  <li key={outfit._id} className="text-sm font-medium">
-                    {outfit.name}
+                  <li key={outfit._id}>
+                    <Link
+                      href={routes.outfit(outfit._id)}
+                      className="text-sm font-medium underline-offset-4 hover:underline"
+                    >
+                      {outfit.name}
+                    </Link>
                   </li>
                 ))}
               </ul>
