@@ -22,8 +22,12 @@ const display = Bebas_Neue({
 });
 
 export const metadata: Metadata = {
-  title: "WardrobeAI",
-  description: "AI wardrobe and virtual try-on",
+  title: {
+    default: "WardrobeAI",
+    template: "%s · WardrobeAI",
+  },
+  description:
+    "Photograph your clothes, build outfits with Eve, and preview try-ons on you. Start with free credits.",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
