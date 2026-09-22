@@ -11,6 +11,7 @@ import {
   type Category,
 } from "@convex/shared/wardrobe";
 import { ItemTile } from "@/components/wardrobe/ItemTile";
+import { SeedDemoWardrobe } from "@/components/wardrobe/SeedDemoWardrobe";
 import { cn } from "@/lib/cn";
 import { pluralize } from "@/lib/format";
 import { routes } from "@/lib/routes";
@@ -65,13 +66,16 @@ export function WardrobeGrid() {
             The pieces you love. The looks you haven&apos;t tried yet.
           </p>
         </div>
-        <Link
-          href={routes.add}
-          className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas transition active:scale-95 active:opacity-50"
-        >
-          <Plus className="size-4" />
-          Add clothes
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <SeedDemoWardrobe />
+          <Link
+            href={routes.add}
+            className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas transition active:scale-95 active:opacity-50"
+          >
+            <Plus className="size-4" />
+            Add clothes
+          </Link>
+        </div>
       </div>
 
       {ingesting ? (
@@ -132,9 +136,21 @@ export function WardrobeGrid() {
           <p className="text-sm text-mute">
             {showHidden
               ? "Nothing hidden right now."
-              : "Upload a photo to extract your first garments."}
+              : query.trim() || category !== "all"
+                ? "Try a different search or clear filters."
+                : "Upload a photo, or seed a free demo wardrobe to explore."}
           </p>
-          {!showHidden ? (
+          {!showHidden && !query.trim() && category === "all" ? (
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <SeedDemoWardrobe variant="secondary" />
+              <Link
+                href={routes.add}
+                className="inline-flex h-12 items-center rounded-full bg-ink px-8 text-base font-medium text-canvas"
+              >
+                Add clothes
+              </Link>
+            </div>
+          ) : !showHidden ? (
             <Link
               href={routes.add}
               className="inline-flex h-12 items-center rounded-full bg-ink px-8 text-base font-medium text-canvas"
