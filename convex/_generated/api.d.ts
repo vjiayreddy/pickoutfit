@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as auth from "../auth.js";
+import type * as http from "../http.js";
 import type * as shared_credits from "../shared/credits.js";
 import type * as shared_jobs from "../shared/jobs.js";
 import type * as shared_validators from "../shared/validators.js";
@@ -20,6 +22,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  auth: typeof auth;
+  http: typeof http;
   "shared/credits": typeof shared_credits;
   "shared/jobs": typeof shared_jobs;
   "shared/validators": typeof shared_validators;
@@ -52,4 +56,6 @@ export declare const internal: FilterApi<
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {};
+export declare const components: {
+  betterAuth: import("@convex-dev/better-auth/_generated/component.js").ComponentApi<"betterAuth">;
+};
