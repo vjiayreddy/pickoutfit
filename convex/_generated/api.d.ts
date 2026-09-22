@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as admin from "../admin.js";
 import type * as agent from "../agent.js";
 import type * as ai_colours from "../ai/colours.js";
 import type * as ai_image_input from "../ai/image_input.js";
@@ -18,14 +19,17 @@ import type * as auth from "../auth.js";
 import type * as avatars from "../avatars.js";
 import type * as billing from "../billing.js";
 import type * as credits from "../credits.js";
+import type * as demoWardrobe from "../demoWardrobe.js";
 import type * as http from "../http.js";
 import type * as items from "../items.js";
 import type * as jobs from "../jobs.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_env from "../lib/env.js";
 import type * as lib_errors from "../lib/errors.js";
+import type * as model_admin from "../model/admin.js";
 import type * as model_avatars from "../model/avatars.js";
 import type * as model_credits from "../model/credits.js";
+import type * as model_demo_wardrobe from "../model/demo_wardrobe.js";
 import type * as model_items from "../model/items.js";
 import type * as model_jobs from "../model/jobs.js";
 import type * as model_outfits from "../model/outfits.js";
@@ -38,6 +42,7 @@ import type * as model_users from "../model/users.js";
 import type * as outfits from "../outfits.js";
 import type * as renders from "../renders.js";
 import type * as shared_credits from "../shared/credits.js";
+import type * as shared_demo_wardrobe from "../shared/demo_wardrobe.js";
 import type * as shared_jobs from "../shared/jobs.js";
 import type * as shared_validators from "../shared/validators.js";
 import type * as shared_wardrobe from "../shared/wardrobe.js";
@@ -56,6 +61,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  admin: typeof admin;
   agent: typeof agent;
   "ai/colours": typeof ai_colours;
   "ai/image_input": typeof ai_image_input;
@@ -66,14 +72,17 @@ declare const fullApi: ApiFromModules<{
   avatars: typeof avatars;
   billing: typeof billing;
   credits: typeof credits;
+  demoWardrobe: typeof demoWardrobe;
   http: typeof http;
   items: typeof items;
   jobs: typeof jobs;
   "lib/auth": typeof lib_auth;
   "lib/env": typeof lib_env;
   "lib/errors": typeof lib_errors;
+  "model/admin": typeof model_admin;
   "model/avatars": typeof model_avatars;
   "model/credits": typeof model_credits;
+  "model/demo_wardrobe": typeof model_demo_wardrobe;
   "model/items": typeof model_items;
   "model/jobs": typeof model_jobs;
   "model/outfits": typeof model_outfits;
@@ -86,6 +95,7 @@ declare const fullApi: ApiFromModules<{
   outfits: typeof outfits;
   renders: typeof renders;
   "shared/credits": typeof shared_credits;
+  "shared/demo_wardrobe": typeof shared_demo_wardrobe;
   "shared/jobs": typeof shared_jobs;
   "shared/validators": typeof shared_validators;
   "shared/wardrobe": typeof shared_wardrobe;

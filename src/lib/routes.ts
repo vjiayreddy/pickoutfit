@@ -15,6 +15,8 @@ export const routes = {
   lookbook: "/lookbook",
   share: (token: string) => `/share/${token}`,
   billing: "/billing",
+  settings: "/settings",
+  admin: "/admin",
   stylist: "/stylist",
   thread: (id: string) => `/stylist/${id}`,
 } as const;

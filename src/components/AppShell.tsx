@@ -4,7 +4,16 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode } from "react";
 import { useQuery } from "convex/react";
-import { Images, LayoutGrid, MessageCircle, Plus, Shirt, Sparkles } from "lucide-react";
+import {
+  Images,
+  LayoutGrid,
+  MessageCircle,
+  Plus,
+  Settings,
+  Shield,
+  Shirt,
+  Sparkles,
+} from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { ActivityPopover } from "@/components/layout/ActivityPopover";
 import { OnboardingGate } from "@/components/layout/OnboardingGate";
@@ -117,6 +126,38 @@ function AppFrame({ children }: { children: ReactNode }) {
                   {me.balance.total} credits
                 </Link>
                 {onboarded ? <ActivityPopover /> : null}
+                {me.role === "admin" ? (
+                  <Link
+                    href={routes.admin}
+                    aria-current={
+                      isActivePath(pathname, routes.admin) ? "page" : undefined
+                    }
+                    className={cn(
+                      "hidden h-10 items-center gap-1.5 rounded-full px-4 text-sm font-medium transition sm:inline-flex",
+                      isActivePath(pathname, routes.admin)
+                        ? "bg-ink text-canvas"
+                        : "bg-soft-cloud text-ink",
+                    )}
+                  >
+                    <Shield className="size-3.5" aria-hidden />
+                    Admin
+                  </Link>
+                ) : null}
+                <Link
+                  href={routes.settings}
+                  aria-label="Settings"
+                  aria-current={
+                    isActivePath(pathname, routes.settings) ? "page" : undefined
+                  }
+                  className={cn(
+                    "flex size-10 items-center justify-center rounded-full transition",
+                    isActivePath(pathname, routes.settings)
+                      ? "bg-ink text-canvas"
+                      : "bg-soft-cloud text-ink",
+                  )}
+                >
+                  <Settings className="size-4" aria-hidden />
+                </Link>
                 <button
                   type="button"
                   onClick={signOut}
