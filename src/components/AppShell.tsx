@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode } from "react";
 import { useQuery } from "convex/react";
-import { Plus, Shirt } from "lucide-react";
+import { Images, LayoutGrid, Plus, Shirt } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { ActivityPopover } from "@/components/layout/ActivityPopover";
 import { OnboardingGate } from "@/components/layout/OnboardingGate";
@@ -15,6 +15,8 @@ import { routes } from "@/lib/routes";
 const PRIMARY_NAV = [
   { href: routes.wardrobe, label: "Wardrobe", icon: Shirt },
   { href: routes.add, label: "Add clothes", icon: Plus },
+  { href: routes.outfits, label: "Outfits", icon: LayoutGrid },
+  { href: routes.lookbook, label: "Lookbook", icon: Images },
 ] as const;
 
 function isActivePath(pathname: string, href: string): boolean {

@@ -9,4 +9,9 @@ export const routes = {
   add: "/add",
   wardrobe: "/wardrobe",
   item: (itemId: Id<"items"> | string) => `/wardrobe/${itemId}`,
+  outfits: "/outfits",
+  newOutfit: "/outfits/new",
+  outfit: (outfitId: Id<"outfits"> | string) => `/outfits/${outfitId}`,
+  lookbook: "/lookbook",
+  share: (token: string) => `/share/${token}`,
 } as const;
