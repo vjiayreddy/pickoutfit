@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Bebas_Neue, Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 import { getToken } from "@/lib/auth-server";
 import "./globals.css";
@@ -36,6 +37,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col">
         <ConvexClientProvider initialToken={initialToken}>
           {children}
+          <Toaster position="bottom-right" richColors closeButton />
         </ConvexClientProvider>
       </body>
     </html>
