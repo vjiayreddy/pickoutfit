@@ -16,6 +16,7 @@ import type { vDetectedItem } from "../shared/validators";
 import { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from "../shared/wardrobe";
 import type { UploadView } from "../views";
 import { reserve, shortfallError } from "./credits";
+import { ensureFreshBilling } from "./subscriptions";
 import {
   addSteps,
   assertAffordable,
@@ -162,7 +163,8 @@ export async function startExtractionJob(
   await assertBelowJobLimit(ctx, user._id);
 
   const needed = extractionCreditCost(itemIds.length);
-  assertAffordable(user, needed);
+  const billed = await ensureFreshBilling(ctx, user);
+  assertAffordable(billed, needed);
 
   const steps: StepInput[] = [
     { key: INGEST_STEPS.reserve },
@@ -172,9 +174,9 @@ export async function startExtractionJob(
     })),
     { key: INGEST_STEPS.finalize },
   ];
-  const jobId = await createJob(ctx, user, { type: "ingest", steps, uploadId });
+  const jobId = await createJob(ctx, billed, { type: "ingest", steps, uploadId });
 
-  const result = await reserve(ctx, user, needed, jobId);
+  const result = await reserve(ctx, billed, needed, jobId);
   if (result.granted < needed) throw shortfallError(result, needed);
   await setStep(ctx, jobId, INGEST_STEPS.reserve, {
     status: "done",
@@ -361,9 +363,10 @@ export async function confirmSelection(
     throw appError("CONFLICT", "This photo isn't ready for selection.");
   }
   await assertBelowJobLimit(ctx, user._id);
+  const billed = await ensureFreshBilling(ctx, user);
   const existing = await ctx.db
     .query("items")
-    .withIndex("by_user_status", (q) => q.eq("userId", user._id))
+    .withIndex("by_user_status", (q) => q.eq("userId", billed._id))
     .take(LIMITS.maxItemsPerUser + 1);
   if (existing.length + selectedIndices.length > LIMITS.maxItemsPerUser) {
     throw appError(
@@ -371,7 +374,7 @@ export async function confirmSelection(
       `Your wardrobe is full (${LIMITS.maxItemsPerUser} items). Delete a few before adding more.`,
     );
   }
-  const jobId = await createJob(ctx, user, {
+  const jobId = await createJob(ctx, billed, {
     type: "ingest",
     uploadId,
     batchId: upload.batchId,
@@ -379,7 +382,7 @@ export async function confirmSelection(
   });
   const result = await reserve(
     ctx,
-    user,
+    billed,
     extractionCreditCost(selectedIndices.length),
     jobId,
   );

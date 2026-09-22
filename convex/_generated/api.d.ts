@@ -15,6 +15,7 @@ import type * as ai_pipeline from "../ai/pipeline.js";
 import type * as ai_prompts from "../ai/prompts.js";
 import type * as auth from "../auth.js";
 import type * as avatars from "../avatars.js";
+import type * as billing from "../billing.js";
 import type * as credits from "../credits.js";
 import type * as http from "../http.js";
 import type * as items from "../items.js";
@@ -29,6 +30,7 @@ import type * as model_jobs from "../model/jobs.js";
 import type * as model_outfits from "../model/outfits.js";
 import type * as model_renders from "../model/renders.js";
 import type * as model_stats from "../model/stats.js";
+import type * as model_subscriptions from "../model/subscriptions.js";
 import type * as model_threads from "../model/threads.js";
 import type * as model_uploads from "../model/uploads.js";
 import type * as model_users from "../model/users.js";
@@ -60,6 +62,7 @@ declare const fullApi: ApiFromModules<{
   "ai/prompts": typeof ai_prompts;
   auth: typeof auth;
   avatars: typeof avatars;
+  billing: typeof billing;
   credits: typeof credits;
   http: typeof http;
   items: typeof items;
@@ -74,6 +77,7 @@ declare const fullApi: ApiFromModules<{
   "model/outfits": typeof model_outfits;
   "model/renders": typeof model_renders;
   "model/stats": typeof model_stats;
+  "model/subscriptions": typeof model_subscriptions;
   "model/threads": typeof model_threads;
   "model/uploads": typeof model_uploads;
   "model/users": typeof model_users;
@@ -121,4 +125,5 @@ export declare const internal: FilterApi<
 export declare const components: {
   betterAuth: import("@convex-dev/better-auth/_generated/component.js").ComponentApi<"betterAuth">;
   workflow: import("@convex-dev/workflow/_generated/component.js").ComponentApi<"workflow">;
+  stripe: import("@convex-dev/stripe/_generated/component.js").ComponentApi<"stripe">;
 };

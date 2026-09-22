@@ -4,7 +4,8 @@ import { assertOwner } from "../lib/auth";
 import { appError } from "../lib/errors";
 import { LIMITS, PLANS } from "../shared/credits";
 import type { AvatarView } from "../views";
-import { assertFreshBilling, hasCurrentPlan } from "./credits";
+import { hasCurrentPlan } from "./credits";
+import { ensureFreshBilling } from "./subscriptions";
 import { listActive } from "./jobs";
 import { assertStoredImage } from "./uploads";
 
@@ -65,18 +66,18 @@ export async function createAvatar(
     input.label?.trim() || "That photo",
   );
   const existing = await listForUser(ctx, user._id);
-  assertFreshBilling(user);
-  const max = PLANS[hasCurrentPlan(user) ? user.plan : "free"].maxAvatars;
+  const billed = await ensureFreshBilling(ctx, user);
+  const max = PLANS[hasCurrentPlan(billed) ? billed.plan : "free"].maxAvatars;
   if (existing.length >= max) {
     throw appError(
       "FEATURE_LOCKED",
       `Your plan allows ${max} avatar${max === 1 ? "" : "s"}. Remove one or upgrade to add more.`,
-      { max, plan: user.plan },
+      { max, plan: billed.plan },
     );
   }
   const isDefault = existing.length === 0;
   const avatarId = await ctx.db.insert("avatars", {
-    userId: user._id,
+    userId: billed._id,
     storageId: input.storageId,
     label: input.label?.trim() || `Photo ${existing.length + 1}`,
     isDefault,

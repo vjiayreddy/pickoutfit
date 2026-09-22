@@ -14,4 +14,5 @@ export const routes = {
   outfit: (outfitId: Id<"outfits"> | string) => `/outfits/${outfitId}`,
   lookbook: "/lookbook",
   share: (token: string) => `/share/${token}`,
+  billing: "/billing",
 } as const;

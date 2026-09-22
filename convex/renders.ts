@@ -3,7 +3,8 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireOnboarded, requireUser } from "./lib/auth";
 import { appError } from "./lib/errors";
-import { assertFreshBilling, hasCurrentFeature } from "./model/credits";
+import { hasCurrentFeature } from "./model/credits";
+import { ensureFreshBilling } from "./model/subscriptions";
 import { assertJobFinished } from "./model/jobs";
 import { layeredItems, toItemSummary, toOutfitView } from "./model/outfits";
 import {
@@ -133,8 +134,7 @@ export const share = mutation({
   args: { renderId: v.id("renders") },
   returns: v.object({ token: v.string() }),
   handler: async (ctx, { renderId }) => {
-    const user = await requireUser(ctx);
-    assertFreshBilling(user);
+    const user = await ensureFreshBilling(ctx, await requireUser(ctx));
     if (!hasCurrentFeature(user, "sharing")) {
       throw appError("FEATURE_LOCKED", "Sharing is part of the Pro plan.", {
         feature: "sharing",

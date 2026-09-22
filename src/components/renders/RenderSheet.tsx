@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMutation, useQuery } from "convex/react";
 import { Check, Loader2, X } from "lucide-react";
 import { useState } from "react";
@@ -230,7 +231,13 @@ export function RenderSheet({
             </div>
             {!hqUnlocked ? (
               <p className="text-xs text-mute">
-                HQ renders unlock on the Plus plan (billing in Phase 6).
+                HQ renders unlock on the Plus plan.{" "}
+                <Link
+                  href={routes.billing}
+                  className="font-medium text-ink underline underline-offset-4"
+                >
+                  Upgrade in Billing
+                </Link>
               </p>
             ) : null}
           </fieldset>

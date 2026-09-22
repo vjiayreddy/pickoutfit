@@ -16,6 +16,7 @@ import { RENDER_STEPS } from "../shared/jobs";
 import type { RenderView } from "../views";
 import { resolveAvatar } from "./avatars";
 import { hasCurrentFeature, reserve, shortfallError } from "./credits";
+import { ensureFreshBilling } from "./subscriptions";
 import {
   assertAffordable,
   assertBelowJobLimit,
@@ -162,6 +163,7 @@ export async function startRenderJob(
   user: Doc<"users">,
   input: StartRenderInput,
 ): Promise<{ jobId: Id<"jobs">; renderIds: Id<"renders">[] }> {
+  const billed = await ensureFreshBilling(ctx, user);
   const count = Math.trunc(input.count);
   if (
     !Number.isFinite(count) ||
@@ -185,7 +187,7 @@ export async function startRenderJob(
       { max: LIMITS.maxOutfitsPerRenderRequest },
     );
   }
-  if (input.quality === "hq" && !hasCurrentFeature(user, "hq_renders")) {
+  if (input.quality === "hq" && !hasCurrentFeature(billed, "hq_renders")) {
     throw appError(
       "FEATURE_LOCKED",
       "HQ renders are part of the Plus plan.",
@@ -194,15 +196,15 @@ export async function startRenderJob(
   }
 
   for (const outfitId of outfitIds) {
-    const outfit = await requireOutfit(ctx, user, outfitId);
-    await validateSlots(ctx, user, outfit.slots);
+    const outfit = await requireOutfit(ctx, billed, outfitId);
+    await validateSlots(ctx, billed, outfit.slots);
   }
-  const avatar = await resolveAvatar(ctx, user, input.avatarId);
+  const avatar = await resolveAvatar(ctx, billed, input.avatarId);
 
   const images = count * outfitIds.length;
   const needed = renderCreditCost(input.quality, count, outfitIds.length);
-  await assertBelowJobLimit(ctx, user._id);
-  assertAffordable(user, needed);
+  await assertBelowJobLimit(ctx, billed._id);
+  assertAffordable(billed, needed);
 
   const steps: StepInput[] = [
     { key: RENDER_STEPS.reserve },
@@ -211,13 +213,13 @@ export async function startRenderJob(
     })),
     { key: RENDER_STEPS.finalize },
   ];
-  const jobId = await createJob(ctx, user, {
+  const jobId = await createJob(ctx, billed, {
     type: "render",
     steps,
     outfitIds,
   });
 
-  const result = await reserve(ctx, user, needed, jobId);
+  const result = await reserve(ctx, billed, needed, jobId);
   if (result.granted < needed) throw shortfallError(result, needed);
   await setStep(ctx, jobId, RENDER_STEPS.reserve, {
     status: "done",

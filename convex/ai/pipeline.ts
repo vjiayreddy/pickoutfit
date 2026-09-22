@@ -3,6 +3,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { appError } from "../lib/errors";
 import { reserve } from "../model/credits";
+import { ensureFreshBilling } from "../model/subscriptions";
 import {
   countReady,
   insertDetectedItem,
@@ -97,8 +98,9 @@ export const recordDetection = internalMutation({
     args,
   ): Promise<{ found: number; granted: number; skipped: number; toExtract: ExtractTarget[] }> => {
     const job = await getJob(ctx, args.jobId);
-    const user = await ctx.db.get(job.userId);
-    if (!user) throw appError("NOT_FOUND", "User not found for this job.");
+    const userDoc = await ctx.db.get(job.userId);
+    if (!userDoc) throw appError("NOT_FOUND", "User not found for this job.");
+    const user = await ensureFreshBilling(ctx, userDoc);
 
     const detected = args.items.slice(0, LIMITS.maxItemsPerPhoto);
     const found = detected.length;

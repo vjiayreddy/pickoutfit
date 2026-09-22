@@ -5,6 +5,10 @@ export const SERVER_ENV_KEYS = [
   "SITE_URL",
   "MAX_DAILY_SPEND_USD",
   "ALLOW_DEV_SMOKE",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+  "STRIPE_PRICE_PRO",
+  "STRIPE_PRICE_PLUS",
 ] as const;
 
 export type ServerEnvKey = (typeof SERVER_ENV_KEYS)[number];
@@ -28,4 +32,13 @@ export function envNumber(key: ServerEnvKey, fallback: number): number {
   const raw = optionalEnv(key);
   const parsed = raw === undefined ? Number.NaN : Number(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** True when Checkout/Portal can run (keys + price IDs). Webhook secret is separate. */
+export function isStripeCheckoutConfigured(): boolean {
+  return Boolean(
+    optionalEnv("STRIPE_SECRET_KEY") &&
+      optionalEnv("STRIPE_PRICE_PRO") &&
+      optionalEnv("STRIPE_PRICE_PLUS"),
+  );
 }
