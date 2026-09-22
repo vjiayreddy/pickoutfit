@@ -74,7 +74,10 @@ export const ingestUpload = workflow
       { retry: true },
     );
 
-    // Stripe reconcile (subscriptions.refreshForJob) lands in Phase 6.
+    // Keep plan credits in sync before the reserve step.
+    await step.runMutation(internal.billing.refreshForJob, {
+      jobId: args.jobId,
+    });
     const plan = await step.runMutation(internal.ai.pipeline.recordDetection, {
       jobId: args.jobId,
       uploadId: args.uploadId,

@@ -84,16 +84,18 @@ function AppFrame({ children }: { children: ReactNode }) {
               <span className="text-sm text-mute">Loading…</span>
             ) : me ? (
               <>
-                <span
+                <Link
+                  href={routes.billing}
                   className={cn(
-                    "rounded-full px-3 py-1 text-sm font-medium",
+                    "rounded-full px-3 py-1 text-sm font-medium transition-colors",
                     me.balance.lowBalance
                       ? "bg-soft-cloud text-sale"
                       : "bg-soft-cloud text-ink",
+                    isActivePath(pathname, routes.billing) && "ring-1 ring-ink",
                   )}
                 >
                   {me.balance.total} credits
-                </span>
+                </Link>
                 {onboarded ? <ActivityPopover /> : null}
                 <button
                   type="button"
