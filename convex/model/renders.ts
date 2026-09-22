@@ -1,25 +1,34 @@
+import { start } from "@convex-dev/workflow";
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { assertOwner } from "../lib/auth";
 import { appError } from "../lib/errors";
 import {
+  CREDIT_COSTS,
   LIMITS,
   renderCreditCost,
   usageToUsd,
   type RenderQuality,
   type TokenUsage,
 } from "../shared/credits";
+import { RENDER_STEPS } from "../shared/jobs";
 import type { RenderView } from "../views";
 import { resolveAvatar } from "./avatars";
-import { hasCurrentFeature } from "./credits";
-import { assertJobFinished } from "./jobs";
+import { hasCurrentFeature, reserve, shortfallError } from "./credits";
+import {
+  assertAffordable,
+  assertBelowJobLimit,
+  assertJobFinished,
+  createJob,
+  setStep,
+  setWorkflowId,
+  type StepInput,
+} from "./jobs";
 import { requireOutfit, validateSlots } from "./outfits";
 import { bumpDailyStats } from "./stats";
 
 type Ctx = QueryCtx | MutationCtx;
-
-const PIPELINES_UNAVAILABLE =
-  "AI pipelines are not enabled yet. Try-on renders land in Phase 3.";
 
 export async function toRenderView(
   ctx: Ctx,
@@ -145,7 +154,8 @@ export type StartRenderInput = {
 };
 
 /**
- * Validates outfits/avatar/plan limits. Workflow + credit reserve land in Phase 3.
+ * Validate → reserve → create pending `renders` rows → start the render workflow.
+ * Shared by renders.start, renders.regenerate, and (later) agent.startRenders.
  */
 export async function startRenderJob(
   ctx: MutationCtx,
@@ -187,10 +197,94 @@ export async function startRenderJob(
     const outfit = await requireOutfit(ctx, user, outfitId);
     await validateSlots(ctx, user, outfit.slots);
   }
-  await resolveAvatar(ctx, user, input.avatarId);
+  const avatar = await resolveAvatar(ctx, user, input.avatarId);
 
-  // Keep the cost check surface available for clients quoting before Phase 3.
-  void renderCreditCost(input.quality, count, outfitIds.length);
+  const images = count * outfitIds.length;
+  const needed = renderCreditCost(input.quality, count, outfitIds.length);
+  await assertBelowJobLimit(ctx, user._id);
+  assertAffordable(user, needed);
 
-  throw appError("UPSTREAM_FAILED", PIPELINES_UNAVAILABLE);
+  const steps: StepInput[] = [
+    { key: RENDER_STEPS.reserve },
+    ...Array.from({ length: images }, (_, index) => ({
+      key: `${RENDER_STEPS.render}:${index}`,
+    })),
+    { key: RENDER_STEPS.finalize },
+  ];
+  const jobId = await createJob(ctx, user, {
+    type: "render",
+    steps,
+    outfitIds,
+  });
+
+  const result = await reserve(ctx, user, needed, jobId);
+  if (result.granted < needed) throw shortfallError(result, needed);
+  await setStep(ctx, jobId, RENDER_STEPS.reserve, {
+    status: "done",
+    meta: { credits: needed },
+  });
+
+  const now = Date.now();
+  const renderIds: Id<"renders">[] = [];
+  for (const outfitId of outfitIds) {
+    for (let index = 0; index < count; index += 1) {
+      renderIds.push(
+        await ctx.db.insert("renders", {
+          userId: user._id,
+          outfitId,
+          avatarId: avatar._id,
+          jobId,
+          quality: input.quality,
+          status: "pending",
+          prompt: "",
+          creditsCharged: CREDIT_COSTS.render[input.quality],
+          createdAt: now,
+        }),
+      );
+    }
+  }
+
+  const workflowId = await start(
+    ctx,
+    internal.workflows.render.renderOutfits,
+    { jobId, renderIds },
+    {
+      onComplete: internal.workflows.render.onRenderComplete,
+      context: { jobId },
+    },
+  );
+  await setWorkflowId(ctx, jobId, workflowId);
+
+  if (input.threadId) {
+    await attachJobToProposals(ctx, user, input.threadId, outfitIds, jobId);
+  }
+  return { jobId, renderIds };
+}
+
+/** Keeps the stylist thread in sync: one proposal row per outfit, carrying the render job. */
+async function attachJobToProposals(
+  ctx: MutationCtx,
+  user: Doc<"users">,
+  threadId: Id<"threads">,
+  outfitIds: Id<"outfits">[],
+  jobId: Id<"jobs">,
+): Promise<void> {
+  const existing = await ctx.db
+    .query("proposals")
+    .withIndex("by_thread", (q) => q.eq("threadId", threadId))
+    .take(LIMITS.maxOutfitsPerRenderRequest * 4);
+  for (const outfitId of outfitIds) {
+    const proposal = existing.find((row) => row.outfitId === outfitId);
+    if (proposal) {
+      await ctx.db.patch(proposal._id, { jobId });
+    } else {
+      await ctx.db.insert("proposals", {
+        threadId,
+        userId: user._id,
+        outfitId,
+        jobId,
+        createdAt: Date.now(),
+      });
+    }
+  }
 }

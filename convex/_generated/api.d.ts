@@ -8,6 +8,11 @@
  * @module
  */
 
+import type * as ai_colours from "../ai/colours.js";
+import type * as ai_image_input from "../ai/image_input.js";
+import type * as ai_openai from "../ai/openai.js";
+import type * as ai_pipeline from "../ai/pipeline.js";
+import type * as ai_prompts from "../ai/prompts.js";
 import type * as auth from "../auth.js";
 import type * as avatars from "../avatars.js";
 import type * as credits from "../credits.js";
@@ -37,6 +42,9 @@ import type * as threads from "../threads.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
 import type * as views from "../views.js";
+import type * as workflows_ingest from "../workflows/ingest.js";
+import type * as workflows_manager from "../workflows/manager.js";
+import type * as workflows_render from "../workflows/render.js";
 
 import type {
   ApiFromModules,
@@ -45,6 +53,11 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "ai/colours": typeof ai_colours;
+  "ai/image_input": typeof ai_image_input;
+  "ai/openai": typeof ai_openai;
+  "ai/pipeline": typeof ai_pipeline;
+  "ai/prompts": typeof ai_prompts;
   auth: typeof auth;
   avatars: typeof avatars;
   credits: typeof credits;
@@ -74,6 +87,9 @@ declare const fullApi: ApiFromModules<{
   uploads: typeof uploads;
   users: typeof users;
   views: typeof views;
+  "workflows/ingest": typeof workflows_ingest;
+  "workflows/manager": typeof workflows_manager;
+  "workflows/render": typeof workflows_render;
 }>;
 
 /**
@@ -104,4 +120,5 @@ export declare const internal: FilterApi<
 
 export declare const components: {
   betterAuth: import("@convex-dev/better-auth/_generated/component.js").ComponentApi<"betterAuth">;
+  workflow: import("@convex-dev/workflow/_generated/component.js").ComponentApi<"workflow">;
 };
