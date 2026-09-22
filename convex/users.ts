@@ -1,7 +1,14 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { getAppUser, requireUser } from "./lib/auth";
+import { appError } from "./lib/errors";
 import { getBalance } from "./model/credits";
+import {
+  cancelActiveJobs,
+  deleteUserRow,
+  purgeUserBatch,
+} from "./model/users";
 import { vFeature, vPlanId, vPrefs } from "./shared/validators";
 
 export const vBalance = v.object({
@@ -58,6 +65,83 @@ export const updatePrefs = mutation({
   handler: async (ctx, { prefs }) => {
     const user = await requireUser(ctx);
     await ctx.db.patch(user._id, { prefs });
+    return null;
+  },
+});
+
+/** Finish onboarding once an avatar and an explicit wardrobe preference exist. */
+export const completeOnboarding = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const avatar = await ctx.db
+      .query("avatars")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .first();
+    if (!avatar) {
+      throw appError(
+        "INVALID_INPUT",
+        "Add at least one photo of yourself first.",
+      );
+    }
+    if (!user.onboardedAt) {
+      if (
+        user.prefs.presentation !== "masculine" &&
+        user.prefs.presentation !== "feminine"
+      ) {
+        throw appError(
+          "INVALID_INPUT",
+          "Choose Men's wardrobe or Women's wardrobe to finish setup.",
+        );
+      }
+      await ctx.db.patch(user._id, { onboardedAt: Date.now() });
+    }
+    return null;
+  },
+});
+
+/**
+ * Wipes every document and file the user made. The account itself survives:
+ * row, ledger, balance, plan and role stay so wipe cannot re-mint signup credits.
+ */
+export const deleteAllData = mutation({
+  args: { confirm: v.literal("DELETE") },
+  returns: v.null(),
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    await ctx.db.patch(user._id, {
+      defaultAvatarId: undefined,
+      onboardedAt: undefined,
+    });
+    await ctx.scheduler.runAfter(0, internal.users.purgeUserData, {
+      userId: user._id,
+      mode: "content",
+    });
+    return null;
+  },
+});
+
+/** One transaction's worth of deletion, rescheduling itself until nothing is left. */
+export const purgeUserData = internalMutation({
+  args: {
+    userId: v.id("users"),
+    mode: v.union(v.literal("content"), v.literal("account")),
+  },
+  returns: v.null(),
+  handler: async (ctx, { userId, mode }) => {
+    const user = await ctx.db.get(userId);
+    if (!user) return null;
+    await cancelActiveJobs(ctx, userId);
+    const done = await purgeUserBatch(ctx, userId, mode);
+    if (!done) {
+      await ctx.scheduler.runAfter(0, internal.users.purgeUserData, {
+        userId,
+        mode,
+      });
+      return null;
+    }
+    if (mode === "account") await deleteUserRow(ctx, userId);
     return null;
   },
 });
