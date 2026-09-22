@@ -4,10 +4,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode } from "react";
 import { useQuery } from "convex/react";
-import { Images, LayoutGrid, Plus, Shirt } from "lucide-react";
+import { Images, LayoutGrid, MessageCircle, Plus, Shirt, Sparkles } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { ActivityPopover } from "@/components/layout/ActivityPopover";
 import { OnboardingGate } from "@/components/layout/OnboardingGate";
+import { StylistPanel } from "@/components/stylist/stylist-panel";
+import { StylistProvider, useStylistPanel } from "@/components/stylist/stylist-provider";
+import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/cn";
 import { routes } from "@/lib/routes";
@@ -17,6 +20,7 @@ const PRIMARY_NAV = [
   { href: routes.add, label: "Add clothes", icon: Plus },
   { href: routes.outfits, label: "Outfits", icon: LayoutGrid },
   { href: routes.lookbook, label: "Lookbook", icon: Images },
+  { href: routes.stylist, label: "Stylist", icon: MessageCircle },
 ] as const;
 
 function isActivePath(pathname: string, href: string): boolean {
@@ -26,7 +30,10 @@ function isActivePath(pathname: string, href: string): boolean {
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <OnboardingGate>
-      <AppFrame>{children}</AppFrame>
+      <StylistProvider>
+        <AppFrame>{children}</AppFrame>
+        <StylistPanel />
+      </StylistProvider>
     </OnboardingGate>
   );
 }
@@ -36,6 +43,7 @@ function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const me = useQuery(api.users.me);
   const onboarded = Boolean(me?.onboardedAt);
+  const panel = useStylistPanel();
 
   async function signOut() {
     await authClient.signOut();
@@ -84,6 +92,18 @@ function AppFrame({ children }: { children: ReactNode }) {
               <span className="text-sm text-mute">Loading…</span>
             ) : me ? (
               <>
+                {onboarded ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="hidden h-10 sm:inline-flex"
+                    onClick={() => panel.setOpen(true)}
+                  >
+                    <Sparkles className="size-3.5" aria-hidden />
+                    Ask stylist
+                  </Button>
+                ) : null}
                 <Link
                   href={routes.billing}
                   className={cn(

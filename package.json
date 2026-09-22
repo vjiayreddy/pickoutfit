@@ -2,11 +2,15 @@
   "name": "wardrobe-ai",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "convex dev --start 'next dev'",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p convex/tsconfig.json && tsc --noEmit -p agent/tsconfig.json"
   },
   "dependencies": {
     "@convex-dev/better-auth": "^0.12.5",
@@ -14,6 +18,8 @@
     "@convex-dev/workflow": "^0.4.8",
     "better-auth": "^1.6.33",
     "convex": "^1.46.0",
+    "eve": "^0.56.0",
+    "jose": "^6.2.12",
     "lucide-react": "^1.47.0",
     "next": "16.3.5",
     "openai": "^7.21.0",
@@ -26,12 +32,13 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "just-bash": "^3.4.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   },

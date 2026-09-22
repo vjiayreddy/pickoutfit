@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# eve local runtime / caches
+.eve/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

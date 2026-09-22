@@ -5,6 +5,8 @@ import { cn } from "@/lib/cn";
 type ItemImageProps = {
   src: string | null | undefined;
   alt: string;
+  /** cutout/photo default square; render uses portrait crop. */
+  variant?: "cutout" | "photo" | "render";
   aspect?: string;
   className?: string;
   imgClassName?: string;
@@ -15,13 +17,16 @@ type ItemImageProps = {
 export function ItemImage({
   src,
   alt,
-  aspect = "aspect-square",
+  variant = "cutout",
+  aspect,
   className,
   imgClassName,
   priority,
 }: ItemImageProps) {
+  const ratio =
+    aspect ?? (variant === "render" ? "aspect-[2/3]" : "aspect-square");
   return (
-    <div className={cn("relative overflow-hidden bg-soft-cloud", aspect, className)}>
+    <div className={cn("relative overflow-hidden bg-soft-cloud", ratio, className)}>
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element -- Convex storage URLs; no next/image remote config yet
         <img

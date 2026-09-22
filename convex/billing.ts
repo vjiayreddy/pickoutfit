@@ -1,6 +1,6 @@
 import { StripeSubscriptions } from "@convex-dev/stripe";
 import { v } from "convex/values";
-import { components } from "./_generated/api";
+import { api, components, internal } from "./_generated/api";
 import {
   action,
   internalMutation,
@@ -203,6 +203,19 @@ export const reconcileByAuthId = internalMutation({
       .unique();
     if (!user) return null;
     await reconcileUser(ctx, user);
+    return null;
+  },
+});
+
+/** Eve tools call this before quote/start renders so plan features stay fresh. */
+export const refreshForAgent = action({
+  args: { serviceKey: v.string(), authId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.runQuery(api.agent.getContext, args);
+    await ctx.runMutation(internal.billing.reconcileByAuthId, {
+      authId: args.authId,
+    });
     return null;
   },
 });
