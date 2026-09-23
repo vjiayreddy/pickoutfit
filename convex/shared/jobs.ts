@@ -1,4 +1,4 @@
-export const JOB_TYPES = ["ingest", "render"] as const;
+export const JOB_TYPES = ["ingest", "render", "groom"] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const JOB_STATUSES = [
@@ -50,6 +50,12 @@ export const RENDER_STEPS = {
   finalize: "finalize",
 } as const;
 
+export const GROOM_STEPS = {
+  reserve: "reserve",
+  groom: "groom",
+  finalize: "finalize",
+} as const;
+
 const STATIC_LABELS: Record<string, string> = {
   upload: "Uploaded",
   detect: "Detecting items",
@@ -69,6 +75,7 @@ export function stepLabel(key: string, meta?: Record<string, unknown>): string {
   const n = index ? Number(index) + 1 : undefined;
   if (prefix === "extract") return n ? `Extracting item ${n}` : "Extracting items";
   if (prefix === "render") return n ? `Rendering image ${n}` : "Rendering";
+  if (prefix === "groom") return n ? `Styling look ${n}` : "Styling hair & beard";
   return key;
 }
 

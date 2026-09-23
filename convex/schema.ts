@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import {
   vDetectedItem,
   vFeature,
+  vGrooming,
   vItemAttributes,
   vItemStatus,
   vJobStatus,
@@ -11,6 +12,7 @@ import {
   vOutfitSlots,
   vPlanId,
   vPrefs,
+  vRenderKind,
   vRenderQuality,
   vReservation,
   vTokenUsage,
@@ -145,7 +147,13 @@ export default defineSchema({
     avatarId: v.id("avatars"),
     jobId: v.id("jobs"),
     storageId: v.optional(v.id("_storage")),
+    /** Snapshot of the source try-on PNG at groom create time (avoids parent-delete races). */
+    sourceStorageId: v.optional(v.id("_storage")),
     quality: vRenderQuality,
+    /** Absent on legacy rows — treat as try_on. */
+    kind: v.optional(vRenderKind),
+    parentRenderId: v.optional(v.id("renders")),
+    grooming: v.optional(vGrooming),
     status: v.union(
       v.literal("pending"),
       v.literal("done"),
@@ -164,7 +172,8 @@ export default defineSchema({
     .index("by_outfit", ["outfitId"])
     .index("by_job", ["jobId"])
     .index("by_shareToken", ["shareToken"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .index("by_parent", ["parentRenderId"]),
 
   jobs: defineTable({
     userId: v.id("users"),

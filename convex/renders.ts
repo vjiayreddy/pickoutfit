@@ -12,10 +12,11 @@ import {
   listByOutfit as listRendersByOutfit,
   removeRender,
   requireRender,
+  startGroomJob,
   startRenderJob,
   toRenderView,
 } from "./model/renders";
-import { vRenderQuality } from "./shared/validators";
+import { vBeardStyle, vHairStyle, vRenderQuality } from "./shared/validators";
 import { vItemSummary, vOutfitView, vPaginated, vRenderView } from "./views";
 
 /**
@@ -126,6 +127,29 @@ export const regenerate = mutation({
       throw appError("UPSTREAM_FAILED", "Could not queue the render.");
     }
     return { jobId: result.jobId, renderId: created };
+  },
+});
+
+/**
+ * Second-pass hair & beard restyle on a finished look. Masculine presentation only.
+ * Creates a new render variant; the parent try-on is kept.
+ */
+export const groom = mutation({
+  args: {
+    renderId: v.id("renders"),
+    hair: vHairStyle,
+    beard: vBeardStyle,
+    custom: v.optional(v.string()),
+  },
+  returns: v.object({ jobId: v.id("jobs"), renderId: v.id("renders") }),
+  handler: async (ctx, args) => {
+    const user = await requireOnboarded(ctx);
+    return startGroomJob(ctx, user, {
+      parentRenderId: args.renderId,
+      hair: args.hair,
+      beard: args.beard,
+      custom: args.custom,
+    });
   },
 });
 

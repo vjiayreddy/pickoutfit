@@ -17,11 +17,13 @@ import { layeredItems } from "../model/outfits";
 import { markRenderDone, markRenderFailed, setRenderPrompt } from "../model/renders";
 import { bumpDailyStats } from "../model/stats";
 import { detectUsageToUsd, usageToUsd, LIMITS } from "../shared/credits";
-import { INGEST_STEPS, RENDER_STEPS } from "../shared/jobs";
+import { GROOM_STEPS, INGEST_STEPS, RENDER_STEPS } from "../shared/jobs";
 import {
   literals,
+  vBeardStyle,
   vColours,
   vDetectedItem,
+  vHairStyle,
   vPrefs,
   vRenderQuality,
   vStepStatus,
@@ -51,6 +53,10 @@ export function extractStepKey(index: number): string {
 
 export function renderStepKey(index: number): string {
   return `${RENDER_STEPS.render}:${index}`;
+}
+
+export function groomStepKey(index: number): string {
+  return `${GROOM_STEPS.groom}:${index}`;
 }
 
 /** Marks the upload as being looked at and opens the detect step. */
@@ -342,6 +348,38 @@ export const renderContext = internalQuery({
       avatarStorageId: avatar.storageId,
       garments,
       prefs: user.prefs,
+    };
+  },
+});
+
+/** Source try-on PNG + grooming selection for a second-pass hair/beard edit. */
+export const groomContext = internalQuery({
+  args: { renderId: v.id("renders") },
+  returns: v.object({
+    userId: v.id("users"),
+    quality: vRenderQuality,
+    sourceStorageId: v.id("_storage"),
+    grooming: v.object({
+      hair: vHairStyle,
+      beard: vBeardStyle,
+      custom: v.optional(v.string()),
+    }),
+  }),
+  handler: async (ctx, { renderId }) => {
+    const render = await ctx.db.get(renderId);
+    if (!render) throw appError("NOT_FOUND", "That render no longer exists.");
+    if (render.kind !== "groom" || !render.grooming) {
+      throw appError("INVALID_INPUT", "That look is not a grooming job.");
+    }
+    const sourceStorageId = render.sourceStorageId;
+    if (!sourceStorageId) {
+      throw appError("NOT_FOUND", "The source try-on image is missing.");
+    }
+    return {
+      userId: render.userId,
+      quality: render.quality,
+      sourceStorageId,
+      grooming: render.grooming,
     };
   },
 });

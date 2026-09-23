@@ -6,8 +6,10 @@ import {
   vDetectedItem,
   vFit,
   vFormality,
+  vGrooming,
   vItemStatus,
   vOutfitSlots,
+  vRenderKind,
   vRenderQuality,
   vSeason,
 } from "./shared/validators";
@@ -90,6 +92,11 @@ export const vRenderView = v.object({
   jobId: v.id("jobs"),
   status: v.union(v.literal("pending"), v.literal("done"), v.literal("failed")),
   quality: vRenderQuality,
+  kind: vRenderKind,
+  parentRenderId: v.optional(v.id("renders")),
+  grooming: v.optional(vGrooming),
+  /** Short label for groom variants, e.g. "Short fade · Light stubble". */
+  groomingLabel: v.optional(v.string()),
   url: v.union(v.string(), v.null()),
   creditsCharged: v.number(),
   shareToken: v.optional(v.string()),
