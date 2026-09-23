@@ -41,29 +41,27 @@ export function OnboardingFlow() {
   const plan = me.balance.plan as PlanId;
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-8">
-      <div className="space-y-4">
-        <p className="text-sm font-medium uppercase tracking-wide text-mute">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col space-y-6">
+      <div className="space-y-3">
+        <p className="text-xs font-medium uppercase tracking-wide text-mute sm:text-sm">
           Step {step + 1} of {STEPS.length}
         </p>
-        <h1 className="font-display text-4xl font-medium uppercase leading-[0.9] tracking-tight sm:text-5xl">
+        <h1 className="font-display text-3xl font-medium uppercase leading-[0.9] tracking-tight sm:text-5xl">
           {current.title}
         </h1>
-        <p className="max-w-xl text-base text-mute">{current.description}</p>
-        <ol className="grid grid-cols-2 border-b border-hairline pt-3" aria-label="Setup progress">
+        <p className="max-w-xl text-sm text-mute sm:text-base">{current.description}</p>
+        <div className="flex gap-2 pt-2" aria-hidden>
           {STEPS.map((entry, index) => (
-            <li
+            <span
               key={entry.title}
-              aria-current={index === step ? "step" : undefined}
-              className={cn(
-                "flex items-center gap-3 border-b-2 py-3 text-sm",
-                index === step
-                  ? "border-ink font-medium"
-                  : "border-transparent text-mute",
-              )}
-            >
-              <span className="font-mono text-[11px]">0{index + 1}</span>
-              <span>{index === 0 ? "Your photo" : "Your preferences"}</span>
+              className={cn("h-1 flex-1", index <= step ? "bg-ink" : "bg-hairline")}
+            />
+          ))}
+        </div>
+        <ol className="sr-only">
+          {STEPS.map((entry, index) => (
+            <li key={entry.title} aria-current={index === step ? "step" : undefined}>
+              {entry.title}
             </li>
           ))}
         </ol>

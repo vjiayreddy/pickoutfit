@@ -189,7 +189,7 @@ export function PreferencesStep({
         </p>
       ) : null}
 
-      <div className="flex flex-col-reverse gap-2 border-t border-hairline pt-5 sm:flex-row sm:justify-between">
+      <div className="hidden flex-col-reverse gap-2 border-t border-hairline pt-5 lg:flex lg:flex-row lg:justify-between">
         <button
           type="button"
           className="inline-flex h-12 items-center gap-2 rounded-full px-4 text-sm font-medium text-mute"
@@ -220,6 +220,34 @@ export function PreferencesStep({
           Finish setup
         </button>
       </div>
+      <div className="fixed inset-x-0 bottom-0 z-20 flex gap-2 border-t border-hairline bg-canvas p-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:hidden">
+        <button
+          type="button"
+          className="inline-flex h-12 items-center gap-2 rounded-full px-4 text-sm font-medium text-mute"
+          onClick={() =>
+            onBack({
+              presentation: presentation ?? "neutral",
+              fit,
+              avoidColours,
+              homeCity: homeCity || undefined,
+            })
+          }
+          disabled={pending}
+        >
+          <ArrowLeft className="size-4" />
+          Back
+        </button>
+        <button
+          type="button"
+          className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-ink px-8 text-base font-medium text-canvas disabled:opacity-50"
+          onClick={handleFinish}
+          disabled={pending || !presentation}
+        >
+          {pending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+          Finish setup
+        </button>
+      </div>
+      <div className="h-20 lg:hidden" aria-hidden />
     </div>
   );
 }

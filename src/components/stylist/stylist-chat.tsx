@@ -17,6 +17,7 @@ import { DEFAULT_THREAD_TITLE, useStylistSession, type StylistThread } from "@/h
 import { useInitialStylistBrief } from "@/hooks/use-initial-stylist-brief";
 import { reportError } from "@/lib/client-errors";
 import { toStylistClientContext, type StylistPageContext } from "@/lib/stylist-context";
+import { AppHeaderTitle } from "@/components/layout/app-header";
 import { cn } from "@/lib/cn";
 import { routes } from "@/lib/routes";
 import { api } from "@convex/_generated/api";
@@ -174,9 +175,12 @@ export function StylistChat({
     <div
       className={cn(
         "flex min-h-0 w-full flex-1 flex-col",
-        embedded ? "" : "mx-auto h-[calc(100dvh-var(--app-header-height)-var(--app-content-padding))] max-w-3xl gap-4",
+        embedded
+          ? ""
+          : "mx-auto min-h-0 w-full max-w-3xl flex-1 gap-4 max-lg:h-full lg:h-[calc(100dvh-var(--app-header-height)-var(--app-tab-height)-var(--app-content-padding))] lg:flex-none",
       )}
     >
+      {!embedded ? <AppHeaderTitle title={thread.title} /> : null}
       {!embedded ? (
         <div className="shrink-0">
           <PageHeader
@@ -184,7 +188,7 @@ export function StylistChat({
             eyebrow="The styling room / Conversation"
             title={thread.title}
             actions={
-              <Button variant="ghost" size="sm" className="min-h-11" href={routes.stylist}>
+              <Button variant="ghost" size="sm" className="hidden min-h-11 lg:inline-flex" href={routes.stylist}>
                 <ArrowLeft data-icon="inline-start" />
                 All chats
               </Button>

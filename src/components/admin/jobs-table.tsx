@@ -142,7 +142,7 @@ export function JobsTable() {
         </select>
       </header>
 
-      <div className="overflow-x-auto">
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         {rows === undefined ? (
           <div className="space-y-3 p-4" aria-busy="true" aria-label="Loading jobs">
             {Array.from({ length: 5 }, (_, i) => (

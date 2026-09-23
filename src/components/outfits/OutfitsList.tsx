@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import { api } from "@convex/_generated/api";
 import { OutfitCollage } from "@/components/common/OutfitCollage";
+import { StickyAction } from "@/components/common/StickyAction";
 import { routes } from "@/lib/routes";
 
 const PAGE_SIZE = 20;
@@ -17,22 +18,22 @@ export function OutfitsList() {
   );
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="space-y-5 sm:space-y-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-sm font-medium uppercase tracking-wide text-mute">
+          <p className="text-xs font-medium uppercase tracking-wide text-mute sm:text-sm">
             Outfit studio
           </p>
-          <h1 className="mt-2 font-display text-4xl font-medium uppercase leading-[0.9] tracking-tight sm:text-5xl">
+          <h1 className="mt-1 font-display text-3xl font-medium uppercase leading-[0.9] tracking-tight sm:mt-2 sm:text-5xl">
             Your outfits.
           </h1>
-          <p className="mt-4 max-w-md text-base text-mute">
+          <p className="mt-2 max-w-md text-sm text-mute sm:mt-4 sm:text-base">
             Combine pieces, then try them on your fitting photo.
           </p>
         </div>
         <Link
           href={routes.newOutfit}
-          className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas transition active:scale-95 active:opacity-50"
+          className="hidden h-12 shrink-0 items-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas transition active:scale-95 active:opacity-50 lg:inline-flex"
         >
           <Plus className="size-4" />
           New outfit
@@ -60,26 +61,23 @@ export function OutfitsList() {
         </div>
       ) : (
         <>
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
             {results.map((outfit) => (
               <li key={outfit._id}>
-                <Link
-                  href={routes.outfit(outfit._id)}
-                  className="block space-y-3 border border-hairline p-4 transition hover:bg-soft-cloud"
-                >
+                <Link href={routes.outfit(outfit._id)} className="block">
                   {outfit.coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={outfit.coverUrl}
                       alt=""
-                      className="aspect-[4/5] w-full object-cover bg-soft-cloud"
+                      className="aspect-[4/5] w-full bg-soft-cloud object-cover"
                     />
                   ) : (
                     <div className="flex aspect-[4/5] items-center justify-center bg-soft-cloud p-4">
                       <OutfitCollage items={outfit.items} tile="size-14" max={6} />
                     </div>
                   )}
-                  <div>
+                  <div className="pt-2">
                     <p className="text-sm font-medium">{outfit.name}</p>
                     {outfit.occasion ? (
                       <p className="text-xs text-mute">{outfit.occasion}</p>
@@ -107,6 +105,10 @@ export function OutfitsList() {
           ) : null}
         </>
       )}
+      <StickyAction href={routes.newOutfit}>
+        <Plus className="size-4" />
+        New outfit
+      </StickyAction>
     </div>
   );
 }

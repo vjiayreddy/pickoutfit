@@ -13,16 +13,18 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { CATEGORY_LABELS } from "@convex/shared/wardrobe";
 import { CreditQuote, useCreditQuote } from "@/components/common/CreditQuote";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { ItemImage } from "@/components/common/ItemImage";
 import { JobStepper } from "@/components/common/JobStepper";
+import { AppHeaderTitle } from "@/components/layout/app-header";
 import { ItemForm } from "@/components/wardrobe/ItemForm";
-import { reportError, toClientError } from "@/lib/client-errors";
+import { reportError } from "@/lib/client-errors";
 import { formatDate, formatRelative } from "@/lib/format";
 import { routes } from "@/lib/routes";
 
@@ -37,6 +39,8 @@ export function ItemDetail({ itemId }: { itemId: string }) {
 
   const [dismissing, setDismissing] = useState(false);
   const [pending, setPending] = useState<"worn" | "status" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmReextract, setConfirmReextract] = useState(false);
   const [jobId, setJobId] = useState<Id<"jobs"> | null>(null);
   const job = useQuery(api.jobs.get, jobId ? { jobId } : "skip");
   const quote = useCreditQuote(
@@ -85,15 +89,55 @@ export function ItemDetail({ itemId }: { itemId: string }) {
     }
   }
 
+  async function markWornToday() {
+    setPending("worn");
+    try {
+      await markWorn({ itemId: item._id });
+      toast.success("Marked as worn today.");
+    } catch (e) {
+      toast.error(reportError(e).message);
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function toggleHidden() {
+    setPending("status");
+    try {
+      await setStatus({
+        itemIds: [item._id],
+        status: hidden ? "ready" : "hidden",
+      });
+      toast.success(hidden ? "Back in your wardrobe." : "Hidden from the grid.");
+    } catch (e) {
+      toast.error(reportError(e).message);
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function runReextract() {
+    const result = await reextract({ itemId: item._id });
+    setJobId(result.jobId);
+    toast.success("Re-extraction started.");
+  }
+
+  async function deleteItem() {
+    await removeItems({ itemIds: [item._id] });
+    toast.success("Item deleted.");
+    router.push(routes.wardrobe);
+  }
+
   return (
     <div className="space-y-6">
+      <AppHeaderTitle title={item.name} />
       <BackLink />
 
       <div>
         <p className="text-sm font-medium uppercase tracking-wide text-mute">
           {CATEGORY_LABELS[item.category]}
         </p>
-        <h1 className="mt-2 font-display text-4xl font-medium uppercase leading-[0.9] tracking-tight sm:text-5xl">
+        <h1 className="mt-1 font-display text-3xl font-medium uppercase leading-[0.9] tracking-tight sm:mt-2 sm:text-5xl">
           {item.name}
         </h1>
         <p className="mt-3 text-base text-mute">
@@ -149,26 +193,55 @@ export function ItemDetail({ itemId }: { itemId: string }) {
             src={item.url}
             alt={item.name}
             aspect="aspect-square"
-            className="p-10 sm:p-14"
+            className="p-4 sm:p-14"
             priority
           />
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2 lg:hidden">
+            <IconAction
+              label="Worn today"
+              disabled={pending !== null}
+              onClick={() => void markWornToday()}
+            >
+              {pending === "worn" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <CalendarCheck className="size-4" />
+              )}
+            </IconAction>
+            {item.uploadId ? (
+              <IconAction
+                label="Re-extract"
+                disabled={quote?.canAfford === false}
+                onClick={() => setConfirmReextract(true)}
+              >
+                <Wand2 className="size-4" />
+              </IconAction>
+            ) : null}
+            <IconAction
+              label={hidden ? "Unhide" : "Hide"}
+              disabled={pending !== null}
+              onClick={() => void toggleHidden()}
+            >
+              {pending === "status" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : hidden ? (
+                <Eye className="size-4" />
+              ) : (
+                <EyeOff className="size-4" />
+              )}
+            </IconAction>
+            <IconAction label="Delete item" onClick={() => setConfirmDelete(true)}>
+              <Trash2 className="size-4" />
+            </IconAction>
+          </div>
+
+          <div className="hidden flex-wrap gap-2 lg:flex">
             <button
               type="button"
               className="inline-flex h-10 items-center gap-2 rounded-full border border-hairline px-4 text-sm font-medium disabled:opacity-50"
               disabled={pending !== null}
-              onClick={async () => {
-                setPending("worn");
-                try {
-                  await markWorn({ itemId: item._id });
-                  toast.success("Marked as worn today.");
-                } catch (e) {
-                  toast.error(reportError(e).message);
-                } finally {
-                  setPending(null);
-                }
-              }}
+              onClick={() => void markWornToday()}
             >
               {pending === "worn" ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -183,16 +256,7 @@ export function ItemDetail({ itemId }: { itemId: string }) {
                 type="button"
                 className="inline-flex h-10 items-center gap-2 rounded-full border border-hairline px-4 text-sm font-medium disabled:opacity-50"
                 disabled={quote?.canAfford === false}
-                onClick={async () => {
-                  if (!confirm("Re-extract this cutout? Costs 1 credit.")) return;
-                  try {
-                    const result = await reextract({ itemId: item._id });
-                    setJobId(result.jobId);
-                    toast.success("Re-extraction started.");
-                  } catch (e) {
-                    toast.error(toClientError(e).message);
-                  }
-                }}
+                onClick={() => setConfirmReextract(true)}
               >
                 <Wand2 className="size-4" />
                 Re-extract
@@ -203,22 +267,7 @@ export function ItemDetail({ itemId }: { itemId: string }) {
               type="button"
               className="inline-flex h-10 items-center gap-2 rounded-full border border-hairline px-4 text-sm font-medium disabled:opacity-50"
               disabled={pending !== null}
-              onClick={async () => {
-                setPending("status");
-                try {
-                  await setStatus({
-                    itemIds: [item._id],
-                    status: hidden ? "ready" : "hidden",
-                  });
-                  toast.success(
-                    hidden ? "Back in your wardrobe." : "Hidden from the grid.",
-                  );
-                } catch (e) {
-                  toast.error(reportError(e).message);
-                } finally {
-                  setPending(null);
-                }
-              }}
+              onClick={() => void toggleHidden()}
             >
               {pending === "status" ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -233,18 +282,8 @@ export function ItemDetail({ itemId }: { itemId: string }) {
             <button
               type="button"
               aria-label="Delete item"
-              className="inline-flex size-10 items-center justify-center rounded-full text-mute hover:bg-soft-cloud hover:text-sale"
-              onClick={async () => {
-                if (!confirm(`Delete ${item.name}? This cannot be undone.`))
-                  return;
-                try {
-                  await removeItems({ itemIds: [item._id] });
-                  toast.success("Item deleted.");
-                  router.push(routes.wardrobe);
-                } catch (e) {
-                  toast.error(reportError(e).message);
-                }
-              }}
+              className="inline-flex size-11 items-center justify-center rounded-full text-mute hover:bg-soft-cloud hover:text-sale"
+              onClick={() => setConfirmDelete(true)}
             >
               <Trash2 className="size-4" />
             </button>
@@ -361,6 +400,24 @@ export function ItemDetail({ itemId }: { itemId: string }) {
 
         <ItemForm item={item} />
       </div>
+
+      <ConfirmDialog
+        open={confirmReextract}
+        onOpenChange={setConfirmReextract}
+        title="Re-extract this cutout?"
+        description="This costs 1 credit."
+        confirmLabel="Re-extract"
+        onConfirm={runReextract}
+      />
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete ${item.name}?`}
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={deleteItem}
+      />
     </div>
   );
 }
@@ -369,11 +426,36 @@ function BackLink() {
   return (
     <Link
       href={routes.wardrobe}
-      className="inline-flex items-center gap-2 text-sm font-medium text-mute hover:text-ink"
+      className="hidden items-center gap-2 text-sm font-medium text-mute hover:text-ink lg:inline-flex"
     >
       <ArrowLeft className="size-4" />
       Wardrobe
     </Link>
+  );
+}
+
+function IconAction({
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex size-11 items-center justify-center rounded-full border border-hairline disabled:opacity-50"
+    >
+      {children}
+    </button>
   );
 }
 

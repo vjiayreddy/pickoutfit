@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import {
   ArrowLeft,
   CalendarCheck,
+  Ellipsis,
   Loader2,
   Scissors,
   Share2,
@@ -18,6 +19,9 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { JobStepper } from "@/components/common/JobStepper";
 import { OutfitCollage } from "@/components/common/OutfitCollage";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { StickyAction } from "@/components/common/StickyAction";
+import { AppHeaderTitle } from "@/components/layout/app-header";
 import {
   draftFromOutfit,
   OutfitForm,
@@ -27,6 +31,12 @@ import { RenderSheet } from "@/components/renders/RenderSheet";
 import { reportError, toClientError } from "@/lib/client-errors";
 import { formatDate } from "@/lib/format";
 import { routes } from "@/lib/routes";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export function OutfitDetail({ outfitId }: { outfitId: string }) {
   const outfit = useQuery(api.outfits.get, { outfitId });
@@ -44,6 +54,9 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
   const regenerate = useMutation(api.renders.regenerate);
 
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmRenderId, setConfirmRenderId] = useState<Id<"renders"> | null>(null);
   const [groomRenderId, setGroomRenderId] = useState<Id<"renders"> | null>(
     null,
   );
@@ -52,6 +65,15 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
   const canShare = Boolean(me?.balance.features.includes("sharing"));
   const canGroom = me?.prefs.presentation === "masculine";
   const groomTarget = renders?.find((r) => r._id === groomRenderId);
+
+  async function markWornToday() {
+    try {
+      await markWorn({ outfitId: outfit!._id });
+      toast.success("Marked as worn today.");
+    } catch (e) {
+      toast.error(reportError(e).message);
+    }
+  }
 
   if (outfit === undefined) {
     return (
@@ -79,20 +101,21 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
+      <AppHeaderTitle title={outfit.name} />
       <Link
         href={routes.outfits}
-        className="inline-flex items-center gap-2 text-sm font-medium text-mute hover:text-ink"
+        className="hidden items-center gap-2 text-sm font-medium text-mute hover:text-ink lg:inline-flex"
       >
         <ArrowLeft className="size-4" /> Outfits
       </Link>
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-sm font-medium uppercase tracking-wide text-mute">
+          <p className="text-xs font-medium uppercase tracking-wide text-mute sm:text-sm">
             Outfit
           </p>
-          <h1 className="mt-2 font-display text-4xl font-medium uppercase leading-[0.9] tracking-tight sm:text-5xl">
+          <h1 className="mt-1 font-display text-3xl font-medium uppercase leading-[0.9] tracking-tight sm:mt-2 sm:text-5xl">
             {outfit.name}
           </h1>
           {outfit.occasion ? (
@@ -102,7 +125,7 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
             <OutfitCollage items={outfit.items} tile="size-16" max={8} />
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="hidden flex-wrap gap-2 lg:flex">
           <button
             type="button"
             onClick={() => setSheetOpen(true)}
@@ -114,14 +137,7 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
           <button
             type="button"
             className="inline-flex h-12 items-center gap-2 rounded-full border border-hairline px-5 text-sm font-medium"
-            onClick={async () => {
-              try {
-                await markWorn({ outfitId: outfit._id });
-                toast.success("Marked as worn today.");
-              } catch (e) {
-                toast.error(reportError(e).message);
-              }
-            }}
+            onClick={() => void markWornToday()}
           >
             <CalendarCheck className="size-4" />
             Worn today
@@ -130,20 +146,20 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
             type="button"
             aria-label="Delete outfit"
             className="inline-flex size-12 items-center justify-center rounded-full text-mute hover:bg-soft-cloud hover:text-sale"
-            onClick={async () => {
-              if (!confirm(`Delete ${outfit.name}?`)) return;
-              try {
-                await removeOutfit({ outfitId: outfit._id });
-                toast.success("Outfit deleted.");
-                router.push(routes.outfits);
-              } catch (e) {
-                toast.error(reportError(e).message);
-              }
-            }}
+            onClick={() => setConfirmDelete(true)}
           >
             <Trash2 className="size-4" />
           </button>
         </div>
+        <button
+          type="button"
+          aria-label="More outfit actions"
+          className="inline-flex h-11 items-center gap-2 self-start rounded-full border border-hairline px-4 text-sm font-medium lg:hidden"
+          onClick={() => setMoreOpen(true)}
+        >
+          <Ellipsis className="size-4" />
+          More
+        </button>
       </div>
 
       {job ? (
@@ -195,7 +211,7 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
                     <>
                       <button
                         type="button"
-                        className="rounded-full border border-hairline px-3 py-1 text-[11px] font-medium disabled:opacity-40"
+                        className="inline-flex h-11 items-center rounded-full border border-hairline px-3 text-xs font-medium disabled:opacity-40"
                         disabled={!canShare && !render.shareToken}
                         onClick={async () => {
                           try {
@@ -226,7 +242,7 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
                       {canGroom ? (
                         <button
                           type="button"
-                          className="rounded-full border border-hairline px-3 py-1 text-[11px] font-medium"
+                          className="inline-flex h-11 items-center rounded-full border border-hairline px-3 text-xs font-medium"
                           onClick={() => setGroomRenderId(render._id)}
                         >
                           <Scissors className="mr-1 inline size-3" />
@@ -235,7 +251,7 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
                       ) : null}
                       <button
                         type="button"
-                        className="rounded-full border border-hairline px-3 py-1 text-[11px] font-medium"
+                        className="inline-flex h-11 items-center rounded-full border border-hairline px-3 text-xs font-medium"
                         onClick={async () => {
                           try {
                             const result = await regenerate({
@@ -254,16 +270,8 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
                   ) : null}
                   <button
                     type="button"
-                    className="rounded-full px-3 py-1 text-[11px] text-mute hover:text-sale"
-                    onClick={async () => {
-                      if (!confirm("Delete this try-on?")) return;
-                      try {
-                        await removeRender({ renderId: render._id });
-                        toast.success("Deleted.");
-                      } catch (e) {
-                        toast.error(reportError(e).message);
-                      }
-                    }}
+                    className="inline-flex h-11 items-center rounded-full px-3 text-xs font-medium text-mute hover:text-sale"
+                    onClick={() => setConfirmRenderId(render._id)}
                   >
                     Delete
                   </button>
@@ -289,6 +297,65 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         onStarted={setJobId}
+      />
+      <StickyAction onClick={() => setSheetOpen(true)}>
+        <Sparkles className="size-4" />
+        Try on
+      </StickyAction>
+      <Dialog open={moreOpen} onOpenChange={setMoreOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Outfit</DialogTitle>
+          </DialogHeader>
+          <button
+            type="button"
+            className="flex h-12 items-center gap-2 text-left text-sm font-medium"
+            onClick={() => {
+              setMoreOpen(false);
+              void markWornToday();
+            }}
+          >
+            <CalendarCheck className="size-4" />
+            Worn today
+          </button>
+          <button
+            type="button"
+            className="flex h-12 items-center gap-2 text-left text-sm font-medium text-sale"
+            onClick={() => {
+              setMoreOpen(false);
+              setConfirmDelete(true);
+            }}
+          >
+            <Trash2 className="size-4" />
+            Delete outfit
+          </button>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete ${outfit.name}?`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={async () => {
+          await removeOutfit({ outfitId: outfit._id });
+          toast.success("Outfit deleted.");
+          router.push(routes.outfits);
+        }}
+      />
+      <ConfirmDialog
+        open={confirmRenderId !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmRenderId(null);
+        }}
+        title="Delete this try-on?"
+        confirmLabel="Delete"
+        destructive
+        onConfirm={async () => {
+          if (!confirmRenderId) return;
+          await removeRender({ renderId: confirmRenderId });
+          toast.success("Deleted.");
+        }}
       />
       {groomTarget ? (
         <GroomSheet

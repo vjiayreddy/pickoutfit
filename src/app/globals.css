@@ -9,6 +9,16 @@
   --sale: #d30005;
   --background: var(--canvas);
   --foreground: var(--ink);
+  --app-header-height: calc(3.5rem + env(safe-area-inset-top, 0px));
+  --app-tab-height: calc(3rem + env(safe-area-inset-bottom, 0px));
+  --app-content-padding: 3rem;
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --app-tab-height: 0px;
+    --app-content-padding: 6rem;
+  }
 }
 
 @theme inline {

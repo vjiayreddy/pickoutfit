@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { FunctionReturnType } from "convex/server";
 import { CATEGORY_LABELS } from "@convex/shared/wardrobe";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { CreditQuote, useCreditQuote } from "@/components/common/CreditQuote";
 import { reportError, toClientError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
@@ -18,6 +19,7 @@ export function ImportReview({ upload }: { upload: UploadView }) {
   const candidates = upload.candidates ?? [];
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const [pending, setPending] = useState<"import" | "discard" | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirmSelection = useMutation(api.uploads.confirmSelection);
   const remove = useMutation(api.uploads.remove);
@@ -173,9 +175,7 @@ export function ImportReview({ upload }: { upload: UploadView }) {
         <button
           type="button"
           disabled={pending !== null}
-          onClick={() => {
-            if (confirm("Discard this photo?")) void discardPhoto();
-          }}
+          onClick={() => setConfirmDiscard(true)}
           className="inline-flex h-12 items-center gap-2 rounded-full bg-soft-cloud px-6 text-sm font-medium text-ink disabled:opacity-50"
         >
           {pending === "discard" ? (
@@ -186,6 +186,14 @@ export function ImportReview({ upload }: { upload: UploadView }) {
           Discard photo
         </button>
       </div>
+      <ConfirmDialog
+        open={confirmDiscard}
+        onOpenChange={setConfirmDiscard}
+        title="Discard this photo?"
+        confirmLabel="Discard"
+        destructive
+        onConfirm={discardPhoto}
+      />
     </section>
   );
 }

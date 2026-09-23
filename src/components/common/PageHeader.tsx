@@ -23,7 +23,7 @@ export function PageHeader({ title, description, actions, eyebrow, className }: 
             {eyebrow}
           </div>
         ) : null}
-        <h1 className="text-[30px] leading-[1.06] font-medium tracking-[-0.055em] text-balance sm:text-[44px]">
+        <h1 className="text-2xl leading-tight font-medium tracking-[-0.04em] text-balance sm:text-[44px] sm:leading-[1.06] sm:tracking-[-0.055em]">
           {title}
         </h1>
         {description ? (

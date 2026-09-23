@@ -1,6 +1,6 @@
 "use client";
 
-import { ImagePlus, UploadCloud } from "lucide-react";
+import { Camera, ImagePlus, UploadCloud } from "lucide-react";
 import {
   useCallback,
   useRef,
@@ -99,6 +99,7 @@ export function DropZone({
   className,
 }: DropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [dragReject, setDragReject] = useState(false);
 
@@ -174,6 +175,16 @@ export function DropZone({
         onChange={onChange}
         onClick={(e) => e.stopPropagation()}
       />
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        disabled={disabled}
+        className="sr-only"
+        onChange={onChange}
+        onClick={(e) => e.stopPropagation()}
+      />
       <div className={cn("text-ink", size === "lg" ? "size-7" : "size-6")} aria-hidden>
         {dragActive ? (
           <UploadCloud className="size-5" />
@@ -190,9 +201,37 @@ export function DropZone({
         >
           {dragActive ? "Drop to upload" : title}
         </p>
-        <p className="mx-auto max-w-md text-sm leading-relaxed text-mute">
+        <p className="mx-auto hidden max-w-md text-sm leading-relaxed text-mute lg:block">
           {description}
         </p>
+        <p className="mx-auto max-w-md text-sm leading-relaxed text-mute lg:hidden">
+          Take a photo or choose one from your library.
+        </p>
+      </div>
+      <div className="flex w-full max-w-xs flex-col gap-2 lg:hidden">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={(event) => {
+            event.stopPropagation();
+            cameraRef.current?.click();
+          }}
+          className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas disabled:opacity-50"
+        >
+          <Camera className="size-4" aria-hidden />
+          Take photo
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={(event) => {
+            event.stopPropagation();
+            inputRef.current?.click();
+          }}
+          className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-soft-cloud px-6 text-base font-medium text-ink disabled:opacity-50"
+        >
+          Photo library
+        </button>
       </div>
       <button
         type="button"
@@ -202,10 +241,10 @@ export function DropZone({
           inputRef.current?.click();
         }}
         className={cn(
-          "rounded-full font-medium transition active:scale-95 active:opacity-50 disabled:opacity-50",
+          "hidden rounded-full font-medium transition active:scale-95 active:opacity-50 disabled:opacity-50 lg:inline-flex",
           size === "lg"
-            ? "h-12 bg-ink px-8 text-base text-canvas"
-            : "h-10 border border-hairline bg-canvas px-5 text-sm text-ink",
+            ? "h-12 items-center bg-ink px-8 text-base text-canvas"
+            : "h-11 items-center border border-hairline bg-canvas px-5 text-sm text-ink",
         )}
       >
         {buttonLabel}

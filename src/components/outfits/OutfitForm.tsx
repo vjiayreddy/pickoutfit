@@ -199,7 +199,7 @@ export function OutfitForm(props: OutfitFormProps) {
         </button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="flex gap-3 overflow-x-auto pb-1 lg:grid lg:grid-cols-3 lg:overflow-visible">
         {visibleSlots.map((slot) => {
           const selected =
             slot === "accessories"
@@ -214,7 +214,7 @@ export function OutfitForm(props: OutfitFormProps) {
               key={slot}
               type="button"
               onClick={() => setPickerSlot(slot)}
-              className="flex min-h-28 flex-col gap-2 border border-hairline p-3 text-left hover:bg-soft-cloud"
+              className="flex min-h-28 w-40 shrink-0 flex-col gap-2 border border-hairline p-3 text-left hover:bg-soft-cloud lg:w-auto lg:shrink"
             >
               <span className="text-[11px] font-medium tracking-wide text-mute uppercase">
                 {SLOT_LABELS[slot]}
@@ -296,7 +296,7 @@ export function OutfitForm(props: OutfitFormProps) {
 
       {pickerSlot ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 sm:items-center">
-          <div className="flex max-h-[85dvh] w-full max-w-lg flex-col bg-canvas">
+          <div className="flex max-h-[85dvh] w-full max-w-lg flex-col bg-canvas pb-[env(safe-area-inset-bottom)] sm:pb-0">
             <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
               <h2 className="text-sm font-medium">
                 Choose {SLOT_LABELS[pickerSlot].toLowerCase()}
