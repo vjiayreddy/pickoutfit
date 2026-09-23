@@ -3,7 +3,7 @@
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { ArrowLeft, ArrowUpRight, History, PanelRightClose, Plus, X } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { ErrorAlert } from "@/components/common/ErrorAlert";
 import { Composer } from "@/components/stylist/composer";
 import { StylistChat } from "@/components/stylist/stylist-chat";
@@ -55,15 +55,6 @@ export function StylistPanel() {
   // Only one useEveAgent instance may own a given session across the panel and its standalone route.
   const pageOwnsThread = selectedThreadId !== null && pathname === routes.thread(selectedThreadId) && !open;
 
-  useEffect(() => {
-    if (!open || isDesktop) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, [open, isDesktop]);
-
   async function startChat(brief: string) {
     if (starting.current || waitForContext) return;
     starting.current = true;
@@ -80,24 +71,18 @@ export function StylistPanel() {
     }
   }
 
+  if (!isDesktop) return null;
+
   return (
     <>
-      {!isDesktop && open ? (
-        <button
-          type="button"
-          aria-label="Close stylist"
-          className="fixed inset-0 z-40 bg-ink/25"
-          onClick={() => setOpen(false)}
-        />
-      ) : null}
       <div
         ref={panelRef}
         id="stylist-panel"
         role="dialog"
-        aria-modal={!isDesktop}
+        aria-modal={false}
         aria-hidden={!open}
         inert={!open ? true : undefined}
-        className={`fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-ink/15 bg-canvas shadow-[-12px_0_40px_-24px_rgba(0,0,0,0.2)] outline-none transition-transform duration-200 motion-reduce:transition-none xl:top-[56px] xl:w-[440px] ${
+        className={`fixed inset-y-0 right-0 z-40 flex w-[440px] flex-col border-l border-ink/15 bg-canvas shadow-[-12px_0_40px_-24px_rgba(0,0,0,0.2)] outline-none transition-transform duration-200 motion-reduce:transition-none top-[var(--app-header-height)] ${
           open ? "translate-x-0" : "pointer-events-none invisible translate-x-full"
         }`}
       >

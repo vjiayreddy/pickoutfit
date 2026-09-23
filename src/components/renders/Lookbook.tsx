@@ -2,9 +2,11 @@
 
 import { usePaginatedQuery, useQuery } from "convex/react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { X } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import { ChipRail, FilterChip } from "@/components/common/ChipRail";
 import { routes } from "@/lib/routes";
 
 const PAGE_SIZE = 24;
@@ -19,22 +21,36 @@ export function Lookbook() {
     { initialNumItems: PAGE_SIZE },
   );
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const swipeStart = useRef<number | null>(null);
 
   return (
     <div className="space-y-8">
       <div>
-        <p className="text-sm font-medium uppercase tracking-wide text-mute">
+        <p className="text-xs font-medium uppercase tracking-wide text-mute sm:text-sm">
           Fitting room archive
         </p>
-        <h1 className="mt-2 font-display text-4xl font-medium uppercase leading-[0.9] tracking-tight sm:text-5xl">
+        <h1 className="mt-1 font-display text-3xl font-medium uppercase leading-[0.9] tracking-tight sm:mt-2 sm:text-5xl">
           Lookbook
         </h1>
-        <p className="mt-4 max-w-md text-base text-mute">
+        <p className="mt-2 max-w-md text-sm text-mute sm:mt-4 sm:text-base">
           Your wardrobe, on you. Keep the looks worth coming back to.
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 border-y border-hairline py-3">
+      <div className="lg:hidden">
+        <ChipRail label="Filter by outfit">
+          <FilterChip active={outfitId === null} onClick={() => setOutfitId(null)} label="All" />
+          {(summaries ?? []).map((outfit) => (
+            <FilterChip
+              key={outfit._id}
+              active={outfitId === outfit._id}
+              onClick={() => setOutfitId(outfit._id)}
+              label={outfit.name}
+            />
+          ))}
+        </ChipRail>
+      </div>
+      <div className="hidden items-center gap-3 border-y border-hairline py-3 lg:flex">
         <label className="text-sm font-medium">
           Outfit
           <select
@@ -129,17 +145,41 @@ export function Lookbook() {
 
       {lightbox ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4"
-          onClick={() => setLightbox(null)}
+          className="fixed inset-0 z-50 flex flex-col bg-ink"
           role="dialog"
           aria-label="Try-on preview"
+          onTouchStart={(event) => {
+            swipeStart.current = event.changedTouches[0]?.clientX ?? null;
+          }}
+          onTouchEnd={(event) => {
+            const start = swipeStart.current;
+            const end = event.changedTouches[0]?.clientX;
+            swipeStart.current = null;
+            if (start !== null && end !== undefined && Math.abs(end - start) > 48) {
+              setLightbox(null);
+            }
+          }}
         >
+          <button
+            type="button"
+            aria-label="Close preview"
+            className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-4 z-10 flex size-11 items-center justify-center rounded-full bg-canvas text-ink"
+            onClick={() => setLightbox(null)}
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="absolute inset-0"
+            aria-label="Close preview"
+            onClick={() => setLightbox(null)}
+          />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={lightbox}
             alt=""
-            className="max-h-full max-w-full object-contain"
-            onClick={(e) => e.stopPropagation()}
+            className="relative z-10 m-auto max-h-full max-w-full object-contain"
+            onClick={(event) => event.stopPropagation()}
           />
         </div>
       ) : null}

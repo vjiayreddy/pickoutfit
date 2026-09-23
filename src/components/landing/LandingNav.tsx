@@ -3,7 +3,7 @@ import { routes } from "@/lib/routes";
 
 export function LandingNav() {
   return (
-    <header className="sticky top-0 z-20 border-b border-white/10 bg-ink/90 text-canvas backdrop-blur-md">
+    <header className="sticky top-0 z-20 border-b border-white/10 bg-ink/90 pt-[env(safe-area-inset-top)] text-canvas backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between px-4 sm:px-8">
         <Link
           href={routes.home}

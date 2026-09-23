@@ -10,9 +10,10 @@ import {
   CATEGORY_LABELS,
   type Category,
 } from "@convex/shared/wardrobe";
+import { ChipRail, FilterChip } from "@/components/common/ChipRail";
+import { StickyAction } from "@/components/common/StickyAction";
 import { ItemTile } from "@/components/wardrobe/ItemTile";
 import { SeedDemoWardrobe } from "@/components/wardrobe/SeedDemoWardrobe";
-import { cn } from "@/lib/cn";
 import { pluralize } from "@/lib/format";
 import { routes } from "@/lib/routes";
 
@@ -53,16 +54,16 @@ export function WardrobeGrid() {
   );
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="space-y-5 sm:space-y-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-sm font-medium uppercase tracking-wide text-mute">
+          <p className="text-xs font-medium uppercase tracking-wide text-mute sm:text-sm">
             The personal collection
           </p>
-          <h1 className="mt-2 font-display text-4xl font-medium uppercase leading-[0.9] tracking-tight sm:text-5xl">
+          <h1 className="mt-1 font-display text-3xl font-medium uppercase leading-[0.9] tracking-tight sm:mt-2 sm:text-5xl">
             Your wardrobe.
           </h1>
-          <p className="mt-4 max-w-md text-base text-mute">
+          <p className="mt-2 max-w-md text-sm text-mute sm:mt-4 sm:text-base">
             The pieces you love. The looks you haven&apos;t tried yet.
           </p>
         </div>
@@ -70,7 +71,7 @@ export function WardrobeGrid() {
           <SeedDemoWardrobe />
           <Link
             href={routes.add}
-            className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas transition active:scale-95 active:opacity-50"
+            className="hidden h-12 shrink-0 items-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas transition active:scale-95 active:opacity-50 lg:inline-flex"
           >
             <Plus className="size-4" />
             Add clothes
@@ -87,7 +88,7 @@ export function WardrobeGrid() {
         </div>
       ) : null}
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div className="relative max-w-md">
           <Search className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-mute" />
           <input
@@ -95,10 +96,10 @@ export function WardrobeGrid() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name, colour, material…"
-            className="h-10 w-full rounded-[24px] bg-soft-cloud pr-4 pl-11 text-sm outline-none focus:bg-canvas focus:ring-2 focus:ring-ink"
+            className="h-11 w-full rounded-[24px] bg-soft-cloud pr-4 pl-11 text-base outline-none focus:bg-canvas focus:ring-2 focus:ring-ink"
           />
         </div>
-        <div className="flex flex-wrap gap-2">
+        <ChipRail label="Wardrobe filters">
           <FilterChip
             active={category === "all"}
             onClick={() => setCategory("all")}
@@ -117,11 +118,11 @@ export function WardrobeGrid() {
             onClick={() => setShowHidden((v) => !v)}
             label="Hidden"
           />
-        </div>
+        </ChipRail>
       </div>
 
       {items === undefined ? (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
           {Array.from({ length: 8 }, (_, i) => (
             <div key={i} className="aspect-square animate-pulse bg-soft-cloud" />
           ))}
@@ -164,36 +165,17 @@ export function WardrobeGrid() {
           <p className="text-xs font-medium text-mute tabular-nums">
             {pluralize(items.length, "item")}
           </p>
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">
+          <ul className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-8 lg:grid-cols-4">
             {items.map((item) => (
               <ItemTile key={item._id} item={item} />
             ))}
           </ul>
         </>
       )}
+      <StickyAction href={routes.add}>
+        <Plus className="size-4" />
+        Add clothes
+      </StickyAction>
     </div>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "h-9 rounded-full px-4 text-sm font-medium transition",
-        active ? "bg-ink text-canvas" : "border border-hairline bg-canvas text-ink",
-      )}
-    >
-      {label}
-    </button>
   );
 }

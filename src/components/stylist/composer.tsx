@@ -79,7 +79,7 @@ export function Composer({ onSend, onCancel, isBusy, isResuming, placeholder, bl
         event.preventDefault();
         void submit();
       }}
-      className="shrink-0 border-t border-ink bg-canvas pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      className="shrink-0 border-t border-ink bg-canvas pt-2 pb-3 xl:pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
       <div className="flex items-end gap-2">
         <Textarea

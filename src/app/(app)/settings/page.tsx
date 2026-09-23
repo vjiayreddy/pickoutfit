@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ChipRail } from "@/components/common/ChipRail";
 import { PageHeader } from "@/components/common/PageHeader";
 import { AppearanceSettings } from "@/components/settings/appearance-settings";
 import { AvatarsSettings } from "@/components/settings/avatars-settings";
@@ -27,17 +28,19 @@ export default function SettingsPage() {
       />
       <nav
         aria-label="Settings sections"
-        className="flex flex-wrap gap-x-6 gap-y-2 text-xs font-medium"
+        className="sticky top-[var(--app-header-height)] z-20 -mx-4 border-b border-hairline bg-canvas px-4 py-2 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0"
       >
-        {SECTIONS.map(([id, label]) => (
-          <a
-            key={id}
-            href={`#${id}`}
-            className="border-b border-transparent pb-2 text-mute transition-colors hover:border-ink hover:text-ink"
-          >
-            {label}
-          </a>
-        ))}
+        <ChipRail>
+          {SECTIONS.map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className="inline-flex h-11 shrink-0 items-center rounded-full border border-hairline px-4 text-sm font-medium text-ink"
+            >
+              {label}
+            </a>
+          ))}
+        </ChipRail>
       </nav>
       <div>
         <AvatarsSettings />

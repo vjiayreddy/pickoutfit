@@ -17,8 +17,8 @@ export function LandingHero() {
         aria-hidden
         className="absolute inset-0 bg-gradient-to-t from-ink via-ink/55 to-ink/20"
       />
-      <div className="relative z-10 mx-auto flex min-h-[min(92vh,920px)] max-w-[1440px] flex-col justify-end px-4 pb-16 pt-28 sm:px-8 sm:pb-24">
-        <h1 className="max-w-3xl font-display text-6xl font-medium uppercase leading-[0.9] tracking-tight sm:text-8xl">
+      <div className="relative z-10 mx-auto flex min-h-[min(92vh,920px)] max-w-[1440px] flex-col justify-end px-4 pb-12 pt-24 sm:px-8 sm:pb-24 sm:pt-28">
+        <h1 className="max-w-3xl font-display text-5xl font-medium uppercase leading-[0.9] tracking-tight sm:text-7xl lg:text-8xl">
           Digitize.
           <br />
           Style.

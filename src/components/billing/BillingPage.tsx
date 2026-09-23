@@ -101,7 +101,7 @@ export function BillingPage() {
   const currentPlan = status.plan;
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-12">
+    <div className="mx-auto w-full max-w-3xl space-y-8 sm:space-y-12">
       <header className="space-y-2">
         <h1 className="font-display text-3xl font-medium tracking-tight sm:text-4xl">
           Billing
@@ -152,7 +152,7 @@ export function BillingPage() {
                     type="button"
                     disabled={!status.configured || pendingPlan !== null}
                     onClick={() => void upgrade(plan.id as "pro" | "plus")}
-                    className="mt-auto h-12 rounded-full bg-ink text-sm font-medium text-canvas disabled:opacity-50"
+                    className="mt-auto flex h-12 w-full items-center justify-center rounded-full bg-ink text-sm font-medium text-canvas disabled:opacity-50"
                   >
                     {pendingPlan === plan.id
                       ? "Redirecting…"
@@ -163,7 +163,7 @@ export function BillingPage() {
                     type="button"
                     disabled={!status.configured || portalPending}
                     onClick={() => void openPortal()}
-                    className="mt-auto h-12 rounded-full bg-soft-cloud text-sm font-medium text-ink disabled:opacity-50"
+                    className="mt-auto flex h-12 w-full items-center justify-center rounded-full bg-soft-cloud text-sm font-medium text-ink disabled:opacity-50"
                   >
                     {portalPending ? "Opening…" : "Manage subscription"}
                   </button>

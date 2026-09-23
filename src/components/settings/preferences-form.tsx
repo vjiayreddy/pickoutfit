@@ -93,7 +93,7 @@ function PreferencesFields({ initial }: { initial: Prefs }) {
   return (
     <section
       id="preferences"
-      className="grid scroll-mt-24 gap-6 border-t border-hairline py-8 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-10"
+      className="grid scroll-mt-40 gap-6 border-t border-hairline py-8 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-10"
     >
       <header className="space-y-2">
         <p className="font-mono text-[10px] tracking-[0.16em] text-mute uppercase">

@@ -87,7 +87,7 @@ export function GroomSheet({
         aria-label="Close"
         onClick={() => onOpenChange(false)}
       />
-      <div className="relative z-10 flex max-h-[90dvh] w-full max-w-lg flex-col bg-canvas">
+      <div className="relative z-10 flex max-h-[90dvh] w-full max-w-lg flex-col bg-canvas pb-[env(safe-area-inset-bottom)] sm:pb-0">
         <div className="flex items-start justify-between border-b border-hairline p-6">
           <div>
             <p className="text-[10px] font-medium tracking-[0.16em] text-mute uppercase">

@@ -71,7 +71,7 @@ export function DialogContent({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      className="fixed inset-0 z-50 m-0 flex h-full max-h-none w-full max-w-none items-center justify-center bg-transparent p-4 open:flex"
+      className="fixed inset-0 z-50 m-0 flex h-full max-h-none w-full max-w-none items-end justify-center bg-transparent p-0 open:flex sm:items-center sm:p-4"
       onClose={() => setOpen(false)}
     >
       <div
@@ -81,7 +81,7 @@ export function DialogContent({
       />
       <div
         className={cn(
-          "relative z-10 grid w-full max-w-sm gap-4 bg-canvas p-4 text-sm text-ink ring-1 ring-hairline",
+          "relative z-10 grid max-h-[90dvh] w-full max-w-none gap-4 overflow-y-auto bg-canvas p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-sm text-ink sm:max-w-sm sm:pb-4 sm:ring-1 sm:ring-hairline",
           className,
         )}
         onClick={(event) => event.stopPropagation()}

@@ -8,6 +8,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { PLANS, type PlanId } from "@convex/shared/credits";
 import { ItemImage } from "@/components/common/ItemImage";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { PhotoTips } from "@/components/onboarding/PhotoTips";
 import {
   describeRejection,
@@ -42,6 +43,7 @@ export function AvatarStep({ plan, onContinue }: AvatarStepProps) {
   const [settingDefault, setSettingDefault] = useState<Id<"avatars"> | null>(
     null,
   );
+  const [removeId, setRemoveId] = useState<Id<"avatars"> | null>(null);
 
   const maxAvatars = PLANS[plan].maxAvatars;
   const count = avatars?.length ?? 0;
@@ -188,15 +190,8 @@ export function AvatarStep({ plan, onContinue }: AvatarStepProps) {
                     <button
                       type="button"
                       aria-label={`Remove ${avatar.label}`}
-                      className="flex size-9 items-center justify-center rounded-full text-mute hover:bg-soft-cloud hover:text-ink"
-                      onClick={async () => {
-                        if (!confirm("Remove this photo?")) return;
-                        try {
-                          await removeAvatar({ avatarId: avatar._id });
-                        } catch (caught) {
-                          toast.error(reportError(caught).message);
-                        }
-                      }}
+                      className="flex size-11 items-center justify-center rounded-full text-mute hover:bg-soft-cloud hover:text-ink"
+                      onClick={() => setRemoveId(avatar._id)}
                     >
                       <Trash2 className="size-4" />
                     </button>
@@ -225,7 +220,7 @@ export function AvatarStep({ plan, onContinue }: AvatarStepProps) {
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-4 border-t border-hairline pt-5 lg:col-span-2">
+      <div className="hidden items-center justify-between gap-4 border-t border-hairline pt-5 lg:col-span-2 lg:flex">
         <p className="text-xs text-mute">
           {count > 0
             ? "Photo added. Next, choose your styling preferences."
@@ -241,6 +236,31 @@ export function AvatarStep({ plan, onContinue }: AvatarStepProps) {
           <ArrowRight className="size-4" />
         </button>
       </div>
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-hairline bg-canvas p-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:hidden">
+        <button
+          type="button"
+          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-ink px-8 text-base font-medium text-canvas disabled:opacity-50"
+          onClick={onContinue}
+          disabled={count === 0 || busy}
+        >
+          Continue
+          <ArrowRight className="size-4" />
+        </button>
+      </div>
+      <div className="h-20 lg:hidden" aria-hidden />
+      <ConfirmDialog
+        open={removeId !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveId(null);
+        }}
+        title="Remove this photo?"
+        confirmLabel="Remove"
+        destructive
+        onConfirm={async () => {
+          if (!removeId) return;
+          await removeAvatar({ avatarId: removeId });
+        }}
+      />
     </div>
   );
 }

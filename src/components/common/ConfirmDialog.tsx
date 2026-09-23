@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactElement, type ReactNode } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -55,7 +56,7 @@ export function ConfirmDialog({
       await onConfirm();
       setOpen(false);
     } catch (error) {
-      reportError(error);
+      toast.error(reportError(error).message);
     } finally {
       setPending(false);
     }
