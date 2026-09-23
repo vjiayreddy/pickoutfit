@@ -27,10 +27,12 @@ export function ActivityPopover({ className }: { className?: string }) {
   useJobCompletionToasts();
 
   const photos = jobs?.filter((job) => job.type === "ingest").length ?? 0;
-  const renders = count - photos;
+  const grooms = jobs?.filter((job) => job.type === "groom").length ?? 0;
+  const renders = count - photos - grooms;
   const counts = [
     photos ? pluralize(photos, "photo") : "",
     renders ? pluralize(renders, "try-on") : "",
+    grooms ? pluralize(grooms, "style") : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -99,7 +101,11 @@ export function ActivityPopover({ className }: { className?: string }) {
                     !job.steps.some((step) => step.status === "running");
                   const label =
                     job.steps.find((s) => s.status === "running")?.label ??
-                    (job.type === "ingest" ? "Scanning photo" : "Rendering");
+                    (job.type === "ingest"
+                      ? "Scanning photo"
+                      : job.type === "groom"
+                        ? "Styling hair & beard"
+                        : "Rendering");
                   return (
                     <li key={job._id}>
                       <Link
@@ -131,7 +137,11 @@ export function ActivityPopover({ className }: { className?: string }) {
                           </span>
                           <span className="block text-[11px] text-mute tabular-nums">
                             {Math.round(job.progress)}% ·{" "}
-                            {job.type === "ingest" ? "Import" : "Try-on"}
+                            {job.type === "ingest"
+                              ? "Import"
+                              : job.type === "groom"
+                                ? "Style"
+                                : "Try-on"}
                           </span>
                         </span>
                         <ArrowUpRight
@@ -167,7 +177,11 @@ function useJobCompletionToasts() {
       if (prev !== job.status && isTerminalJobStatus(job.status)) {
         if (job.status === "done") {
           toast.success(
-            job.type === "ingest" ? "Import finished." : "Try-on finished.",
+            job.type === "ingest"
+              ? "Import finished."
+              : job.type === "groom"
+                ? "Hair & beard styling finished."
+                : "Try-on finished.",
           );
         } else if (job.status === "failed") {
           toast.error(job.error ?? "Job failed.");

@@ -1,4 +1,10 @@
 import { LIMITS } from "../shared/credits";
+import {
+  BEARD_PHRASES,
+  HAIR_PHRASES,
+  type BeardStyle,
+  type HairStyle,
+} from "../shared/grooming";
 import { CATEGORIES, FORMALITY, SEASONS, type Fit, type Presentation, type Slot } from "../shared/wardrobe";
 
 /**
@@ -176,4 +182,33 @@ export function renderPrompt(input: RenderPromptInput): string {
   ]
     .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
     .join("\n");
+}
+
+export type GroomPromptInput = {
+  hair: HairStyle;
+  beard: BeardStyle;
+  custom?: string;
+};
+
+/** Second-pass gpt-image-2 edit: restyle hair/beard on a finished try-on, keep outfit intact. */
+export function groomPrompt(input: GroomPromptInput): string {
+  const hairPhrase = HAIR_PHRASES[input.hair];
+  const beardPhrase = BEARD_PHRASES[input.beard];
+  const changes: string[] = [];
+  if (hairPhrase) changes.push(`Hairstyle: give the person ${hairPhrase}.`);
+  if (beardPhrase) changes.push(`Facial hair: ${beardPhrase}.`);
+  const custom = input.custom?.trim();
+  if (custom) changes.push(`Additional styling notes: ${custom}`);
+
+  return [
+    "Image 1 is a finished full-body outfit try-on photo of one person.",
+    "",
+    "Edit image 1 only. Keep the exact same person, face structure, skin tone, body proportions, pose, camera framing, lighting, background, and every item of clothing and accessories exactly as shown.",
+    "Do not add, remove, restyle, or recolour any garments or accessories.",
+    "",
+    "Change only the hair and/or facial hair as specified:",
+    ...changes,
+    "",
+    "The result must stay photorealistic and match the original image's lighting and colour grade. Do not crop, zoom, or change the composition.",
+  ].join("\n");
 }

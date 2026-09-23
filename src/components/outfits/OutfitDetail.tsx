@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CalendarCheck,
   Loader2,
+  Scissors,
   Share2,
   Sparkles,
   Trash2,
@@ -21,6 +22,7 @@ import {
   draftFromOutfit,
   OutfitForm,
 } from "@/components/outfits/OutfitForm";
+import { GroomSheet } from "@/components/renders/GroomSheet";
 import { RenderSheet } from "@/components/renders/RenderSheet";
 import { reportError, toClientError } from "@/lib/client-errors";
 import { formatDate } from "@/lib/format";
@@ -42,9 +44,14 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
   const regenerate = useMutation(api.renders.regenerate);
 
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [groomRenderId, setGroomRenderId] = useState<Id<"renders"> | null>(
+    null,
+  );
   const [jobId, setJobId] = useState<Id<"jobs"> | null>(null);
   const job = useQuery(api.jobs.get, jobId ? { jobId } : "skip");
   const canShare = Boolean(me?.balance.features.includes("sharing"));
+  const canGroom = me?.prefs.presentation === "masculine";
+  const groomTarget = renders?.find((r) => r._id === groomRenderId);
 
   if (outfit === undefined) {
     return (
@@ -141,7 +148,11 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
 
       {job ? (
         <div className="space-y-2 border border-hairline p-4">
-          <p className="text-sm font-medium">Try-on in progress</p>
+          <p className="text-sm font-medium">
+            {job.type === "groom"
+              ? "Styling in progress"
+              : "Try-on in progress"}
+          </p>
           <JobStepper job={job} />
         </div>
       ) : null}
@@ -171,6 +182,9 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
                   )}
                 </div>
                 <p className="text-[11px] text-mute capitalize">
+                  {render.kind === "groom" && render.groomingLabel
+                    ? `${render.groomingLabel} · `
+                    : ""}
                   {render.quality} · {render.status}
                   {render.completedAt
                     ? ` · ${formatDate(render.completedAt)}`
@@ -209,6 +223,16 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
                         <Share2 className="mr-1 inline size-3" />
                         {render.shareToken ? "Unshare" : "Share"}
                       </button>
+                      {canGroom ? (
+                        <button
+                          type="button"
+                          className="rounded-full border border-hairline px-3 py-1 text-[11px] font-medium"
+                          onClick={() => setGroomRenderId(render._id)}
+                        >
+                          <Scissors className="mr-1 inline size-3" />
+                          Style
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="rounded-full border border-hairline px-3 py-1 text-[11px] font-medium"
@@ -266,6 +290,17 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
         onOpenChange={setSheetOpen}
         onStarted={setJobId}
       />
+      {groomTarget ? (
+        <GroomSheet
+          renderId={groomTarget._id}
+          quality={groomTarget.quality}
+          open={Boolean(groomRenderId)}
+          onOpenChange={(open) => {
+            if (!open) setGroomRenderId(null);
+          }}
+          onStarted={setJobId}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { v, type VLiteral, type VUnion } from "convex/values";
 import { FEATURES, PLAN_IDS, RENDER_QUALITIES } from "./credits";
+import { BEARD_STYLES, HAIR_STYLES, RENDER_KINDS } from "./grooming";
 import { JOB_STATUSES, JOB_TYPES, STEP_STATUSES } from "./jobs";
 import {
   CATEGORIES,
@@ -35,6 +36,15 @@ export const vItemStatus = literals(ITEM_STATUSES);
 export const vPlanId = literals(PLAN_IDS);
 export const vFeature = literals(FEATURES);
 export const vRenderQuality = literals(RENDER_QUALITIES);
+export const vRenderKind = literals(RENDER_KINDS);
+export const vHairStyle = literals(HAIR_STYLES);
+export const vBeardStyle = literals(BEARD_STYLES);
+
+export const vGrooming = v.object({
+  hair: vHairStyle,
+  beard: vBeardStyle,
+  custom: v.optional(v.string()),
+});
 
 export const vJobType = literals(JOB_TYPES);
 export const vJobStatus = literals(JOB_STATUSES);

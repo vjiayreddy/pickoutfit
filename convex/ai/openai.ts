@@ -15,7 +15,7 @@ import { vDetectedItem } from "../shared/validators";
 import { FORMALITY, isCategory, SEASONS, type Formality, type Season, type Slot } from "../shared/wardrobe";
 import { dominantHex } from "./colours";
 import { normalizeImageInput } from "./image_input";
-import { detectionInstructions, extractionPrompt, renderPrompt } from "./prompts";
+import { detectionInstructions, extractionPrompt, groomPrompt, renderPrompt } from "./prompts";
 
 /**
  * Every OpenAI call the app makes. Actions only: they read and write through `ai/pipeline.ts` so a
@@ -242,6 +242,71 @@ export const renderImage = internalAction({
           error: message,
         });
         // A settled result stops Workpool retrying rejected images or invalid requests.
+        return { error: message };
+      }
+      await ctx.runMutation(internal.ai.pipeline.markStep, {
+        jobId: args.jobId,
+        key: args.stepKey,
+        status: "running",
+        error: message,
+      });
+      throw error;
+    }
+  },
+});
+
+/** Second-pass edit: restyle hair/beard on a finished try-on PNG (single reference). */
+export const groomImage = internalAction({
+  args: { renderId: v.id("renders"), jobId: v.id("jobs"), stepKey: v.string() },
+  returns: v.union(v.null(), v.object({ error: v.string() })),
+  handler: async (ctx, args): Promise<null | { error: string }> => {
+    await ctx.runMutation(internal.ai.pipeline.markStep, {
+      jobId: args.jobId,
+      key: args.stepKey,
+      status: "running",
+      meta: { renderId: args.renderId },
+    });
+    let prompt = "";
+    try {
+      const context = await ctx.runQuery(internal.ai.pipeline.groomContext, {
+        renderId: args.renderId,
+      });
+      const source = await ctx.storage.get(context.sourceStorageId);
+      if (!source) throw appError("NOT_FOUND", "The source try-on image is gone.");
+
+      prompt = groomPrompt({
+        hair: context.grooming.hair,
+        beard: context.grooming.beard,
+        custom: context.grooming.custom,
+      });
+
+      const response = await editImage({
+        image: [await toImageFile(source, "try-on")],
+        prompt,
+        size: "1024x1536",
+        quality: context.quality === "hq" ? "high" : "medium",
+      });
+      const { bytes, usage } = decodeImage(response);
+      const storageId = await ctx.storage.store(pngBlob(bytes));
+
+      await ctx.runMutation(internal.ai.pipeline.renderDone, {
+        renderId: args.renderId,
+        jobId: args.jobId,
+        stepKey: args.stepKey,
+        storageId,
+        prompt,
+        usage,
+      });
+      return null;
+    } catch (error) {
+      const message = errorText(error);
+      if (isPermanentRenderError(error)) {
+        await ctx.runMutation(internal.ai.pipeline.renderFailed, {
+          renderId: args.renderId,
+          jobId: args.jobId,
+          stepKey: args.stepKey,
+          error: message,
+        });
         return { error: message };
       }
       await ctx.runMutation(internal.ai.pipeline.markStep, {

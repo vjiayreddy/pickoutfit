@@ -103,6 +103,9 @@ export function Lookbook() {
                     {render.outfitName}
                   </p>
                   <p className="text-[11px] text-mute capitalize">
+                    {render.kind === "groom" && render.groomingLabel
+                      ? `${render.groomingLabel} · `
+                      : ""}
                     {render.quality}
                   </p>
                 </button>
