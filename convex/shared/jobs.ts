@@ -41,6 +41,7 @@ export const INGEST_STEPS = {
   review: "review",
   reserve: "reserve",
   extract: "extract",
+  extractGrid: "extractGrid",
   finalize: "finalize",
 } as const;
 
@@ -62,6 +63,7 @@ const STATIC_LABELS: Record<string, string> = {
   review: "Ready to review",
   reserve: "Reserving credits",
   finalize: "Finishing up",
+  extractGrid: "Laying out the pieces",
 };
 
 export function stepLabel(key: string, meta?: Record<string, unknown>): string {
@@ -82,6 +84,32 @@ export function stepLabel(key: string, meta?: Record<string, unknown>): string {
 export function stepIndex(key: string): number | null {
   const [, index] = key.split(":");
   return index === undefined ? null : Number(index);
+}
+
+/** Progress chips. The shared board belongs to cut-out, not its own stage. */
+export function stepPhaseKey(key: string): string {
+  if (key === INGEST_STEPS.extractGrid) return INGEST_STEPS.extract;
+  const index = stepIndex(key);
+  return index === null ? key : stepPrefix(key);
+}
+
+/**
+ * Copy for the step that is running now. After the shared board, each piece is only being saved.
+ */
+export function activeStepLabel(
+  steps: ReadonlyArray<{ key: string; status: string; label: string }>,
+): string | undefined {
+  const running = steps.find((step) => step.status === "running");
+  if (!running) return undefined;
+  if (running.key === INGEST_STEPS.extractGrid) return STATIC_LABELS.extractGrid;
+  const gridDone = steps.some(
+    (step) => step.key === INGEST_STEPS.extractGrid && step.status === "done",
+  );
+  const index = stepIndex(running.key);
+  if (gridDone && stepPrefix(running.key) === INGEST_STEPS.extract && index !== null) {
+    return `Saving piece ${index + 1}`;
+  }
+  return running.label;
 }
 
 /** `extract:3` → `extract`; static keys map to themselves. Used for step-duration statistics. */

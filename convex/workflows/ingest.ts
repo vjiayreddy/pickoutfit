@@ -120,9 +120,55 @@ async function runExtractions(
   jobId: Id<"jobs">,
   targets: Array<{ itemId: Id<"items">; stepKey: string }>,
 ): Promise<boolean[]> {
+  const cropped = new Set<Id<"items">>();
+  if (targets.length >= 2) {
+    let board: {
+      crops: Array<{ itemId: Id<"items">; storageId: Id<"_storage"> }>;
+      usage: { inputTextTokens: number; inputImageTokens: number; outputTokens: number };
+    } | null = null;
+    try {
+      board = await step.runAction(
+        internal.gridDemo.cutSelection,
+        { jobId, itemIds: targets.map((target) => target.itemId) },
+        { retry: false },
+      );
+    } catch {
+      board = null;
+      await step.runMutation(internal.ai.pipeline.markStep, {
+        jobId,
+        key: INGEST_STEPS.extractGrid,
+        status: "failed",
+        error: "The shared cutout failed. Each piece will be cut separately.",
+      });
+    }
+    if (board) {
+      await step.runMutation(internal.ai.pipeline.recordGridCost, { jobId, usage: board.usage });
+      for (const crop of board.crops) {
+        const target = targets.find((entry) => entry.itemId === crop.itemId);
+        if (!target) continue;
+        try {
+          await step.runAction(
+            internal.ai.openai.finishCutout,
+            {
+              itemId: crop.itemId,
+              jobId,
+              stepKey: target.stepKey,
+              storageId: crop.storageId,
+            },
+            { retry: true },
+          );
+          cropped.add(crop.itemId);
+        } catch {
+          // The crop could not be saved. The per-item extract below still runs.
+        }
+      }
+    }
+  }
+
   const results: boolean[] = [];
-  for (let offset = 0; offset < targets.length; offset += MAX_PARALLEL_EXTRACTIONS) {
-    const chunk = targets.slice(offset, offset + MAX_PARALLEL_EXTRACTIONS);
+  const remaining = targets.filter((target) => !cropped.has(target.itemId));
+  for (let offset = 0; offset < remaining.length; offset += MAX_PARALLEL_EXTRACTIONS) {
+    const chunk = remaining.slice(offset, offset + MAX_PARALLEL_EXTRACTIONS);
     const settled = await Promise.all(
       chunk.map(async ({ itemId, stepKey }) => {
         try {
@@ -134,6 +180,9 @@ async function runExtractions(
       }),
     );
     results.push(...settled);
+  }
+  for (const target of targets) {
+    if (cropped.has(target.itemId)) results.push(true);
   }
   return results;
 }

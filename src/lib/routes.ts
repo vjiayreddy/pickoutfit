@@ -7,6 +7,7 @@ export const routes = {
   signUp: "/sign-up",
   onboarding: "/onboarding",
   add: "/add",
+  gridDemo: "/grid-demo",
   wardrobe: "/wardrobe",
   item: (itemId: Id<"items"> | string) => `/wardrobe/${itemId}`,
   outfits: "/outfits",

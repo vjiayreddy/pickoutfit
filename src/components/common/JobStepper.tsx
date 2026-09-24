@@ -3,12 +3,13 @@
 import type { FunctionReturnType } from "convex/server";
 import { AlertCircle, Check, Clock3, Loader2, Minus } from "lucide-react";
 import {
+  activeStepLabel,
   isTerminalJobStatus,
-  stepIndex,
-  stepPrefix,
+  stepPhaseKey,
 } from "@convex/shared/jobs";
 import type { api } from "@convex/_generated/api";
 import { cn } from "@/lib/cn";
+import { formatPercent } from "@/lib/format";
 
 type Job = NonNullable<FunctionReturnType<typeof api.jobs.get>>;
 type Step = Job["steps"][number];
@@ -33,7 +34,7 @@ function jobProgress(job: Pick<Job, "steps" | "status" | "error">) {
   const terminal = isTerminalJobStatus(job.status);
   const groups = new Map<string, Step[]>();
   for (const step of job.steps) {
-    const key = stepIndex(step.key) !== null ? stepPrefix(step.key) : step.key;
+    const key = stepPhaseKey(step.key);
     groups.set(key, [...(groups.get(key) ?? []), step]);
   }
   const phases: ProgressPhase[] = [...groups].map(([key, steps]) => {
@@ -56,7 +57,6 @@ function jobProgress(job: Pick<Job, "steps" | "status" | "error">) {
     return { key, label: PHASE_LABELS[key] ?? key, status };
   });
 
-  const running = job.steps.find((s) => s.status === "running");
   const title =
     job.status === "failed"
       ? "Failed"
@@ -64,7 +64,7 @@ function jobProgress(job: Pick<Job, "steps" | "status" | "error">) {
         ? "Done"
         : job.status === "queued"
           ? "Queued"
-          : (running?.label ?? "Working…");
+          : (activeStepLabel(job.steps) ?? "Working…");
 
   return { phases, title, terminal };
 }
@@ -91,7 +91,7 @@ export function JobStepper({
         >
           {view.title}
         </span>
-        <span className="tabular-nums text-mute">{Math.round(job.progress)}%</span>
+        <span className="tabular-nums text-mute">{formatPercent(job.progress)}</span>
       </div>
       <ol className="grid grid-cols-3 gap-x-2 gap-y-3" aria-label="Progress stages">
         {view.phases.map((phase) => (

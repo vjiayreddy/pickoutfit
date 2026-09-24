@@ -14,9 +14,9 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
-import { isTerminalJobStatus } from "@convex/shared/jobs";
+import { activeStepLabel, isTerminalJobStatus } from "@convex/shared/jobs";
 import { cn } from "@/lib/cn";
-import { pluralize } from "@/lib/format";
+import { formatPercent, pluralize } from "@/lib/format";
 import { routes } from "@/lib/routes";
 
 export function ActivityPopover({ className }: { className?: string }) {
@@ -100,7 +100,7 @@ export function ActivityPopover({ className }: { className?: string }) {
                     job.status === "queued" ||
                     !job.steps.some((step) => step.status === "running");
                   const label =
-                    job.steps.find((s) => s.status === "running")?.label ??
+                    activeStepLabel(job.steps) ??
                     (job.type === "ingest"
                       ? "Scanning photo"
                       : job.type === "groom"
@@ -136,7 +136,7 @@ export function ActivityPopover({ className }: { className?: string }) {
                             {label}
                           </span>
                           <span className="block text-[11px] text-mute tabular-nums">
-                            {Math.round(job.progress)}% ·{" "}
+                            {formatPercent(job.progress)} ·{" "}
                             {job.type === "ingest"
                               ? "Import"
                               : job.type === "groom"

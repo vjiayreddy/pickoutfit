@@ -52,6 +52,7 @@ function parentHref(pathname: string): string {
     return routes.outfits;
   }
   if (pathname.startsWith(`${routes.stylist}/`)) return routes.stylist;
+  if (pathname.startsWith(routes.gridDemo)) return routes.add;
   return routes.wardrobe;
 }
 
@@ -63,6 +64,7 @@ function fallbackTitle(pathname: string): string {
   if (pathname.startsWith(routes.settings)) return "Settings";
   if (pathname.startsWith(routes.billing)) return "Billing";
   if (pathname.startsWith(routes.admin)) return "Admin";
+  if (pathname.startsWith(routes.gridDemo)) return "Grid demo";
   return "WardrobeAI";
 }
 

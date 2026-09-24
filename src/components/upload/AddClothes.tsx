@@ -205,6 +205,9 @@ function AddClothesInner() {
           Drop clear photos of garments. We detect pieces, you confirm, then we
           cut them out into your wardrobe.
         </p>
+        <Link href={routes.gridDemo} className="mt-3 inline-block text-sm font-medium text-ink underline">
+          Try the one-call grid demo
+        </Link>
       </div>
 
       <DropZone
