@@ -5,6 +5,7 @@ import { AppearanceSettings } from "@/components/settings/appearance-settings";
 import { AvatarsSettings } from "@/components/settings/avatars-settings";
 import { DangerZone } from "@/components/settings/danger-zone";
 import { PreferencesForm } from "@/components/settings/preferences-form";
+import { ShoppingSettings } from "@/components/settings/shopping-settings";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -15,6 +16,7 @@ const SECTIONS = [
   ["photos", "Fitting photos"],
   ["preferences", "Style preferences"],
   ["appearance", "Appearance"],
+  ["shopping", "Shop similar"],
   ["data", "Your data"],
 ] as const;
 
@@ -46,6 +48,7 @@ export default function SettingsPage() {
         <AvatarsSettings />
         <PreferencesForm />
         <AppearanceSettings />
+        <ShoppingSettings />
         <DangerZone />
       </div>
     </div>

@@ -79,6 +79,8 @@ export const vPrefs = v.object({
   fit: vFit,
   avoidColours: v.array(v.string()),
   homeCity: v.optional(v.string()),
+  /** Absent or true shows Shop similar. False hides it on items and outfits. */
+  shopSimilar: v.optional(v.boolean()),
 });
 
 export const vOutfitSlots = v.object({

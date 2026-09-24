@@ -174,6 +174,14 @@ export async function purgeUserBatch(
     if (budget <= 0) return false;
   }
 
+  const shopLookups = await ctx.db
+    .query("shopLookups")
+    .withIndex("by_user_mode", (q) => q.eq("userId", userId))
+    .take(budget);
+  for (const lookup of shopLookups) await ctx.db.delete(lookup._id);
+  budget -= shopLookups.length;
+  if (budget <= 0) return false;
+
   const outfits = await ctx.db
     .query("outfits")
     .withIndex("by_user", (q) => q.eq("userId", userId))

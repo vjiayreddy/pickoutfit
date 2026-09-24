@@ -11,6 +11,7 @@ import {
 } from "../shared/wardrobe";
 import type { ItemView } from "../views";
 import { removeItemsFromOutfits } from "./outfits";
+import { deleteShopLookup } from "./shop";
 import { bumpDailyStats } from "./stats";
 
 type Ctx = QueryCtx | MutationCtx;
@@ -427,6 +428,7 @@ export async function removeItems(
     if (item.storageId) await deleteFile(ctx, item.storageId);
     if (item.thumbStorageId) await deleteFile(ctx, item.thumbStorageId);
     await deleteItemEmbedding(ctx, item._id);
+    await deleteShopLookup(ctx, item._id);
     await ctx.db.delete(item._id);
   }
   await removeItemsFromOutfits(

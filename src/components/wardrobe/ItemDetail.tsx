@@ -17,6 +17,7 @@ import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import { shopSimilarVisible } from "@convex/shared/shop";
 import { CATEGORY_LABELS } from "@convex/shared/wardrobe";
 import { CreditQuote, useCreditQuote } from "@/components/common/CreditQuote";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
@@ -24,12 +25,14 @@ import { ItemImage } from "@/components/common/ItemImage";
 import { JobStepper } from "@/components/common/JobStepper";
 import { AppHeaderTitle } from "@/components/layout/app-header";
 import { ItemForm } from "@/components/wardrobe/ItemForm";
+import { ShopSimilar } from "@/components/wardrobe/ShopSimilar";
 import { reportError } from "@/lib/client-errors";
 import { formatDate, formatRelative } from "@/lib/format";
 import { routes } from "@/lib/routes";
 
 export function ItemDetail({ itemId }: { itemId: string }) {
   const data = useQuery(api.items.get, { itemId });
+  const me = useQuery(api.users.me);
   const router = useRouter();
   const dismissDuplicate = useMutation(api.items.dismissDuplicate);
   const markWorn = useMutation(api.items.markWorn);
@@ -340,6 +343,15 @@ export function ItemDetail({ itemId }: { itemId: string }) {
                 ))}
               </ul>
             </div>
+          ) : null}
+
+          {item.status === "ready" && me && shopSimilarVisible(me.prefs) ? (
+            <section className="space-y-3">
+              <h2 className="text-[10px] font-medium tracking-[0.14em] text-mute uppercase">
+                Shop similar
+              </h2>
+              <ShopSimilar itemId={item._id} />
+            </section>
           ) : null}
 
           <section
