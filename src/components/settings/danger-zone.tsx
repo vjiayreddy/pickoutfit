@@ -32,7 +32,7 @@ export function DangerZone() {
     >
       <header className="space-y-2">
         <p className="font-mono text-[10px] tracking-[0.16em] text-mute uppercase">
-          04 / Your data
+          05 / Your data
         </p>
         <h2 className="flex items-center gap-2 text-xl font-medium tracking-tight">
           <TriangleAlert className="size-4" aria-hidden />

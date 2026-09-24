@@ -17,6 +17,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import { shopSimilarVisible } from "@convex/shared/shop";
 import { JobStepper } from "@/components/common/JobStepper";
 import { OutfitCollage } from "@/components/common/OutfitCollage";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
@@ -28,6 +29,7 @@ import {
 } from "@/components/outfits/OutfitForm";
 import { GroomSheet } from "@/components/renders/GroomSheet";
 import { RenderSheet } from "@/components/renders/RenderSheet";
+import { ShopSimilar } from "@/components/wardrobe/ShopSimilar";
 import { reportError, toClientError } from "@/lib/client-errors";
 import { formatDate } from "@/lib/format";
 import { routes } from "@/lib/routes";
@@ -282,6 +284,8 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
         </section>
       ) : null}
 
+      {me && shopSimilarVisible(me.prefs) ? <ShopPieces items={outfit.items} /> : null}
+
       <section className="space-y-4 border-t border-hairline pt-8">
         <h2 className="text-sm font-medium">Edit outfit</h2>
         <OutfitForm
@@ -369,5 +373,41 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
         />
       ) : null}
     </div>
+  );
+}
+
+function ShopPieces({
+  items,
+}: {
+  items: {
+    outerwear?: { _id: Id<"items">; name: string };
+    top?: { _id: Id<"items">; name: string };
+    bottom?: { _id: Id<"items">; name: string };
+    dress?: { _id: Id<"items">; name: string };
+    shoes?: { _id: Id<"items">; name: string };
+    accessories: { _id: Id<"items">; name: string }[];
+  };
+}) {
+  const pieces = [
+    items.outerwear,
+    items.dress,
+    items.top,
+    items.bottom,
+    items.shoes,
+    ...items.accessories,
+  ].filter((item) => item !== undefined);
+  if (pieces.length === 0) return null;
+  return (
+    <section className="space-y-6 border-t border-hairline pt-8">
+      <h2 className="text-sm font-medium">Shop similar</h2>
+      <ul className="space-y-6">
+        {pieces.map((piece) => (
+          <li key={piece._id} className="space-y-3">
+            <p className="text-sm font-medium">{piece.name}</p>
+            <ShopSimilar itemId={piece._id} />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

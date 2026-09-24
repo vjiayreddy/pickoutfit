@@ -37,6 +37,7 @@ export const authComponent = createClient<DataModel>(components.betterAuth, {
             presentation: "neutral",
             fit: "regular",
             avoidColours: [],
+            shopSimilar: true,
           },
           createdAt: now,
         });

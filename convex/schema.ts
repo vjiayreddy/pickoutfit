@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { vShopOffer } from "./shared/shop";
 import {
   vDetectedItem,
   vFeature,
@@ -121,6 +122,18 @@ export default defineSchema({
       dimensions: EMBEDDING_DIMENSIONS,
       filterFields: ["userId"],
     }),
+
+  /** One shop-similar result per item. `offers` rows count toward the OpenAI check cap. */
+  shopLookups: defineTable({
+    userId: v.id("users"),
+    itemId: v.id("items"),
+    query: v.string(),
+    mode: v.union(v.literal("offers"), v.literal("links")),
+    offers: v.array(vShopOffer),
+    createdAt: v.number(),
+  })
+    .index("by_item", ["itemId"])
+    .index("by_user_mode", ["userId", "mode"]),
 
   outfits: defineTable({
     userId: v.id("users"),

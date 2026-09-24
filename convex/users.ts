@@ -64,7 +64,23 @@ export const updatePrefs = mutation({
   returns: v.null(),
   handler: async (ctx, { prefs }) => {
     const user = await requireUser(ctx);
-    await ctx.db.patch(user._id, { prefs });
+    const shopSimilar = prefs.shopSimilar ?? user.prefs.shopSimilar;
+    await ctx.db.patch(user._id, {
+      prefs: shopSimilar === undefined ? prefs : { ...prefs, shopSimilar },
+    });
+    return null;
+  },
+});
+
+/** Show or hide Shop similar on item and outfit pages. Does not change style prefs. */
+export const setShopSimilar = mutation({
+  args: { enabled: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, { enabled }) => {
+    const user = await requireUser(ctx);
+    await ctx.db.patch(user._id, {
+      prefs: { ...user.prefs, shopSimilar: enabled },
+    });
     return null;
   },
 });
