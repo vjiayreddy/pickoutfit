@@ -135,36 +135,7 @@ export const extractItem = internalAction({
       });
       const { bytes, usage } = decodeImage(response);
       const storageId = await ctx.storage.store(pngBlob(bytes));
-      const hex = dominantHex(bytes, 3);
-
-      const embedding = await embedText(embeddingInput(item, hex));
-      const matches = await ctx.vectorSearch("itemEmbeddings", "by_embedding", {
-        vector: embedding,
-        limit: 4,
-        filter: (q) => q.eq("userId", item.userId),
-      });
-      const candidates = matches
-        .filter((match) => match._score >= LIMITS.duplicateCosineThreshold)
-        .map((match) => match._id);
-      const ready =
-        candidates.length > 0
-          ? await ctx.runQuery(internal.ai.pipeline.duplicateCandidates, {
-              embeddingIds: candidates,
-              itemId: args.itemId,
-            })
-          : [];
-      const duplicateOfId = ready[0];
-
-      await ctx.runMutation(internal.ai.pipeline.itemReady, {
-        itemId: args.itemId,
-        jobId: args.jobId,
-        stepKey: args.stepKey,
-        storageId,
-        hex,
-        usage,
-        embedding,
-        duplicateOfId,
-      });
+      await commitCutout(ctx, { ...args, storageId, bytes, usage });
       return null;
     } catch (error) {
       await ctx.runMutation(internal.ai.pipeline.itemFailed, {
@@ -177,6 +148,77 @@ export const extractItem = internalAction({
     }
   },
 });
+
+const NO_IMAGE_USAGE: TokenUsage = { inputTextTokens: 0, inputImageTokens: 0, outputTokens: 0 };
+
+/**
+ * A crop already exists. Swatches, embedding and the wardrobe row only — no image edit.
+ * Throws without marking the item failed so the workflow can fall back to `extractItem`.
+ */
+export const finishCutout = internalAction({
+  args: {
+    itemId: v.id("items"),
+    jobId: v.id("jobs"),
+    stepKey: v.string(),
+    storageId: v.id("_storage"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    await ctx.runMutation(internal.ai.pipeline.markStep, {
+      jobId: args.jobId,
+      key: args.stepKey,
+      status: "running",
+    });
+    const blob = await ctx.storage.get(args.storageId);
+    if (!blob) throw appError("NOT_FOUND", "The cropped image is missing.");
+    const decoded = Buffer.from(await blob.arrayBuffer());
+    const bytes = new Uint8Array(decoded.byteLength);
+    bytes.set(decoded);
+    await commitCutout(ctx, { ...args, bytes, usage: NO_IMAGE_USAGE });
+    return null;
+  },
+});
+
+async function commitCutout(
+  ctx: ActionCtx,
+  args: {
+    itemId: Id<"items">;
+    jobId: Id<"jobs">;
+    stepKey: string;
+    storageId: Id<"_storage">;
+    bytes: Uint8Array<ArrayBuffer>;
+    usage: TokenUsage;
+  },
+): Promise<void> {
+  const item = await ctx.runQuery(internal.ai.pipeline.extractContext, { itemId: args.itemId });
+  const hex = dominantHex(args.bytes, 3);
+  const embedding = await embedText(embeddingInput(item, hex));
+  const matches = await ctx.vectorSearch("itemEmbeddings", "by_embedding", {
+    vector: embedding,
+    limit: 4,
+    filter: (q) => q.eq("userId", item.userId),
+  });
+  const candidates = matches
+    .filter((match) => match._score >= LIMITS.duplicateCosineThreshold)
+    .map((match) => match._id);
+  const ready =
+    candidates.length > 0
+      ? await ctx.runQuery(internal.ai.pipeline.duplicateCandidates, {
+          embeddingIds: candidates,
+          itemId: args.itemId,
+        })
+      : [];
+  await ctx.runMutation(internal.ai.pipeline.itemReady, {
+    itemId: args.itemId,
+    jobId: args.jobId,
+    stepKey: args.stepKey,
+    storageId: args.storageId,
+    hex,
+    usage: args.usage,
+    embedding,
+    duplicateOfId: ready[0],
+  });
+}
 
 /** One try-on image: the avatar plus every garment cutout as references, one prompt. */
 export const renderImage = internalAction({

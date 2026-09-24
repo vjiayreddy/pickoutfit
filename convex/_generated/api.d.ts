@@ -20,6 +20,7 @@ import type * as avatars from "../avatars.js";
 import type * as billing from "../billing.js";
 import type * as credits from "../credits.js";
 import type * as demoWardrobe from "../demoWardrobe.js";
+import type * as gridDemo from "../gridDemo.js";
 import type * as http from "../http.js";
 import type * as items from "../items.js";
 import type * as jobs from "../jobs.js";
@@ -75,6 +76,7 @@ declare const fullApi: ApiFromModules<{
   billing: typeof billing;
   credits: typeof credits;
   demoWardrobe: typeof demoWardrobe;
+  gridDemo: typeof gridDemo;
   http: typeof http;
   items: typeof items;
   jobs: typeof jobs;

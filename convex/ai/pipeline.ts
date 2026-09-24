@@ -271,6 +271,26 @@ export const itemReady = internalMutation({
   },
 });
 
+/** The shared board is one image call. Daily COGS records it once, not once per piece. */
+export const recordGridCost = internalMutation({
+  args: { jobId: v.id("jobs"), usage: vTokenUsage },
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    const costUsd = usageToUsd(args.usage);
+    await setStep(ctx, args.jobId, INGEST_STEPS.extractGrid, {
+      status: "done",
+      meta: {
+        costUsd,
+        inputTextTokens: args.usage.inputTextTokens,
+        inputImageTokens: args.usage.inputImageTokens,
+        outputTokens: args.usage.outputTokens,
+      },
+    });
+    if (costUsd > 0) await bumpDailyStats(ctx, { cogsUsd: costUsd });
+    return null;
+  },
+});
+
 export const itemFailed = internalMutation({
   args: { itemId: v.id("items"), jobId: v.id("jobs"), stepKey: v.string(), error: v.string() },
   returns: v.null(),
