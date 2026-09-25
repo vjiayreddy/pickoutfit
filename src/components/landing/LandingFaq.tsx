@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 const QUESTIONS = [
   {
@@ -25,10 +25,10 @@ const QUESTIONS = [
 
 export function LandingFaq() {
   return (
-    <div id="faq" className="mt-16 scroll-mt-16 grid gap-8 md:mt-24 md:grid-cols-[0.8fr_1.2fr] md:gap-16">
+    <div id="faq" className="mt-16 grid scroll-mt-20 gap-8 md:mt-24 md:grid-cols-[0.8fr_1.2fr] md:gap-16">
       <div>
-        <p className="text-sm font-medium uppercase tracking-wide text-mute">Before you get dressed</p>
-        <h3 className="mt-4 font-display text-3xl font-medium uppercase leading-tight tracking-tight sm:text-4xl">
+        <p className="text-xs font-medium tracking-wide text-mute uppercase">Before you get dressed</p>
+        <h3 className="mt-4 font-display text-3xl leading-[0.95] font-medium tracking-tight md:text-4xl">
           A few good questions.
         </h3>
       </div>
@@ -37,9 +37,9 @@ export function LandingFaq() {
           <details key={item.question} className="group border-b border-hairline">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-5 py-5 text-sm font-medium [&::-webkit-details-marker]:hidden">
               {item.question}
-              <Plus
+              <ChevronRight
                 aria-hidden
-                className="size-4 shrink-0 transition-transform duration-200 group-open:rotate-45"
+                className="size-4 shrink-0 transition-transform duration-200 group-open:rotate-90"
               />
             </summary>
             <p className="max-w-lg pr-8 pb-6 text-sm leading-relaxed text-mute">{item.answer}</p>
