@@ -40,3 +40,71 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Helvetica, Arial, sans-serif;
 }
+
+.tryon-waves {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 0;
+  width: 280%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.tryon-waves span {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--mute);
+  transform-origin: center;
+  animation: tryon-wave 7s linear infinite;
+  will-change: transform, opacity;
+}
+
+.tryon-waves span:nth-child(2) {
+  animation-delay: -2.33s;
+}
+
+.tryon-waves span:nth-child(3) {
+  animation-delay: -4.67s;
+}
+
+@keyframes tryon-wave {
+  0% {
+    transform: scale(0.58);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.22;
+  }
+  40% {
+    opacity: 0.34;
+  }
+  78% {
+    opacity: 0.16;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tryon-waves span {
+    animation: none;
+    opacity: 0.22;
+  }
+
+  .tryon-waves span:nth-child(1) {
+    transform: scale(0.62);
+  }
+
+  .tryon-waves span:nth-child(2) {
+    transform: scale(0.78);
+  }
+
+  .tryon-waves span:nth-child(3) {
+    transform: scale(0.94);
+  }
+}
