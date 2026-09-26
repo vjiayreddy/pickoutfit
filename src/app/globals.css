@@ -56,7 +56,7 @@ body {
   position: absolute;
   inset: 0;
   border-radius: 9999px;
-  border: 1px solid var(--mute);
+  border: 1px solid color-mix(in srgb, var(--canvas) 55%, transparent);
   transform-origin: center;
   animation: tryon-wave 7s linear infinite;
   will-change: transform, opacity;
