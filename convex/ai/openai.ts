@@ -314,12 +314,13 @@ export const groomImage = internalAction({
         renderId: args.renderId,
       });
       const source = await ctx.storage.get(context.sourceStorageId);
-      if (!source) throw appError("NOT_FOUND", "The source try-on image is gone.");
+      if (!source) throw appError("NOT_FOUND", "The source photo is gone.");
 
       prompt = groomPrompt({
         hair: context.grooming.hair,
         beard: context.grooming.beard,
         custom: context.grooming.custom,
+        sourceKind: context.sourceKind,
       });
 
       const response = await editImage({

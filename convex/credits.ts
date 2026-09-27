@@ -46,6 +46,7 @@ export const quote = query({
         outfits: v.optional(v.number()),
       }),
       v.object({ kind: v.literal("extract"), items: v.number() }),
+      v.object({ kind: v.literal("groom"), quality: vRenderQuality }),
     ),
   },
   returns: vQuote,
@@ -53,8 +54,11 @@ export const quote = query({
     const user = await requireUser(ctx);
     const { total, dailyRemaining } = getBalance(user);
 
-    if (request.kind === "render") {
-      if (request.count < 1 || request.count > LIMITS.maxRendersPerRequest) {
+    if (request.kind === "render" || request.kind === "groom") {
+      if (
+        request.kind === "render" &&
+        (request.count < 1 || request.count > LIMITS.maxRendersPerRequest)
+      ) {
         throw appError(
           "INVALID_INPUT",
           `Choose between 1 and ${LIMITS.maxRendersPerRequest} images.`,
@@ -62,11 +66,10 @@ export const quote = query({
         );
       }
       if (request.quality === "hq" && !hasCurrentFeature(user, "hq_renders")) {
-        const credits = renderCreditCost(
-          request.quality,
-          request.count,
-          request.outfits ?? 1,
-        );
+        const credits =
+          request.kind === "groom"
+            ? renderCreditCost(request.quality, 1, 1)
+            : renderCreditCost(request.quality, request.count, request.outfits ?? 1);
         return {
           credits,
           available: Math.min(total, dailyRemaining),
@@ -79,12 +82,10 @@ export const quote = query({
 
     const credits =
       request.kind === "render"
-        ? renderCreditCost(
-            request.quality,
-            request.count,
-            request.outfits ?? 1,
-          )
-        : extractionCreditCost(request.items);
+        ? renderCreditCost(request.quality, request.count, request.outfits ?? 1)
+        : request.kind === "groom"
+          ? renderCreditCost(request.quality, 1, 1)
+          : extractionCreditCost(request.items);
     const available = Math.min(total, dailyRemaining);
     const shortfall = Math.max(0, credits - available);
     if (shortfall === 0) return { credits, available, shortfall, canAfford: true };

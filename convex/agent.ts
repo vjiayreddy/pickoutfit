@@ -5,6 +5,7 @@ import { vQuote } from "./credits";
 import { requireServiceUser } from "./lib/auth";
 import { appError } from "./lib/errors";
 import { listForUser as listAvatars } from "./model/avatars";
+import { listProfiles } from "./model/profiles";
 import { getBalance, hasCurrentFeature } from "./model/credits";
 import { countRunningUnits } from "./model/jobs";
 import { listForUser as listItems } from "./model/items";
@@ -29,7 +30,7 @@ import { LIMITS, renderCreditCost } from "./shared/credits";
 import { vCategory, vFormality, vOutfitSlots, vPrefs, vRenderQuality, vSeason } from "./shared/validators";
 import { CATEGORIES, CATEGORY_LABELS, FORMALITY, SEASONS, type Category, type Season } from "./shared/wardrobe";
 import { vBalance } from "./users";
-import { vItemSummary, type ItemSummary } from "./views";
+import { vItemSummary, vServiceProfileView, type ItemSummary } from "./views";
 
 /**
  * Service surface for the eve stylist. Every function takes `serviceKey` (AGENT_SERVICE_KEY) and
@@ -79,11 +80,35 @@ export const getWardrobe = query({
 
 export const getContext = query({
   args: vService,
-  returns: v.object({ name: v.optional(v.string()), prefs: vPrefs, balance: vBalance, avatarCount: v.number() }),
+  returns: v.object({
+    name: v.optional(v.string()),
+    prefs: vPrefs,
+    balance: vBalance,
+    avatarCount: v.number(),
+    serviceProfiles: v.array(vServiceProfileView),
+  }),
   handler: async (ctx, args) => {
     const user = await requireServiceUser(ctx, args);
-    const avatars = await listAvatars(ctx, user._id);
-    return { name: user.name, prefs: user.prefs, balance: getBalance(user), avatarCount: avatars.length };
+    const [avatars, profiles] = await Promise.all([
+      listAvatars(ctx, user._id),
+      listProfiles(ctx, user._id),
+    ]);
+    return {
+      name: user.name,
+      prefs: user.prefs,
+      balance: getBalance(user),
+      avatarCount: avatars.length,
+      serviceProfiles: profiles.map((row) => ({
+        serviceId: row.serviceId,
+        budget: row.budget,
+        ...(row.hairLength ? { hairLength: row.hairLength } : {}),
+        ...(row.texture ? { texture: row.texture } : {}),
+        ...(row.hairGoal ? { hairGoal: row.hairGoal } : {}),
+        ...(row.beardNow ? { beardNow: row.beardNow } : {}),
+        ...(row.beardGoal ? { beardGoal: row.beardGoal } : {}),
+        updatedAt: row.updatedAt,
+      })),
+    };
   },
 });
 

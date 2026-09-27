@@ -2,9 +2,15 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { vShopOffer } from "./shared/shop";
 import {
+  vBeardGoal,
+  vBeardNow,
+  vBudget,
   vDetectedItem,
   vFeature,
   vGrooming,
+  vHairGoal,
+  vHairLength,
+  vHairTexture,
   vItemAttributes,
   vItemStatus,
   vJobStatus,
@@ -16,6 +22,10 @@ import {
   vRenderKind,
   vRenderQuality,
   vReservation,
+  vServiceId,
+  vStyleOrigin,
+  vStyleRefServiceId,
+  vStyleRefStatus,
   vTokenUsage,
 } from "./shared/validators";
 
@@ -59,6 +69,8 @@ export default defineSchema({
     mimeType: v.string(),
     sizeBytes: v.number(),
     jobId: v.optional(v.id("jobs")),
+    /** Unset means wardrobe. A grooming upload skips garment detection. */
+    serviceId: v.optional(vServiceId),
     detectedCount: v.optional(v.number()),
     candidates: v.optional(v.array(vDetectedItem)),
     selectedIndices: v.optional(v.array(v.number())),
@@ -156,7 +168,10 @@ export default defineSchema({
 
   renders: defineTable({
     userId: v.id("users"),
-    outfitId: v.id("outfits"),
+    /** Wardrobe try-ons. Absent on a standalone grooming preview. */
+    outfitId: v.optional(v.id("outfits")),
+    /** Profile-photo try-on. Absent on wardrobe renders. */
+    lookId: v.optional(v.id("looks")),
     avatarId: v.id("avatars"),
     jobId: v.id("jobs"),
     storageId: v.optional(v.id("_storage")),
@@ -165,6 +180,8 @@ export default defineSchema({
     quality: vRenderQuality,
     /** Absent on legacy rows — treat as try_on. */
     kind: v.optional(vRenderKind),
+    /** Which service produced this image. Unset on legacy wardrobe try-ons. */
+    serviceId: v.optional(vServiceId),
     parentRenderId: v.optional(v.id("renders")),
     grooming: v.optional(vGrooming),
     status: v.union(
@@ -182,6 +199,8 @@ export default defineSchema({
     completedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
+    .index("by_user_kind", ["userId", "kind"])
+    .index("by_user_kind_service", ["userId", "kind", "serviceId"])
     .index("by_outfit", ["outfitId"])
     .index("by_job", ["jobId"])
     .index("by_shareToken", ["shareToken"])
@@ -191,6 +210,8 @@ export default defineSchema({
   jobs: defineTable({
     userId: v.id("users"),
     type: vJobType,
+    /** Unset means wardrobe (ingest or outfit try-on). */
+    serviceId: v.optional(vServiceId),
     status: vJobStatus,
     steps: v.array(vJobStep),
     progress: v.number(),
@@ -284,6 +305,52 @@ export default defineSchema({
     jobsFailed: v.number(),
     newUsers: v.number(),
   }).index("by_day", ["dayKey"]),
+
+  /**
+   * One row per user per service. Hairstyle and beard are the live variants.
+   * Skincare and later advice services use the same table.
+   */
+  serviceProfiles: defineTable({
+    userId: v.id("users"),
+    serviceId: vServiceId,
+    budget: vBudget,
+    hairLength: v.optional(vHairLength),
+    texture: v.optional(vHairTexture),
+    hairGoal: v.optional(vHairGoal),
+    beardNow: v.optional(vBeardNow),
+    beardGoal: v.optional(vBeardGoal),
+    updatedAt: v.number(),
+  }).index("by_user_service", ["userId", "serviceId"]),
+
+  /** A saved hair or beard style, not the finished photo. */
+  styleRefs: defineTable({
+    userId: v.id("users"),
+    serviceId: vStyleRefServiceId,
+    origin: vStyleOrigin,
+    uploadId: v.optional(v.id("uploads")),
+    storageId: v.optional(v.id("_storage")),
+    label: v.string(),
+    status: vStyleRefStatus,
+    createdAt: v.number(),
+  }).index("by_user_service", ["userId", "serviceId"]),
+
+  /** One try-on request on the profile photo. Outfit is empty until a look stacks clothes. */
+  looks: defineTable({
+    userId: v.id("users"),
+    avatarId: v.id("avatars"),
+    outfitId: v.optional(v.id("outfits")),
+    name: v.string(),
+    createdAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  /** Which styles are on a look. At most one hairstyle and one beard. */
+  lookRefs: defineTable({
+    lookId: v.id("looks"),
+    styleRefId: v.id("styleRefs"),
+    serviceId: vStyleRefServiceId,
+  })
+    .index("by_look", ["lookId"])
+    .index("by_styleRef", ["styleRefId"]),
 
   /** Running average duration per step prefix ("detect", "extract", "render") for ETAs. */
   stepStats: defineTable({

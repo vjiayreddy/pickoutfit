@@ -112,9 +112,11 @@ export function ActivityPopover({ className }: { className?: string }) {
                         href={
                           job.type === "ingest"
                             ? routes.add
-                            : job.outfitIds?.[0]
-                              ? routes.outfit(job.outfitIds[0])
-                              : routes.lookbook
+                            : job.serviceId === "hairstyle" || job.serviceId === "beard"
+                              ? routes.service(job.serviceId)
+                              : job.outfitIds?.[0]
+                                ? routes.outfit(job.outfitIds[0])
+                                : routes.lookbook
                         }
                         onClick={() => setOpen(false)}
                         className="group flex items-start gap-3 px-4 py-3 transition-colors hover:bg-soft-cloud"

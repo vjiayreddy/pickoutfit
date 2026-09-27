@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import { FITS, type Fit, type Presentation } from "@convex/shared/wardrobe";
+import { ServicePreferences } from "@/components/settings/service-preferences";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -229,6 +230,8 @@ function PreferencesFields({ initial }: { initial: Prefs }) {
             />
           </div>
         </div>
+
+        <ServicePreferences />
 
         <div className="flex justify-end gap-2 border-t border-hairline pt-4">
           <Button variant="ghost" disabled={!dirty || saving} onClick={() => setDraft(saved)}>

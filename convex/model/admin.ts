@@ -6,7 +6,7 @@ import { dayKey, UNIT_ECONOMICS } from "../shared/credits";
 import { JOB_STATUSES, type JobStatus } from "../shared/jobs";
 import { listByUpload } from "./items";
 import { getJob } from "./jobs";
-import { listByJob, startRenderJob } from "./renders";
+import { listByJob, startGroomJob, startRenderJob } from "./renders";
 import { readDailyStats, readSystemCounter, sumDailyStats } from "./stats";
 import { startExtractionJob } from "./uploads";
 
@@ -213,8 +213,31 @@ export async function retryJob(ctx: MutationCtx, jobId: Id<"jobs">): Promise<Id<
   const first = failed[0];
   if (!first) throw appError("INVALID_INPUT", "That job has no failed images to retry.");
 
+  if (job.type === "groom" || (first.kind ?? "try_on") === "groom") {
+    if (!first.grooming) {
+      throw appError("INVALID_INPUT", "That grooming job has no style to retry.");
+    }
+    const result = await startGroomJob(ctx, user, {
+      source: first.parentRenderId
+        ? { type: "render", renderId: first.parentRenderId }
+        : { type: "avatar", avatarId: first.avatarId },
+      hair: first.grooming.hair,
+      beard: first.grooming.beard,
+      custom: first.grooming.custom,
+      quality: first.quality,
+      serviceId:
+        first.serviceId === "hairstyle" || first.serviceId === "beard"
+          ? first.serviceId
+          : undefined,
+    });
+    return result.jobId;
+  }
+
   const perOutfit = new Map<Id<"outfits">, number>();
   for (const render of failed) {
+    if (!render.outfitId) {
+      throw appError("INVALID_INPUT", "That image has no outfit to retry.");
+    }
     perOutfit.set(render.outfitId, (perOutfit.get(render.outfitId) ?? 0) + 1);
   }
   const count = Math.max(...perOutfit.values());

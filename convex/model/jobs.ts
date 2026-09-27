@@ -100,12 +100,14 @@ export async function createJob(
     uploadId?: Id<"uploads">;
     batchId?: string;
     outfitIds?: Id<"outfits">[];
+    serviceId?: Doc<"jobs">["serviceId"];
   },
 ): Promise<Id<"jobs">> {
   const now = Date.now();
   return ctx.db.insert("jobs", {
     userId: user._id,
     type: input.type,
+    ...(input.serviceId ? { serviceId: input.serviceId } : {}),
     status: "queued",
     steps: input.steps.map((step) => ({
       key: step.key,

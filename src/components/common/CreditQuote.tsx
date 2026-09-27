@@ -7,7 +7,8 @@ import { cn } from "@/lib/cn";
 
 type QuoteRequest =
   | { kind: "extract"; items: number }
-  | { kind: "render"; quality: "standard" | "hq"; count: number; outfits?: number };
+  | { kind: "render"; quality: "standard" | "hq"; count: number; outfits?: number }
+  | { kind: "groom"; quality: "standard" | "hq" };
 
 export function useCreditQuote(request: QuoteRequest | null) {
   return useQuery(
