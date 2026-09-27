@@ -65,7 +65,7 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
   const [jobId, setJobId] = useState<Id<"jobs"> | null>(null);
   const job = useQuery(api.jobs.get, jobId ? { jobId } : "skip");
   const canShare = Boolean(me?.balance.features.includes("sharing"));
-  const canGroom = me?.prefs.presentation === "masculine";
+  const canGroom = Boolean(me);
   const groomTarget = renders?.find((r) => r._id === groomRenderId);
 
   async function markWornToday() {

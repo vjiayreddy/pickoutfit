@@ -184,13 +184,16 @@ export function renderPrompt(input: RenderPromptInput): string {
     .join("\n");
 }
 
+export type GroomSourceKind = "avatar" | "try_on";
+
 export type GroomPromptInput = {
   hair: HairStyle;
   beard: BeardStyle;
   custom?: string;
+  sourceKind?: GroomSourceKind;
 };
 
-/** Second-pass gpt-image-2 edit: restyle hair/beard on a finished try-on, keep outfit intact. */
+/** Hair/beard edit. Avatar photos and finished try-ons both keep clothing and identity. */
 export function groomPrompt(input: GroomPromptInput): string {
   const hairPhrase = HAIR_PHRASES[input.hair];
   const beardPhrase = BEARD_PHRASES[input.beard];
@@ -200,8 +203,13 @@ export function groomPrompt(input: GroomPromptInput): string {
   const custom = input.custom?.trim();
   if (custom) changes.push(`Additional styling notes: ${custom}`);
 
+  const opener =
+    input.sourceKind === "avatar"
+      ? "Image 1 is a photo of one person."
+      : "Image 1 is a finished full-body outfit try-on photo of one person.";
+
   return [
-    "Image 1 is a finished full-body outfit try-on photo of one person.",
+    opener,
     "",
     "Edit image 1 only. Keep the exact same person, face structure, skin tone, body proportions, pose, camera framing, lighting, background, and every item of clothing and accessories exactly as shown.",
     "Do not add, remove, restyle, or recolour any garments or accessories.",

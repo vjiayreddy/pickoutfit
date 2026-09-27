@@ -16,7 +16,7 @@ import {
   startRenderJob,
   toRenderView,
 } from "./model/renders";
-import { vBeardStyle, vHairStyle, vRenderQuality } from "./shared/validators";
+import { vBeardStyle, vHairStyle, vRenderKind, vRenderQuality, vServiceId } from "./shared/validators";
 import { vItemSummary, vOutfitView, vPaginated, vRenderView } from "./views";
 
 /**
@@ -92,18 +92,48 @@ export const listMine = query({
 export const get = query({
   args: { renderId: v.id("renders") },
   returns: v.union(
-    v.object({ render: vRenderView, outfit: vOutfitView }),
+    v.object({ render: vRenderView, outfit: v.union(vOutfitView, v.null()) }),
     v.null(),
   ),
   handler: async (ctx, { renderId }) => {
     const user = await requireUser(ctx);
     const render = await ctx.db.get(renderId);
     if (!render || render.userId !== user._id) return null;
-    const outfit = await ctx.db.get(render.outfitId);
-    if (!outfit) return null;
+    const outfit = render.outfitId ? await ctx.db.get(render.outfitId) : null;
     return {
-      render: await toRenderView(ctx, render, outfit.name),
-      outfit: await toOutfitView(ctx, outfit),
+      render: await toRenderView(ctx, render, outfit?.name),
+      outfit: outfit ? await toOutfitView(ctx, outfit) : null,
+    };
+  },
+});
+
+/** Service pages: newest grooming previews, optionally for one service. */
+export const listByKind = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    kind: vRenderKind,
+    serviceId: v.optional(vServiceId),
+  },
+  returns: vPaginated(vRenderView),
+  handler: async (ctx, { paginationOpts, kind, serviceId }) => {
+    const user = await requireUser(ctx);
+    const result = serviceId
+      ? await ctx.db
+          .query("renders")
+          .withIndex("by_user_kind_service", (q) =>
+            q.eq("userId", user._id).eq("kind", kind).eq("serviceId", serviceId),
+          )
+          .order("desc")
+          .paginate(paginationOpts)
+      : await ctx.db
+          .query("renders")
+          .withIndex("by_user_kind", (q) => q.eq("userId", user._id).eq("kind", kind))
+          .order("desc")
+          .paginate(paginationOpts);
+    return {
+      page: await Promise.all(result.page.map((render) => toRenderView(ctx, render))),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
     };
   },
 });
@@ -116,6 +146,28 @@ export const regenerate = mutation({
     const user = await requireOnboarded(ctx);
     const render = await requireRender(ctx, user, renderId);
     await assertJobFinished(ctx, render.jobId, "retry");
+    if ((render.kind ?? "try_on") === "groom") {
+      if (!render.grooming) {
+        throw appError("INVALID_INPUT", "That look has no style to redo.");
+      }
+      const result = await startGroomJob(ctx, user, {
+        source: render.parentRenderId
+          ? { type: "render", renderId: render.parentRenderId }
+          : { type: "avatar", avatarId: render.avatarId },
+        hair: render.grooming.hair,
+        beard: render.grooming.beard,
+        custom: render.grooming.custom,
+        quality: render.quality,
+        serviceId:
+          render.serviceId === "hairstyle" || render.serviceId === "beard"
+            ? render.serviceId
+            : undefined,
+      });
+      return { jobId: result.jobId, renderId: result.renderId };
+    }
+    if (!render.outfitId) {
+      throw appError("INVALID_INPUT", "That try-on has no outfit to redo.");
+    }
     const result = await startRenderJob(ctx, user, {
       outfitIds: [render.outfitId],
       avatarId: render.avatarId,
@@ -136,19 +188,39 @@ export const regenerate = mutation({
  */
 export const groom = mutation({
   args: {
-    renderId: v.id("renders"),
+    /** Kept so the post-try-on sheet can pass a render id directly. */
+    renderId: v.optional(v.id("renders")),
+    source: v.optional(
+      v.union(
+        v.object({ type: v.literal("render"), renderId: v.id("renders") }),
+        v.object({
+          type: v.literal("avatar"),
+          avatarId: v.optional(v.id("avatars")),
+        }),
+      ),
+    ),
     hair: vHairStyle,
     beard: vBeardStyle,
     custom: v.optional(v.string()),
+    quality: v.optional(vRenderQuality),
+    serviceId: v.optional(vServiceId),
   },
   returns: v.object({ jobId: v.id("jobs"), renderId: v.id("renders") }),
   handler: async (ctx, args) => {
     const user = await requireOnboarded(ctx);
+    const source =
+      args.source ??
+      (args.renderId ? { type: "render" as const, renderId: args.renderId } : null);
+    if (!source) {
+      throw appError("INVALID_INPUT", "Choose a photo to style.");
+    }
     return startGroomJob(ctx, user, {
-      parentRenderId: args.renderId,
+      source,
       hair: args.hair,
       beard: args.beard,
       custom: args.custom,
+      quality: args.quality,
+      serviceId: args.serviceId,
     });
   },
 });
@@ -208,11 +280,17 @@ export const getShared = query({
     if (!render || render.status !== "done" || !render.storageId) return null;
     const url = await ctx.storage.getUrl(render.storageId);
     if (!url) return null;
-    const outfit = await ctx.db.get(render.outfitId);
+    const outfit = render.outfitId ? await ctx.db.get(render.outfitId) : null;
     const layered = outfit ? await layeredItems(ctx, outfit.slots) : [];
+    const serviceLabel =
+      render.serviceId === "hairstyle"
+        ? "Hairstyle"
+        : render.serviceId === "beard"
+          ? "Beard"
+          : "Look";
     return {
       url,
-      outfitName: outfit?.name ?? "Outfit",
+      outfitName: outfit?.name ?? serviceLabel,
       items: await Promise.all(
         layered.map(({ item }) => toItemSummary(ctx, item)),
       ),

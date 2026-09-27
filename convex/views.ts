@@ -6,12 +6,19 @@ import {
   vDetectedItem,
   vFit,
   vFormality,
+  vBeardGoal,
+  vBeardNow,
+  vBudget,
   vGrooming,
+  vHairGoal,
+  vHairLength,
+  vHairTexture,
   vItemStatus,
   vOutfitSlots,
   vRenderKind,
   vRenderQuality,
   vSeason,
+  vServiceId,
 } from "./shared/validators";
 
 /**
@@ -86,7 +93,9 @@ export type OutfitView = Infer<typeof vOutfitView>;
 
 export const vRenderView = v.object({
   _id: v.id("renders"),
-  outfitId: v.id("outfits"),
+  outfitId: v.optional(v.id("outfits")),
+  lookId: v.optional(v.id("looks")),
+  serviceId: v.optional(vServiceId),
   outfitName: v.string(),
   avatarId: v.id("avatars"),
   jobId: v.id("jobs"),
@@ -105,6 +114,18 @@ export const vRenderView = v.object({
   completedAt: v.optional(v.number()),
 });
 export type RenderView = Infer<typeof vRenderView>;
+
+export const vServiceProfileView = v.object({
+  serviceId: vServiceId,
+  budget: vBudget,
+  hairLength: v.optional(vHairLength),
+  texture: v.optional(vHairTexture),
+  hairGoal: v.optional(vHairGoal),
+  beardNow: v.optional(vBeardNow),
+  beardGoal: v.optional(vBeardGoal),
+  updatedAt: v.number(),
+});
+export type ServiceProfileView = Infer<typeof vServiceProfileView>;
 
 export const vAvatarView = v.object({
   _id: v.id("avatars"),

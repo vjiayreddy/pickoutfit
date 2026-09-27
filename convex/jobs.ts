@@ -3,11 +3,12 @@ import type { Doc } from "./_generated/dataModel";
 import { query } from "./_generated/server";
 import { assertOwner, requireUser } from "./lib/auth";
 import { listActive as listActiveJobs, readStepEstimates } from "./model/jobs";
-import { vJobStatus, vJobStep, vJobType, vReservation } from "./shared/validators";
+import { vJobStatus, vJobStep, vJobType, vReservation, vServiceId } from "./shared/validators";
 
 export const vJob = v.object({
   _id: v.id("jobs"),
   type: vJobType,
+  serviceId: v.optional(vServiceId),
   status: vJobStatus,
   steps: v.array(vJobStep),
   progress: v.number(),
@@ -26,6 +27,7 @@ export function toJobView(job: Doc<"jobs">) {
   return {
     _id: job._id,
     type: job.type,
+    ...(job.serviceId ? { serviceId: job.serviceId } : {}),
     status: job.status,
     steps: job.steps,
     progress: job.progress,

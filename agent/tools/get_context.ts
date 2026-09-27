@@ -5,8 +5,11 @@ import { api, convex, serviceArgs } from "../lib/convex";
 export default defineTool({
   description:
     "The user's styling preferences (presentation, fit, colours they avoid, home city), how many " +
-    "avatars they have set up, and their current credit balance. Call this once early in a " +
-    "conversation so your suggestions respect their preferences and you know what renders will cost them.",
+    "avatars they have set up, their hairstyle and beard service profiles (budget, hair, beard), " +
+    "and their current credit balance. Call this once early in a conversation so your suggestions " +
+    "respect their preferences and you know what renders will cost them. When they ask about hair " +
+    "or a beard, mention the grooming services and point them to /services/hairstyle or /services/beard. " +
+    "You cannot start a grooming preview yourself.",
   inputSchema: z.object({}),
   label: { start: () => "Reading preferences" },
   async execute(_input, ctx) {
@@ -14,6 +17,7 @@ export default defineTool({
     return {
       name: context.name,
       prefs: context.prefs,
+      serviceProfiles: context.serviceProfiles,
       avatarCount: context.avatarCount,
       credits: {
         total: context.balance.total,

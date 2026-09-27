@@ -35,6 +35,7 @@ const PRIMARY_NAV = [
   { href: routes.add, label: "Add clothes", icon: Plus },
   { href: routes.outfits, label: "Outfits", icon: LayoutGrid },
   { href: routes.lookbook, label: "Lookbook", icon: Images },
+  { href: routes.services, label: "Services", icon: Sparkles },
   { href: routes.stylist, label: "Stylist", icon: MessageCircle },
 ] as const;
 
@@ -52,6 +53,7 @@ function parentHref(pathname: string): string {
     return routes.outfits;
   }
   if (pathname.startsWith(`${routes.stylist}/`)) return routes.stylist;
+  if (pathname.startsWith(`${routes.services}/`)) return routes.services;
   if (pathname.startsWith(routes.gridDemo)) return routes.add;
   return routes.wardrobe;
 }
@@ -61,6 +63,9 @@ function fallbackTitle(pathname: string): string {
   if (pathname.startsWith(`${routes.wardrobe}/`)) return "Piece";
   if (pathname.startsWith(`${routes.outfits}/`)) return "Outfit";
   if (pathname.startsWith(`${routes.stylist}/`)) return "Chat";
+  if (pathname === routes.service("hairstyle")) return "Hairstyle";
+  if (pathname === routes.service("beard")) return "Beard";
+  if (pathname.startsWith(routes.services)) return "Services";
   if (pathname.startsWith(routes.settings)) return "Settings";
   if (pathname.startsWith(routes.billing)) return "Billing";
   if (pathname.startsWith(routes.admin)) return "Admin";

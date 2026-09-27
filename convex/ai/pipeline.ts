@@ -343,6 +343,9 @@ export const renderContext = internalQuery({
   handler: async (ctx, { renderId }) => {
     const render = await ctx.db.get(renderId);
     if (!render) throw appError("NOT_FOUND", "That render no longer exists.");
+    if (!render.outfitId) {
+      throw appError("INVALID_INPUT", "That render is not an outfit try-on.");
+    }
     const [avatar, outfit, user] = await Promise.all([
       ctx.db.get(render.avatarId),
       ctx.db.get(render.outfitId),
@@ -384,6 +387,7 @@ export const groomContext = internalQuery({
       beard: vBeardStyle,
       custom: v.optional(v.string()),
     }),
+    sourceKind: v.union(v.literal("avatar"), v.literal("try_on")),
   }),
   handler: async (ctx, { renderId }) => {
     const render = await ctx.db.get(renderId);
@@ -400,6 +404,7 @@ export const groomContext = internalQuery({
       quality: render.quality,
       sourceStorageId,
       grooming: render.grooming,
+      sourceKind: render.parentRenderId ? ("try_on" as const) : ("avatar" as const),
     };
   },
 });

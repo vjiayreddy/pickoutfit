@@ -19,6 +19,7 @@ import {
   type GroomingSelection,
 } from "../shared/grooming";
 import { GROOM_STEPS, RENDER_STEPS } from "../shared/jobs";
+import { SERVICES, type ServiceId } from "../shared/services";
 import type { RenderView } from "../views";
 import { resolveAvatar } from "./avatars";
 import { hasCurrentFeature, reserve, shortfallError } from "./credits";
@@ -32,6 +33,7 @@ import {
   setWorkflowId,
   type StepInput,
 } from "./jobs";
+import { recordAvatarLook } from "./looks";
 import { requireOutfit, validateSlots } from "./outfits";
 import { bumpDailyStats } from "./stats";
 
@@ -42,12 +44,18 @@ export async function toRenderView(
   render: Doc<"renders">,
   outfitName?: string,
 ): Promise<RenderView> {
+  const outfit = render.outfitId ? await ctx.db.get(render.outfitId) : null;
   const name =
-    outfitName ?? (await ctx.db.get(render.outfitId))?.name ?? "Outfit";
+    outfitName ??
+    outfit?.name ??
+    (render.serviceId ? SERVICES[render.serviceId].label : undefined) ??
+    "Look";
   const kind = render.kind ?? "try_on";
   return {
     _id: render._id,
-    outfitId: render.outfitId,
+    ...(render.outfitId ? { outfitId: render.outfitId } : {}),
+    ...(render.lookId ? { lookId: render.lookId } : {}),
+    ...(render.serviceId ? { serviceId: render.serviceId } : {}),
     outfitName: name,
     avatarId: render.avatarId,
     jobId: render.jobId,
@@ -278,16 +286,23 @@ export async function startRenderJob(
   return { jobId, renderIds };
 }
 
+export type GroomSource =
+  | { type: "render"; renderId: Id<"renders"> }
+  | { type: "avatar"; avatarId?: Id<"avatars"> };
+
 export type StartGroomInput = {
-  parentRenderId: Id<"renders">;
+  source: GroomSource;
   hair: GroomingSelection["hair"];
   beard: GroomingSelection["beard"];
   custom?: string;
+  /** Used when the source is an avatar. A try-on source keeps the parent's quality. */
+  quality?: RenderQuality;
+  serviceId?: ServiceId;
 };
 
 /**
- * Second-pass hair/beard edit on a finished try-on. Creates a new `renders` variant;
- * the parent look stays. Masculine presentation only.
+ * Hair/beard edit on a finished try-on or directly on the fitting photo.
+ * Beard changes require a men's wardrobe. Hair is limited to that presentation's set.
  */
 export async function startGroomJob(
   ctx: MutationCtx,
@@ -295,40 +310,31 @@ export async function startGroomJob(
   input: StartGroomInput,
 ): Promise<{ jobId: Id<"jobs">; renderId: Id<"renders"> }> {
   const billed = await ensureFreshBilling(ctx, user);
-  if (billed.prefs.presentation !== "masculine") {
-    throw appError(
-      "INVALID_INPUT",
-      "Hair & beard styling is available for men's presentation.",
-    );
-  }
-
   const custom = normalizeGroomCustom(input.custom);
   const selection: GroomingSelection = {
     hair: input.hair,
     beard: input.beard,
     ...(custom ? { custom } : {}),
   };
-  const invalid = validateGroomingSelection(selection);
+  const invalid = validateGroomingSelection(selection, billed.prefs.presentation);
   if (invalid) throw appError("INVALID_INPUT", invalid);
 
-  const parent = await requireRender(ctx, billed, input.parentRenderId);
-  if (parent.status !== "done" || !parent.storageId) {
-    throw appError(
-      "INVALID_INPUT",
-      "Wait for the try-on to finish before styling hair & beard.",
-    );
-  }
-  await assertJobFinished(ctx, parent.jobId, "retry");
-
-  if (parent.quality === "hq" && !hasCurrentFeature(billed, "hq_renders")) {
+  const resolved = await resolveGroomSource(ctx, billed, input);
+  if (resolved.quality === "hq" && !hasCurrentFeature(billed, "hq_renders")) {
     throw appError("FEATURE_LOCKED", "HQ renders are part of the Plus plan.", {
       feature: "hq_renders",
     });
   }
 
-  const needed = renderCreditCost(parent.quality, 1, 1);
+  const needed = renderCreditCost(resolved.quality, 1, 1);
   await assertBelowJobLimit(ctx, billed._id);
   assertAffordable(billed, needed);
+
+  const serviceId = groomServiceId(input.serviceId, selection);
+  const lookId =
+    input.source.type === "avatar"
+      ? await recordAvatarLook(ctx, billed._id, resolved.avatarId, selection)
+      : undefined;
 
   const stepKey = `${GROOM_STEPS.groom}:0`;
   const steps: StepInput[] = [
@@ -339,7 +345,8 @@ export async function startGroomJob(
   const jobId = await createJob(ctx, billed, {
     type: "groom",
     steps,
-    outfitIds: [parent.outfitId],
+    serviceId,
+    outfitIds: resolved.outfitId ? [resolved.outfitId] : undefined,
   });
 
   const result = await reserve(ctx, billed, needed, jobId);
@@ -351,17 +358,19 @@ export async function startGroomJob(
 
   const renderId = await ctx.db.insert("renders", {
     userId: billed._id,
-    outfitId: parent.outfitId,
-    avatarId: parent.avatarId,
+    ...(resolved.outfitId ? { outfitId: resolved.outfitId } : {}),
+    ...(lookId ? { lookId } : {}),
+    avatarId: resolved.avatarId,
     jobId,
-    quality: parent.quality,
+    quality: resolved.quality,
     kind: "groom",
-    parentRenderId: parent._id,
-    sourceStorageId: parent.storageId,
+    serviceId,
+    ...(resolved.parentRenderId ? { parentRenderId: resolved.parentRenderId } : {}),
+    sourceStorageId: resolved.sourceStorageId,
     grooming: selection,
     status: "pending",
     prompt: "",
-    creditsCharged: CREDIT_COSTS.render[parent.quality],
+    creditsCharged: CREDIT_COSTS.render[resolved.quality],
     createdAt: Date.now(),
   });
 
@@ -381,6 +390,53 @@ export async function startGroomJob(
   );
   await setWorkflowId(ctx, jobId, workflowId);
   return { jobId, renderId };
+}
+
+function groomServiceId(
+  requested: ServiceId | undefined,
+  selection: GroomingSelection,
+): ServiceId {
+  if (requested === "hairstyle" || requested === "beard") return requested;
+  if (selection.beard !== "keep" && selection.hair === "keep") return "beard";
+  return "hairstyle";
+}
+
+async function resolveGroomSource(
+  ctx: MutationCtx,
+  user: Doc<"users">,
+  input: StartGroomInput,
+): Promise<{
+  sourceStorageId: Id<"_storage">;
+  avatarId: Id<"avatars">;
+  quality: RenderQuality;
+  outfitId?: Id<"outfits">;
+  parentRenderId?: Id<"renders">;
+}> {
+  if (input.source.type === "avatar") {
+    const avatar = await resolveAvatar(ctx, user, input.source.avatarId);
+    const quality = input.quality ?? "standard";
+    return {
+      sourceStorageId: avatar.storageId,
+      avatarId: avatar._id,
+      quality,
+    };
+  }
+
+  const parent = await requireRender(ctx, user, input.source.renderId);
+  if (parent.status !== "done" || !parent.storageId) {
+    throw appError(
+      "INVALID_INPUT",
+      "Wait for the try-on to finish before styling hair & beard.",
+    );
+  }
+  await assertJobFinished(ctx, parent.jobId, "retry");
+  return {
+    sourceStorageId: parent.storageId,
+    avatarId: parent.avatarId,
+    quality: parent.quality,
+    outfitId: parent.outfitId,
+    parentRenderId: parent._id,
+  };
 }
 
 /** Keeps the stylist thread in sync: one proposal row per outfit, carrying the render job. */

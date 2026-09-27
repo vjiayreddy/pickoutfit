@@ -6,28 +6,38 @@ import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
+import { optionalServicesFor } from "@convex/shared/services";
 import { FITS, type Fit, type Presentation } from "@convex/shared/wardrobe";
 import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
 import { routes } from "@/lib/routes";
 
-type Prefs = {
+export type OnboardingPrefs = {
   presentation: Presentation;
   fit: Fit;
   avoidColours: string[];
   homeCity?: string;
 };
 
+export type GroomingInterest = "hairstyle" | "beard";
+
 export function PreferencesStep({
   prefs,
+  interests,
+  onInterests,
   onBack,
+  onContinue,
 }: {
-  prefs: Prefs;
-  onBack: (draft: Prefs) => void;
+  prefs: OnboardingPrefs;
+  interests: GroomingInterest[];
+  onInterests: (interests: GroomingInterest[]) => void;
+  onBack: (draft: OnboardingPrefs) => void;
+  onContinue: (draft: OnboardingPrefs) => void;
 }) {
   const router = useRouter();
   const updatePrefs = useMutation(api.users.updatePrefs);
   const completeOnboarding = useMutation(api.users.completeOnboarding);
+  const wantsGrooming = interests.length > 0;
   const cityId = useId();
   const coloursId = useId();
 
@@ -51,23 +61,47 @@ export function PreferencesStep({
     setColourDraft("");
   }
 
-  async function handleFinish() {
+  function draftPrefs(): OnboardingPrefs {
+    return {
+      presentation: presentation ?? "neutral",
+      fit,
+      avoidColours,
+      homeCity: homeCity || undefined,
+    };
+  }
+
+  function toggleInterest(id: GroomingInterest) {
+    onInterests(
+      interests.includes(id) ? interests.filter((entry) => entry !== id) : [...interests, id],
+    );
+  }
+
+  function choosePresentation(value: "masculine" | "feminine") {
+    setPresentation(value);
+    if (value !== "masculine") onInterests(interests.filter((entry) => entry !== "beard"));
+  }
+
+  async function handleNext() {
     if (!presentation) {
       setError("Choose Men’s wardrobe or Women’s wardrobe to finish setup.");
       return;
     }
     setPending(true);
     setError(null);
+    const city = homeCity.trim();
+    const next = {
+      presentation,
+      fit,
+      avoidColours,
+      ...(city ? { homeCity: city } : {}),
+    };
     try {
-      const city = homeCity.trim();
-      await updatePrefs({
-        prefs: {
-          presentation,
-          fit,
-          avoidColours,
-          ...(city ? { homeCity: city } : {}),
-        },
-      });
+      await updatePrefs({ prefs: next });
+      if (wantsGrooming) {
+        onContinue({ ...next });
+        setPending(false);
+        return;
+      }
       await completeOnboarding({});
       toast.success("You're all set. Let's fill that wardrobe.");
       router.replace(routes.wardrobe);
@@ -95,7 +129,7 @@ export function PreferencesStep({
               <button
                 key={option.value}
                 type="button"
-                onClick={() => setPresentation(option.value)}
+                onClick={() => choosePresentation(option.value)}
                 className={cn(
                   "h-10 rounded-full px-5 text-sm font-medium transition",
                   presentation === option.value
@@ -181,6 +215,32 @@ export function PreferencesStep({
           />
           <p className="text-sm text-mute">Optional — for weather-aware styling later.</p>
         </div>
+
+        <fieldset disabled={pending} className="space-y-3 sm:col-span-2">
+          <legend className="text-sm font-medium">What else should we help with?</legend>
+          <p className="text-sm text-mute">
+            Optional. Skip this and you can turn a service on later in settings.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {optionalServicesFor(presentation ?? "neutral").map((service) => {
+              const selected = interests.includes(service.id as GroomingInterest);
+              return (
+                <button
+                  key={service.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => toggleInterest(service.id as GroomingInterest)}
+                  className={cn(
+                    "h-10 rounded-full px-4 text-sm font-medium transition",
+                    selected ? "bg-ink text-canvas" : "bg-soft-cloud text-ink",
+                  )}
+                >
+                  {service.label}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
       </div>
 
       {error ? (
@@ -193,14 +253,7 @@ export function PreferencesStep({
         <button
           type="button"
           className="inline-flex h-12 items-center gap-2 rounded-full px-4 text-sm font-medium text-mute"
-          onClick={() =>
-            onBack({
-              presentation: presentation ?? "neutral",
-              fit,
-              avoidColours,
-              homeCity: homeCity || undefined,
-            })
-          }
+          onClick={() => onBack(draftPrefs())}
           disabled={pending}
         >
           <ArrowLeft className="size-4" />
@@ -209,7 +262,7 @@ export function PreferencesStep({
         <button
           type="button"
           className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-ink px-8 text-base font-medium text-canvas transition active:scale-95 active:opacity-50 disabled:opacity-50"
-          onClick={handleFinish}
+          onClick={() => void handleNext()}
           disabled={pending || !presentation}
         >
           {pending ? (
@@ -217,21 +270,14 @@ export function PreferencesStep({
           ) : (
             <Check className="size-4" />
           )}
-          Finish setup
+          {wantsGrooming ? "Continue" : "Finish setup"}
         </button>
       </div>
       <div className="fixed inset-x-0 bottom-0 z-20 flex gap-2 border-t border-hairline bg-canvas p-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:hidden">
         <button
           type="button"
           className="inline-flex h-12 items-center gap-2 rounded-full px-4 text-sm font-medium text-mute"
-          onClick={() =>
-            onBack({
-              presentation: presentation ?? "neutral",
-              fit,
-              avoidColours,
-              homeCity: homeCity || undefined,
-            })
-          }
+          onClick={() => onBack(draftPrefs())}
           disabled={pending}
         >
           <ArrowLeft className="size-4" />
@@ -240,11 +286,11 @@ export function PreferencesStep({
         <button
           type="button"
           className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-ink px-8 text-base font-medium text-canvas disabled:opacity-50"
-          onClick={handleFinish}
+          onClick={() => void handleNext()}
           disabled={pending || !presentation}
         >
           {pending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-          Finish setup
+          {wantsGrooming ? "Continue" : "Finish setup"}
         </button>
       </div>
       <div className="h-20 lg:hidden" aria-hidden />

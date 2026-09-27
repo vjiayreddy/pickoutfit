@@ -3,6 +3,18 @@ import { FEATURES, PLAN_IDS, RENDER_QUALITIES } from "./credits";
 import { BEARD_STYLES, HAIR_STYLES, RENDER_KINDS } from "./grooming";
 import { JOB_STATUSES, JOB_TYPES, STEP_STATUSES } from "./jobs";
 import {
+  BEARD_GOALS,
+  BEARD_NOW,
+  BUDGET_TIERS,
+  HAIR_GOALS,
+  HAIR_LENGTHS,
+  HAIR_TEXTURES,
+  SERVICE_IDS,
+  STYLE_ORIGINS,
+  STYLE_REF_SERVICE_IDS,
+  STYLE_REF_STATUSES,
+} from "./services";
+import {
   CATEGORIES,
   FITS,
   FORMALITY,
@@ -39,6 +51,20 @@ export const vRenderQuality = literals(RENDER_QUALITIES);
 export const vRenderKind = literals(RENDER_KINDS);
 export const vHairStyle = literals(HAIR_STYLES);
 export const vBeardStyle = literals(BEARD_STYLES);
+export const vServiceId = literals(SERVICE_IDS);
+export const vStyleRefServiceId = literals(STYLE_REF_SERVICE_IDS);
+export const vBudgetTier = literals(BUDGET_TIERS);
+export const vBudget = v.object({
+  tier: vBudgetTier,
+  monthlyInr: v.optional(v.number()),
+});
+export const vHairLength = literals(HAIR_LENGTHS);
+export const vHairTexture = literals(HAIR_TEXTURES);
+export const vHairGoal = literals(HAIR_GOALS);
+export const vBeardNow = literals(BEARD_NOW);
+export const vBeardGoal = literals(BEARD_GOALS);
+export const vStyleOrigin = literals(STYLE_ORIGINS);
+export const vStyleRefStatus = literals(STYLE_REF_STATUSES);
 
 export const vGrooming = v.object({
   hair: vHairStyle,

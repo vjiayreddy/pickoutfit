@@ -142,6 +142,45 @@ export async function purgeUserBatch(
 ): Promise<boolean> {
   let budget = PURGE_BATCH;
 
+  const profiles = await ctx.db
+    .query("serviceProfiles")
+    .withIndex("by_user_service", (q) => q.eq("userId", userId))
+    .take(budget);
+  for (const profile of profiles) await ctx.db.delete(profile._id);
+  budget -= profiles.length;
+  if (budget <= 0) return false;
+
+  const styleRefs = await ctx.db
+    .query("styleRefs")
+    .withIndex("by_user_service", (q) => q.eq("userId", userId))
+    .take(budget);
+  for (const ref of styleRefs) {
+    await deleteFile(ctx, ref.storageId);
+    const links = await ctx.db
+      .query("lookRefs")
+      .withIndex("by_styleRef", (q) => q.eq("styleRefId", ref._id))
+      .take(8);
+    for (const link of links) await ctx.db.delete(link._id);
+    await ctx.db.delete(ref._id);
+  }
+  budget -= styleRefs.length;
+  if (budget <= 0) return false;
+
+  const looks = await ctx.db
+    .query("looks")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .take(budget);
+  for (const look of looks) {
+    const refs = await ctx.db
+      .query("lookRefs")
+      .withIndex("by_look", (q) => q.eq("lookId", look._id))
+      .take(8);
+    for (const ref of refs) await ctx.db.delete(ref._id);
+    await ctx.db.delete(look._id);
+  }
+  budget -= looks.length;
+  if (budget <= 0) return false;
+
   const renders = await ctx.db
     .query("renders")
     .withIndex("by_user", (q) => q.eq("userId", userId))
