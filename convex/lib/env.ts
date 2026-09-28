@@ -9,6 +9,8 @@ export const SERVER_ENV_KEYS = [
   "STRIPE_WEBHOOK_SECRET",
   "STRIPE_PRICE_PRO",
   "STRIPE_PRICE_PLUS",
+  "OWNER_EMAIL",
+  "OWNER_PASSWORD_HASH",
 ] as const;
 
 export type ServerEnvKey = (typeof SERVER_ENV_KEYS)[number];

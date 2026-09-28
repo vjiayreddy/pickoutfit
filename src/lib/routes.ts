@@ -22,4 +22,7 @@ export const routes = {
   admin: "/admin",
   stylist: "/stylist",
   thread: (id: string) => `/stylist/${id}`,
+  cart: "/cart",
+  checkout: "/checkout",
+  checkoutComplete: "/checkout/complete",
 } as const;

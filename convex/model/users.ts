@@ -221,6 +221,22 @@ export async function purgeUserBatch(
   budget -= shopLookups.length;
   if (budget <= 0) return false;
 
+  const cartItems = await ctx.db
+    .query("cartItems")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .take(budget);
+  for (const line of cartItems) await ctx.db.delete(line._id);
+  budget -= cartItems.length;
+  if (budget <= 0) return false;
+
+  const carts = await ctx.db
+    .query("carts")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .take(budget);
+  for (const cart of carts) await ctx.db.delete(cart._id);
+  budget -= carts.length;
+  if (budget <= 0) return false;
+
   const outfits = await ctx.db
     .query("outfits")
     .withIndex("by_user", (q) => q.eq("userId", userId))

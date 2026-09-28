@@ -28,8 +28,18 @@ export function formatPercent(fraction: number, digits = 0): string {
   return `${(fraction * 100).toFixed(digits)}%`;
 }
 
+const inr = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 0,
+});
+
 export function formatUsd(amount: number): string {
   return usd.format(amount);
+}
+
+export function formatInr(amount: number): string {
+  return inr.format(amount);
 }
 
 /** For unit costs that are fractions of a cent, e.g. $0.033. */

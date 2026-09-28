@@ -3,7 +3,7 @@
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import Link from "next/link";
 import { Loader2, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -17,6 +17,7 @@ import {
   type BeardStyle,
   type HairStyle,
 } from "@convex/shared/grooming";
+import { categoryForService } from "@convex/shared/products";
 import {
   isServiceAvailable,
   isServiceId,
@@ -28,6 +29,7 @@ import { CreditQuote, useCreditQuote } from "@/components/common/CreditQuote";
 import { GroomingPicker } from "@/components/renders/GroomingPicker";
 import { reportError, toClientError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
+import { ProductRail } from "@/components/shop/ProductRail";
 import { routes } from "@/lib/routes";
 
 const PAGE_SIZE = 8;
@@ -128,16 +130,34 @@ export function ServicesHub() {
   );
 }
 
+function ServiceWithProducts({
+  serviceId,
+  children,
+}: {
+  serviceId: string;
+  children: ReactNode;
+}) {
+  const category = categoryForService(serviceId);
+  return (
+    <div className="space-y-10">
+      {children}
+      {category ? <ProductRail category={category} /> : null}
+    </div>
+  );
+}
+
 export function ServiceStudio({ serviceId }: { serviceId: string }) {
   const me = useQuery(api.users.me);
   const profiles = useQuery(api.services.listProfiles);
   const comingSoon = COMING_SOON_STUDIOS[serviceId];
   if (comingSoon) {
     return (
-      <div className="space-y-3">
-        <h1 className="font-display text-4xl uppercase">{comingSoon.title}</h1>
-        <p className="text-sm text-mute">Coming soon. {comingSoon.blurb}</p>
-      </div>
+      <ServiceWithProducts serviceId={serviceId}>
+        <div className="space-y-3">
+          <h1 className="font-display text-4xl uppercase">{comingSoon.title}</h1>
+          <p className="text-sm text-mute">Coming soon. {comingSoon.blurb}</p>
+        </div>
+      </ServiceWithProducts>
     );
   }
   if (!isServiceId(serviceId) || (serviceId !== "hairstyle" && serviceId !== "beard" && serviceId !== "skincare")) {
@@ -157,17 +177,19 @@ export function ServiceStudio({ serviceId }: { serviceId: string }) {
   const service = SERVICES[serviceId];
   if (service.status !== "live" || !isServiceAvailable(serviceId, me)) {
     return (
-      <div className="space-y-3">
-        <h1 className="font-display text-4xl uppercase">{service.label}</h1>
-        <p className="text-sm text-mute">
-          {service.status === "coming_soon"
-            ? "Coming soon. Advice and products will live here, with no photo edit."
-            : "This service is not part of your wardrobe."}
-        </p>
-        <Link href={routes.services} className="text-sm font-medium underline">
-          All services
-        </Link>
-      </div>
+      <ServiceWithProducts serviceId={serviceId}>
+        <div className="space-y-3">
+          <h1 className="font-display text-4xl uppercase">{service.label}</h1>
+          <p className="text-sm text-mute">
+            {service.status === "coming_soon"
+              ? "Coming soon. Advice and products will live here, with no photo edit."
+              : "This service is not part of your wardrobe."}
+          </p>
+          <Link href={routes.services} className="text-sm font-medium underline">
+            All services
+          </Link>
+        </div>
+      </ServiceWithProducts>
     );
   }
   if (serviceId !== "hairstyle" && serviceId !== "beard") {

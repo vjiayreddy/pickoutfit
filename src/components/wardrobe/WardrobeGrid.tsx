@@ -13,6 +13,7 @@ import {
 import { ChipRail, FilterChip } from "@/components/common/ChipRail";
 import { StickyAction } from "@/components/common/StickyAction";
 import { ItemTile } from "@/components/wardrobe/ItemTile";
+import { ProductRail } from "@/components/shop/ProductRail";
 import { SeedDemoWardrobe } from "@/components/wardrobe/SeedDemoWardrobe";
 import { pluralize } from "@/lib/format";
 import { routes } from "@/lib/routes";
@@ -172,6 +173,8 @@ export function WardrobeGrid() {
           </ul>
         </>
       )}
+      <ProductRail category="clothes" />
+      <ProductRail category="accessories" />
       <StickyAction href={routes.add}>
         <Plus className="size-4" />
         Add clothes

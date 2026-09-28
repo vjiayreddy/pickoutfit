@@ -18,6 +18,7 @@ import {
   Plus,
   Scissors,
   Settings,
+  ShoppingBag,
   Sparkles,
   Shield,
   Shirt,
@@ -88,6 +89,7 @@ function parentHref(pathname: string): string {
   if (pathname.startsWith(`${routes.stylist}/`)) return routes.stylist;
   if (pathname.startsWith(`${routes.services}/`)) return routes.services;
   if (pathname.startsWith(routes.gridDemo)) return routes.add;
+  if (pathname.startsWith(routes.checkout)) return routes.cart;
   return routes.wardrobe;
 }
 
@@ -106,6 +108,9 @@ function fallbackTitle(pathname: string): string {
   if (pathname.startsWith(routes.settings)) return "Settings";
   if (pathname.startsWith(routes.billing)) return "Billing";
   if (pathname.startsWith(routes.admin)) return "Admin";
+  if (pathname.startsWith(routes.checkoutComplete)) return "Order";
+  if (pathname.startsWith(routes.checkout)) return "Checkout";
+  if (pathname.startsWith(routes.cart)) return "Bag";
   if (pathname.startsWith(routes.gridDemo)) return "Grid demo";
   return "WardrobeAI";
 }
@@ -145,6 +150,7 @@ function AppFrame({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const me = useQuery(api.users.me);
+  const cartCount = useQuery(api.cart.count, me ? {} : "skip");
   const onboarded = Boolean(me?.onboardedAt);
   const panel = useStylistPanel();
   const headerTitle = useAppHeaderTitle();
@@ -242,6 +248,20 @@ function AppFrame({ children }: { children: ReactNode }) {
                   >
                     {me.balance.total} credits
                   </Link>
+                  {onboarded ? (
+                    <Link
+                      href={routes.cart}
+                      aria-label={cartCount ? `Bag, ${cartCount} items` : "Bag"}
+                      className="relative flex size-10 items-center justify-center rounded-full bg-soft-cloud"
+                    >
+                      <ShoppingBag className="size-4" aria-hidden />
+                      {cartCount ? (
+                        <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink px-1 text-[9px] font-medium text-canvas">
+                          {cartCount}
+                        </span>
+                      ) : null}
+                    </Link>
+                  ) : null}
                   {onboarded ? <ActivityPopover /> : null}
                   {showChrome ? null : (
                     <button

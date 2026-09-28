@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { vProductCategory, vOrderStatus } from "./shared/products";
 import { vShopOffer } from "./shared/shop";
 import {
   vBeardGoal,
@@ -27,6 +28,7 @@ import {
   vStyleRefServiceId,
   vStyleRefStatus,
   vTokenUsage,
+  vPresentation,
 } from "./shared/validators";
 
 export const EMBEDDING_DIMENSIONS = 1536;
@@ -351,6 +353,69 @@ export default defineSchema({
   })
     .index("by_look", ["lookId"])
     .index("by_styleRef", ["styleRefId"]),
+
+  /** Platform catalog. One row per sellable product, shared across services. */
+  products: defineTable({
+    category: vProductCategory,
+    presentation: vPresentation,
+    name: v.string(),
+    priceInr: v.number(),
+    storageId: v.optional(v.id("_storage")),
+    active: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_category_and_presentation", ["category", "presentation"])
+    .index("by_createdAt", ["createdAt"]),
+
+  /** One open bag per user. Checkout deletes it. */
+  carts: defineTable({
+    userId: v.id("users"),
+    updatedAt: v.number(),
+  }).index("by_userId", ["userId"]),
+
+  cartItems: defineTable({
+    cartId: v.id("carts"),
+    userId: v.id("users"),
+    productId: v.id("products"),
+    quantity: v.number(),
+    priceInr: v.number(),
+    name: v.string(),
+  })
+    .index("by_cartId", ["cartId"])
+    .index("by_cartId_and_productId", ["cartId", "productId"])
+    .index("by_userId", ["userId"]),
+
+  /** Buyer fields are a snapshot so sales history survives account deletion. */
+  orders: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    email: v.string(),
+    phone: v.string(),
+    address: v.string(),
+    city: v.string(),
+    pincode: v.string(),
+    status: vOrderStatus,
+    totalInr: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_status_and_createdAt", ["status", "createdAt"])
+    .index("by_createdAt", ["createdAt"]),
+
+  orderItems: defineTable({
+    orderId: v.id("orders"),
+    productId: v.optional(v.id("products")),
+    name: v.string(),
+    quantity: v.number(),
+    priceInr: v.number(),
+  }).index("by_orderId", ["orderId"]),
+
+  /** Hashed platform-owner session. Not a users row. */
+  ownerSessions: defineTable({
+    tokenHash: v.string(),
+    expiresAt: v.number(),
+  }).index("by_tokenHash", ["tokenHash"]),
 
   /** Running average duration per step prefix ("detect", "extract", "render") for ETAs. */
   stepStats: defineTable({
