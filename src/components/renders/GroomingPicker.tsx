@@ -4,6 +4,7 @@ import {
   BEARD_LABELS,
   BEARD_STYLES,
   HAIR_LABELS,
+  hairReference,
   hairStylesFor,
   type BeardStyle,
   type HairStyle,
@@ -23,6 +24,10 @@ type GroomingPickerProps = {
   onCustom: (custom: string) => void;
   disabled?: boolean;
   hairStyles?: readonly HairStyle[];
+  /** Hairstyle studio: photo cards. The try-on sheet keeps text chips. */
+  variant?: "chips" | "references";
+  /** Photo shown on the "Keep current" card. */
+  keepPreviewUrl?: string | null;
 };
 
 export function GroomingPicker({
@@ -36,10 +41,13 @@ export function GroomingPicker({
   onCustom,
   disabled,
   hairStyles,
+  variant = "chips",
+  keepPreviewUrl,
 }: GroomingPickerProps) {
   const showHair = mode !== "beard";
   const showBeard = mode !== "hairstyle" && presentation === "masculine";
   const hairOptions = hairStyles ?? hairStylesFor(presentation);
+  const useReferences = variant === "references" && showHair;
 
   return (
     <div className="space-y-7">
@@ -48,16 +56,30 @@ export function GroomingPicker({
           <legend className="text-[10px] font-medium tracking-wide text-mute uppercase">
             Hair
           </legend>
-          <div className="flex flex-wrap gap-2">
-            {hairOptions.map((option) => (
-              <Chip
-                key={option}
-                active={hair === option}
-                label={HAIR_LABELS[option]}
-                onClick={() => onHair(option)}
-              />
-            ))}
-          </div>
+          {useReferences ? (
+            <div className="grid grid-cols-2 gap-3 min-[480px]:grid-cols-3 xl:grid-cols-4">
+              {hairOptions.map((option) => (
+                <StyleCard
+                  key={option}
+                  active={hair === option}
+                  label={HAIR_LABELS[option]}
+                  src={option === "keep" ? keepPreviewUrl : hairReference(option)}
+                  onClick={() => onHair(option)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {hairOptions.map((option) => (
+                <Chip
+                  key={option}
+                  active={hair === option}
+                  label={HAIR_LABELS[option]}
+                  onClick={() => onHair(option)}
+                />
+              ))}
+            </div>
+          )}
         </fieldset>
       ) : null}
 
@@ -93,6 +115,37 @@ export function GroomingPicker({
         />
       </fieldset>
     </div>
+  );
+}
+
+function StyleCard({
+  active,
+  label,
+  src,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  src?: string | null;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active} className="min-w-0 text-left">
+      <div className={cn("aspect-square bg-soft-cloud", active && "ring-2 ring-ink ring-inset")}>
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt="" className="h-full w-full object-cover" />
+        ) : null}
+      </div>
+      <span
+        className={cn(
+          "mt-2 flex min-h-10 items-center justify-center rounded-full px-2 py-1 text-center text-xs font-medium leading-4",
+          active ? "bg-ink text-canvas" : "text-ink",
+        )}
+      >
+        {label}
+      </span>
+    </button>
   );
 }
 

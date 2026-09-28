@@ -10,7 +10,7 @@ import { ItemImage } from "@/components/common/ItemImage";
 import { JobStepper } from "@/components/common/JobStepper";
 import { ImportReview, useUploadItems } from "@/components/upload/ImportReview";
 import { cn } from "@/lib/cn";
-import { formatBytes, pluralize } from "@/lib/format";
+import { formatBytes, formatPercent, photoLabel, pluralize } from "@/lib/format";
 import { routes } from "@/lib/routes";
 
 type UploadRow = FunctionReturnType<typeof api.uploads.listBatch>[number];
@@ -44,22 +44,40 @@ export function UploadTile({
   );
   const items = useUploadItems(upload._id) ?? [];
   const blocked = items.filter((item) => item.status === "needsCredits");
+  const label = photoLabel(
+    upload.fileName,
+    items.length > 0
+      ? items.map((item) => item.name)
+      : (upload.candidates ?? []).map((item) => item.name),
+    STATUS_LABEL[upload.status],
+  );
   const stillCosts =
     upload.status !== "done" &&
     upload.status !== "failed" &&
     upload.status !== "awaiting_selection";
+  const scanning = upload.status === "queued" || upload.status === "detecting" || upload.status === "extracting";
+
+  if (scanning) {
+    return (
+      <ScanPanel
+        upload={upload}
+        job={job}
+        label={label}
+      />
+    );
+  }
 
   return (
     <article className="space-y-4 border-b border-hairline pb-6">
       <header className="flex items-center gap-3">
         <ItemImage
           src={upload.url}
-          alt={upload.fileName}
+          alt={label}
           aspect="aspect-square"
           className="size-20 shrink-0"
         />
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-medium">{upload.fileName}</h3>
+          <h3 className="truncate text-sm font-medium">{label}</h3>
           <p className="text-xs text-mute">{formatBytes(upload.sizeBytes)}</p>
         </div>
         <span className="rounded-full bg-soft-cloud px-3 py-1 text-xs font-medium">
@@ -135,6 +153,80 @@ export function UploadTile({
           ) : null}
         </div>
       )}
+    </article>
+  );
+}
+
+const SCAN_COPY: Record<"queued" | "detecting" | "extracting", { title: string; body: string }> = {
+  queued: {
+    title: "Queued.",
+    body: "This photo is waiting for a scan slot. You can leave this page.",
+  },
+  detecting: {
+    title: "Scanning.",
+    body: "Looking for pieces in this photo. You can leave this page — it updates on its own.",
+  },
+  extracting: {
+    title: "Cutting out.",
+    body: "Separating the pieces you kept. You can leave this page — it updates on its own.",
+  },
+};
+
+function ScanPanel({
+  upload,
+  job,
+  label,
+}: {
+  upload: UploadRow["upload"];
+  job: UploadRow["job"];
+  label: string;
+}) {
+  const copy = SCAN_COPY[upload.status as keyof typeof SCAN_COPY];
+  const progress = job?.progress ?? 0;
+  const moving = upload.status === "detecting" || upload.status === "extracting";
+  const named = label !== STATUS_LABEL[upload.status];
+  const progressLabel = named
+    ? label
+    : upload.status === "detecting"
+      ? "Detecting items"
+      : copy.title.replace(/\.$/, "");
+
+  return (
+    <article className="overflow-hidden bg-soft-cloud lg:grid lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]">
+      <div className="relative aspect-[4/5] max-h-80 overflow-hidden sm:aspect-[5/4] sm:max-h-96 lg:aspect-auto lg:h-full lg:max-h-none lg:min-h-[22rem]">
+        {upload.url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={upload.url} alt={label} className="absolute inset-0 size-full object-cover" />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-mute">Photo</div>
+        )}
+        {moving ? (
+          <span className="scan-line pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-ink" aria-hidden />
+        ) : null}
+      </div>
+      <div className="flex flex-col justify-center gap-6 px-5 py-6 sm:px-8 sm:py-8">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-mute">This photo</p>
+          <h3 className="mt-1 font-display text-3xl font-medium uppercase leading-[0.9] tracking-tight sm:text-4xl">
+            {copy.title}
+          </h3>
+          <p className="mt-3 max-w-md text-sm leading-relaxed text-mute">{copy.body}</p>
+        </div>
+        <div className="space-y-2" role="status">
+          <div className="flex items-baseline justify-between gap-3 text-sm font-medium">
+            <span>{progressLabel}</span>
+            <span className="tabular-nums text-mute">{formatPercent(progress)}</span>
+          </div>
+          <div className="h-1 bg-canvas" aria-hidden>
+            <div className="h-full bg-ink transition-[width] duration-500" style={{ width: `${Math.round(progress * 100)}%` }} />
+          </div>
+        </div>
+        {job ? (
+          <JobStepper job={job} variant="track" />
+        ) : (
+          <p className="text-sm text-mute">Waiting for a slot…</p>
+        )}
+      </div>
     </article>
   );
 }

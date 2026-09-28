@@ -101,6 +101,28 @@ export const HAIR_LABELS: Record<HairStyle, string> = {
   sleek_bun: "Sleek bun",
 };
 
+/** Catalog portraits for the hairstyle studio. "Keep current" uses the selected look. */
+export const HAIR_REFERENCES: Record<Exclude<HairStyle, "keep">, string> = {
+  buzz: "/grooming/hair/buzz.png",
+  crew: "/grooming/hair/crew.png",
+  fade: "/grooming/hair/fade.png",
+  textured_crop: "/grooming/hair/textured-crop.png",
+  medium: "/grooming/hair/medium.png",
+  slicked_back: "/grooming/hair/slicked-back.png",
+  bob: "/grooming/hair/bob.png",
+  lob: "/grooming/hair/lob.png",
+  long_layers: "/grooming/hair/long-layers.png",
+  pixie: "/grooming/hair/pixie.png",
+  curtain_bangs: "/grooming/hair/curtain-bangs.png",
+  high_ponytail: "/grooming/hair/high-ponytail.png",
+  sleek_bun: "/grooming/hair/sleek-bun.png",
+};
+
+export function hairReference(style: HairStyle): string | null {
+  if (style === "keep") return null;
+  return HAIR_REFERENCES[style];
+}
+
 export const BEARD_LABELS: Record<BeardStyle, string> = {
   keep: "Keep current",
   clean: "Clean shaven",

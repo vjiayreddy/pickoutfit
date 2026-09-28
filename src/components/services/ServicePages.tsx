@@ -2,14 +2,15 @@
 
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import Link from "next/link";
-import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { Loader2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import type { RenderQuality } from "@convex/shared/credits";
 import {
   groomingShopQuery,
+  HAIR_LABELS,
   hairStylesFor,
   orderHairStyles,
   validateGroomingSelection,
@@ -20,7 +21,6 @@ import {
   isServiceAvailable,
   isServiceId,
   SERVICES,
-  type ServiceId,
 } from "@convex/shared/services";
 import { shopSimilarVisible, storeLinks } from "@convex/shared/shop";
 import type { Presentation } from "@convex/shared/wardrobe";
@@ -31,17 +31,74 @@ import { cn } from "@/lib/cn";
 import { routes } from "@/lib/routes";
 
 const PAGE_SIZE = 8;
+const GALLERY_PAGE = 24;
+const LOOK_PAGE = 24;
+
+const COMING_SOON_STUDIOS: Record<string, { title: string; blurb: string }> = {
+  "hair-color": {
+    title: "Hair Color",
+    blurb: "Preview a colour on your fitting photo.",
+  },
+  eyewear: {
+    title: "Eyewear",
+    blurb: "Try frames on your fitting photo.",
+  },
+  makeup: {
+    title: "Makeup",
+    blurb: "Try a makeup look on your fitting photo.",
+  },
+};
+
+const HUB_SERVICES = [
+  { label: "Hair Color", blurb: "Preview a colour on your fitting photo.", href: routes.service("hair-color"), live: false },
+  { label: "Beard/Hair Style", blurb: "Try a cut or a beard on your fitting photo.", href: routes.service("hairstyle"), live: true },
+  { label: "Eyewear", blurb: "Try frames on your fitting photo.", href: routes.service("eyewear"), live: false },
+  { label: "Makeup", blurb: "Try a makeup look on your fitting photo.", href: routes.service("makeup"), live: false },
+  { label: "SkinCare", blurb: "A routine matched to your skin and budget. Advice and products, no photo edit.", href: routes.service("skincare"), live: false },
+] as const;
+
+function ServiceCard({
+  label,
+  blurb,
+  muted,
+  href,
+  primary,
+}: {
+  label: string;
+  blurb: string;
+  muted?: boolean;
+  href?: string;
+  primary?: boolean;
+}) {
+  return (
+    <article
+      className={cn(
+        "flex h-full flex-col gap-4 border border-hairline p-6",
+        muted && "opacity-50",
+      )}
+    >
+      <div className="space-y-2">
+        <h2 className="text-xl font-medium">{label}</h2>
+        <p className="text-sm text-mute">{blurb}</p>
+      </div>
+      {muted || !href ? (
+        <p className="mt-auto text-sm font-medium">Coming soon</p>
+      ) : (
+        <Link
+          href={href}
+          className={cn(
+            "mt-auto inline-flex h-12 items-center justify-center rounded-full px-6 text-sm font-medium",
+            primary ? "bg-ink text-canvas" : "bg-soft-cloud text-ink",
+          )}
+        >
+          Open
+        </Link>
+      )}
+    </article>
+  );
+}
 
 export function ServicesHub() {
-  const me = useQuery(api.users.me);
-  if (me === undefined) {
-    return <div className="h-64 animate-pulse bg-soft-cloud" />;
-  }
-  if (!me) return null;
-  const services = (Object.keys(SERVICES) as ServiceId[])
-    .map((id) => ({ id, ...SERVICES[id] }))
-    .filter((service) => service.audience.includes(me.prefs.presentation));
-
   return (
     <div className="space-y-8">
       <div>
@@ -52,43 +109,20 @@ export function ServicesHub() {
           Services
         </h1>
         <p className="mt-2 max-w-md text-sm text-mute sm:text-base">
-          The same fitting photo. Hair and beard now. Skincare when it is ready.
+          Beard and hair style are ready. Colour, eyewear, makeup, and skincare are next.
         </p>
       </div>
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {services.map((service) => {
-          const muted = service.status !== "live";
-          const href = service.id === "wardrobe" ? routes.wardrobe : service.route;
-          const primary = service.id === "wardrobe";
-          return (
-            <li key={service.id}>
-              <article
-                className={cn(
-                  "flex h-full flex-col gap-4 border border-hairline p-6",
-                  muted && "opacity-50",
-                )}
-              >
-                <div className="space-y-2">
-                  <h2 className="text-xl font-medium">{service.label}</h2>
-                  <p className="text-sm text-mute">{service.blurb}</p>
-                </div>
-                {muted ? (
-                  <p className="mt-auto text-sm font-medium">Coming soon</p>
-                ) : (
-                  <Link
-                    href={href}
-                    className={cn(
-                      "mt-auto inline-flex h-12 items-center justify-center rounded-full px-6 text-sm font-medium",
-                      primary ? "bg-ink text-canvas" : "bg-soft-cloud text-ink",
-                    )}
-                  >
-                    Open
-                  </Link>
-                )}
-              </article>
-            </li>
-          );
-        })}
+        {HUB_SERVICES.map((service) => (
+          <li key={service.label}>
+            <ServiceCard
+              label={service.label}
+              blurb={service.blurb}
+              muted={!service.live}
+              href={service.live ? service.href : undefined}
+            />
+          </li>
+        ))}
       </ul>
     </div>
   );
@@ -97,6 +131,15 @@ export function ServicesHub() {
 export function ServiceStudio({ serviceId }: { serviceId: string }) {
   const me = useQuery(api.users.me);
   const profiles = useQuery(api.services.listProfiles);
+  const comingSoon = COMING_SOON_STUDIOS[serviceId];
+  if (comingSoon) {
+    return (
+      <div className="space-y-3">
+        <h1 className="font-display text-4xl uppercase">{comingSoon.title}</h1>
+        <p className="text-sm text-mute">Coming soon. {comingSoon.blurb}</p>
+      </div>
+    );
+  }
   if (!isServiceId(serviceId) || (serviceId !== "hairstyle" && serviceId !== "beard" && serviceId !== "skincare")) {
     return (
       <p className="text-sm text-mute">
@@ -170,6 +213,7 @@ function Studio({
   canShare: boolean;
   showShop: boolean;
 }) {
+  const isHairStudio = serviceId === "hairstyle";
   const avatars = useQuery(api.avatars.list);
   const groom = useMutation(api.renders.groom);
   const share = useMutation(api.renders.share);
@@ -183,17 +227,57 @@ function Studio({
   const [custom, setCustom] = useState("");
   const [quality, setQuality] = useState<RenderQuality>("standard");
   const [avatarId, setAvatarId] = useState<Id<"avatars"> | null>(null);
+  const [renderId, setRenderId] = useState<Id<"renders"> | null>(null);
   const [pending, setPending] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const loadingGallery = useRef(false);
+  const scannedLookPages = useRef(0);
   const effectiveQuality: RenderQuality = hqUnlocked ? quality : "standard";
-  const quote = useCreditQuote({ kind: "groom", quality: effectiveQuality });
+  const tryOns = usePaginatedQuery(
+    api.renders.listMine,
+    isHairStudio ? {} : "skip",
+    { initialNumItems: LOOK_PAGE },
+  );
   const looks = usePaginatedQuery(
     api.renders.listByKind,
     { kind: "groom", serviceId },
-    { initialNumItems: PAGE_SIZE },
+    { initialNumItems: isHairStudio ? GALLERY_PAGE : PAGE_SIZE },
   );
 
+  const galleryStatus = looks.status;
+  const loadMoreGallery = looks.loadMore;
+  useEffect(() => {
+    if (!isHairStudio) return;
+    if (galleryStatus !== "CanLoadMore") {
+      loadingGallery.current = false;
+      return;
+    }
+    if (loadingGallery.current) return;
+    loadingGallery.current = true;
+    loadMoreGallery(GALLERY_PAGE);
+  }, [isHairStudio, galleryStatus, loadMoreGallery]);
+
+  const tryOnStatus = tryOns.status;
+  const loadMoreTryOns = tryOns.loadMore;
+  const wardrobeLooks = tryOns.results.filter(
+    (render) => render.kind === "try_on" && render.status === "done" && render.url,
+  );
+  useEffect(() => {
+    if (!isHairStudio || tryOnStatus !== "CanLoadMore" || wardrobeLooks.length > 0) return;
+    if (scannedLookPages.current >= 4) return;
+    scannedLookPages.current += 1;
+    loadMoreTryOns(LOOK_PAGE);
+  }, [isHairStudio, tryOnStatus, loadMoreTryOns, wardrobeLooks.length]);
+
   const defaultAvatar = avatars?.find((avatar) => avatar.isDefault) ?? avatars?.[0];
-  const chosenAvatar = avatarId ?? defaultAvatar?._id ?? null;
+  const selectedRender = renderId
+    ? wardrobeLooks.find((render) => render._id === renderId)
+    : undefined;
+  const chosenAvatar = renderId ? null : (avatarId ?? defaultAvatar?._id ?? null);
+  const selectedAvatar = (avatars ?? []).find((avatar) => avatar._id === chosenAvatar);
+  const keepPreviewUrl = selectedRender?.url ?? selectedAvatar?.url ?? null;
+  const quoteQuality = selectedRender?.quality ?? effectiveQuality;
+  const quote = useCreditQuote({ kind: "groom", quality: quoteQuality });
   const hairValue = serviceId === "beard" ? "keep" : hair;
   const beardValue = serviceId === "hairstyle" || presentation !== "masculine" ? "keep" : beard;
   const selectionError = validateGroomingSelection(
@@ -207,16 +291,26 @@ function Studio({
   });
   const links = storeLinks(shopQuery);
 
+  const hasSource = Boolean(selectedRender || chosenAvatar);
+  const applyLabel = `Apply ${HAIR_LABELS[hairValue].toLowerCase()}`;
+  const canApply = !pending && !selectionError && hasSource && quote?.canAfford !== false;
+
   async function handleStart() {
-    if (!chosenAvatar || selectionError || pending || quote?.canAfford === false) return;
+    if (!canApply) return;
+    const source = selectedRender
+      ? { type: "render" as const, renderId: selectedRender._id }
+      : chosenAvatar
+        ? { type: "avatar" as const, avatarId: chosenAvatar }
+        : null;
+    if (!source) return;
     setPending(true);
     try {
       await groom({
-        source: { type: "avatar", avatarId: chosenAvatar },
+        source,
         hair: hairValue,
         beard: beardValue,
         custom: custom.trim() || undefined,
-        quality: effectiveQuality,
+        quality: source.type === "avatar" ? quoteQuality : undefined,
         serviceId,
       });
       toast.success("Preview started. Watch progress in Activity.");
@@ -228,98 +322,188 @@ function Studio({
   }
 
   return (
-    <div className="space-y-10">
+    <div className="min-w-0 space-y-8 xl:space-y-10">
       <div>
         <p className="text-xs font-medium uppercase tracking-wide text-mute">
           {SERVICES[serviceId].label}
         </p>
-        <h1 className="mt-1 font-display text-3xl font-medium uppercase leading-[0.9] sm:text-5xl">
+        <h1 className="mt-1 font-display text-3xl font-medium uppercase leading-[0.9] sm:text-4xl xl:text-5xl">
           {serviceId === "hairstyle" ? "Try a cut." : "Try a beard."}
         </h1>
         <p className="mt-2 max-w-md text-sm text-mute">{SERVICES[serviceId].blurb}</p>
       </div>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium">Fitting photo</h2>
-        <div className="flex gap-2 overflow-x-auto">
-          {(avatars ?? []).map((avatar) => (
-            <button
-              key={avatar._id}
-              type="button"
-              aria-pressed={(avatarId ?? defaultAvatar?._id) === avatar._id}
-              onClick={() => setAvatarId(avatar._id)}
-              className={cn(
-                "w-24 shrink-0 space-y-1 text-left",
-                (avatarId ?? defaultAvatar?._id) === avatar._id && "outline outline-2 outline-ink",
-              )}
-            >
-              <div className="aspect-[3/4] bg-soft-cloud">
-                {avatar.url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={avatar.url} alt={avatar.label} className="h-full w-full object-cover" />
-                ) : null}
+      {isHairStudio ? (
+        <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] xl:items-start xl:gap-10">
+          <section className="min-w-0 space-y-3">
+            <h2 className="text-sm font-medium">Look</h2>
+            <div className="flex min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-1 xl:grid xl:max-h-[32rem] xl:snap-none xl:grid-cols-2 xl:gap-3 xl:overflow-x-hidden xl:overflow-y-auto xl:pr-1">
+              {(avatars ?? []).map((avatar) => (
+                <LookCard
+                  key={avatar._id}
+                  label={avatar.label}
+                  src={avatar.url}
+                  active={!renderId && (avatarId ?? defaultAvatar?._id) === avatar._id}
+                  onClick={() => {
+                    setRenderId(null);
+                    setAvatarId(avatar._id);
+                  }}
+                />
+              ))}
+              {wardrobeLooks.map((render) => (
+                <LookCard
+                  key={render._id}
+                  label={render.outfitName}
+                  src={render.url}
+                  active={renderId === render._id}
+                  onClick={() => setRenderId(render._id)}
+                />
+              ))}
+            </div>
+            {tryOns.status === "CanLoadMore" || tryOns.status === "LoadingMore" ? (
+              <button
+                type="button"
+                className="h-10 rounded-full border border-hairline px-4 text-sm font-medium disabled:opacity-50"
+                disabled={tryOns.status === "LoadingMore"}
+                onClick={() => tryOns.loadMore(LOOK_PAGE)}
+              >
+                {tryOns.status === "LoadingMore" ? "Loading…" : "More looks"}
+              </button>
+            ) : null}
+          </section>
+
+          <div className="min-w-0 space-y-7">
+            <GroomingPicker
+              presentation={presentation}
+              mode={serviceId}
+              variant="references"
+              keepPreviewUrl={keepPreviewUrl}
+              hair={hairValue}
+              beard={beardValue}
+              custom={custom}
+              hairStyles={orderedHair}
+              onHair={setHair}
+              onBeard={setBeard}
+              onCustom={setCustom}
+              disabled={pending}
+            />
+
+            {hqUnlocked && !selectedRender ? (
+              <div className="flex gap-2">
+                {(["standard", "hq"] as const).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    aria-pressed={effectiveQuality === option}
+                    onClick={() => setQuality(option)}
+                    className={cn(
+                      "h-10 rounded-full px-4 text-sm font-medium uppercase",
+                      effectiveQuality === option ? "bg-ink text-canvas" : "border border-hairline",
+                    )}
+                  >
+                    {option === "hq" ? "HQ" : "Standard"}
+                  </button>
+                ))}
               </div>
-              <p className="truncate text-xs font-medium">{avatar.label}</p>
-            </button>
-          ))}
+            ) : null}
+
+            {selectionError ? <p className="text-sm text-mute">{selectionError}</p> : null}
+            <div className="hidden items-center justify-between gap-4 xl:flex">
+              <CreditQuote quote={quote} label="preview" className="min-w-0" />
+              <ApplyButton label={applyLabel} pending={pending} disabled={!canApply} onClick={() => void handleStart()} />
+            </div>
+          </div>
         </div>
-      </section>
+      ) : (
+        <>
+          <section className="space-y-3">
+            <h2 className="text-sm font-medium">Fitting photo</h2>
+            <div className="flex gap-2 overflow-x-auto">
+              {(avatars ?? []).map((avatar) => (
+                <button
+                  key={avatar._id}
+                  type="button"
+                  aria-pressed={(avatarId ?? defaultAvatar?._id) === avatar._id}
+                  onClick={() => setAvatarId(avatar._id)}
+                  className={cn(
+                    "w-24 shrink-0 space-y-1 text-left",
+                    (avatarId ?? defaultAvatar?._id) === avatar._id && "outline outline-2 outline-ink",
+                  )}
+                >
+                  <div className="aspect-[3/4] bg-soft-cloud">
+                    {avatar.url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={avatar.url} alt={avatar.label} className="h-full w-full object-cover" />
+                    ) : null}
+                  </div>
+                  <p className="truncate text-xs font-medium">{avatar.label}</p>
+                </button>
+              ))}
+            </div>
+          </section>
 
-      <GroomingPicker
-        presentation={presentation}
-        mode={serviceId}
-        hair={hairValue}
-        beard={beardValue}
-        custom={custom}
-        hairStyles={orderedHair}
-        onHair={setHair}
-        onBeard={setBeard}
-        onCustom={setCustom}
-        disabled={pending}
-      />
+          <GroomingPicker
+            presentation={presentation}
+            mode={serviceId}
+            hair={hairValue}
+            beard={beardValue}
+            custom={custom}
+            hairStyles={orderedHair}
+            onHair={setHair}
+            onBeard={setBeard}
+            onCustom={setCustom}
+            disabled={pending}
+          />
 
-      {hqUnlocked ? (
-        <div className="flex gap-2">
-          {(["standard", "hq"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              aria-pressed={effectiveQuality === option}
-              onClick={() => setQuality(option)}
-              className={cn(
-                "h-10 rounded-full px-4 text-sm font-medium uppercase",
-                effectiveQuality === option ? "bg-ink text-canvas" : "border border-hairline",
-              )}
-            >
-              {option === "hq" ? "HQ" : "Standard"}
-            </button>
-          ))}
-        </div>
-      ) : null}
+          {hqUnlocked ? (
+            <div className="flex gap-2">
+              {(["standard", "hq"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={effectiveQuality === option}
+                  onClick={() => setQuality(option)}
+                  className={cn(
+                    "h-10 rounded-full px-4 text-sm font-medium uppercase",
+                    effectiveQuality === option ? "bg-ink text-canvas" : "border border-hairline",
+                  )}
+                >
+                  {option === "hq" ? "HQ" : "Standard"}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
-      {selectionError ? <p className="text-sm text-mute">{selectionError}</p> : null}
-      <CreditQuote quote={quote} label="preview" />
-      <button
-        type="button"
-        disabled={pending || Boolean(selectionError) || !chosenAvatar || quote?.canAfford === false}
-        onClick={() => void handleStart()}
-        className="inline-flex h-12 items-center gap-2 rounded-full bg-ink px-8 text-base font-medium text-canvas disabled:opacity-50"
-      >
-        {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-        Start preview
-      </button>
+          {selectionError ? <p className="text-sm text-mute">{selectionError}</p> : null}
+          <CreditQuote quote={quote} label="preview" />
+          <button
+            type="button"
+            disabled={!canApply}
+            onClick={() => void handleStart()}
+            className="inline-flex h-12 items-center gap-2 rounded-full bg-ink px-8 text-base font-medium text-canvas disabled:opacity-50"
+          >
+            {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+            Start preview
+          </button>
+        </>
+      )}
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-medium">Recent looks</h2>
+      <section className="min-w-0 space-y-4">
+        <h2 className="text-sm font-medium">{isHairStudio ? "Your hairstyles" : "Recent looks"}</h2>
         {looks.status === "LoadingFirstPage" ? (
           <div className="h-40 animate-pulse bg-soft-cloud" />
         ) : looks.results.length === 0 ? (
           <p className="text-sm text-mute">No previews yet.</p>
         ) : (
-          <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <ul className="grid min-w-0 grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-4">
             {looks.results.map((render) => (
               <li key={render._id} className="space-y-2">
-                <div className="aspect-[3/4] bg-soft-cloud">
+                <button
+                  type="button"
+                  className="block w-full aspect-[3/4] bg-soft-cloud text-left"
+                  disabled={!render.url}
+                  onClick={() => render.url && setLightbox(render.url)}
+                >
                   {render.url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -332,7 +516,7 @@ function Studio({
                       {render.status}
                     </div>
                   )}
-                </div>
+                </button>
                 <p className="truncate text-sm font-medium">
                   {render.groomingLabel ?? render.outfitName}
                 </p>
@@ -386,6 +570,53 @@ function Studio({
         )}
       </section>
 
+      {isHairStudio ? (
+        <>
+          <div className="h-28 xl:hidden" aria-hidden />
+          <div
+            className="fixed inset-x-0 z-20 border-t border-hairline bg-canvas px-4 pt-3 pb-3 xl:hidden"
+            style={{ bottom: "var(--app-tab-height)" }}
+          >
+            <div className="mx-auto flex w-full max-w-lg flex-col gap-2">
+              <CreditQuote quote={quote} label="preview" />
+              <ApplyButton
+                label={applyLabel}
+                pending={pending}
+                disabled={!canApply}
+                onClick={() => void handleStart()}
+                className="w-full"
+              />
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {lightbox ? (
+        <div className="fixed inset-0 z-50 flex flex-col bg-ink" role="dialog" aria-label="Hairstyle preview">
+          <button
+            type="button"
+            aria-label="Close preview"
+            className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-4 z-10 flex size-11 items-center justify-center rounded-full bg-canvas text-ink"
+            onClick={() => setLightbox(null)}
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="absolute inset-0"
+            aria-label="Close preview"
+            onClick={() => setLightbox(null)}
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt=""
+            className="relative z-10 m-auto max-h-full max-w-full object-contain"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      ) : null}
+
       {showShop ? (
         <section className="space-y-3">
           <h2 className="text-sm font-medium">Products for this style</h2>
@@ -406,6 +637,64 @@ function Studio({
         </section>
       ) : null}
     </div>
+  );
+}
+
+function LookCard({
+  label,
+  src,
+  active,
+  onClick,
+}: {
+  label: string;
+  src: string | null;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className="w-[6.75rem] shrink-0 snap-start space-y-1 text-left sm:w-32 xl:w-full"
+    >
+      <div className={cn("aspect-[3/4] bg-soft-cloud", active && "ring-2 ring-ink ring-inset")}>
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt="" className="h-full w-full object-cover" />
+        ) : null}
+      </div>
+      <p className="truncate text-xs font-medium">{label}</p>
+    </button>
+  );
+}
+
+function ApplyButton({
+  label,
+  pending,
+  disabled,
+  onClick,
+  className,
+}: {
+  label: string;
+  pending: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas disabled:opacity-50 sm:px-8",
+        className,
+      )}
+    >
+      {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+      {label}
+    </button>
   );
 }
 
