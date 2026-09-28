@@ -72,28 +72,38 @@ function jobProgress(job: Pick<Job, "steps" | "status" | "error">) {
 export function JobStepper({
   job,
   className,
+  variant = "default",
 }: {
   job: Pick<Job, "steps" | "status" | "progress" | "error">;
   className?: string;
+  /** `track` is the stage row only. The parent owns the title and percent. */
+  variant?: "default" | "track";
 }) {
   const view = jobProgress(job);
   const error =
     view.terminal && job.status !== "done" ? job.error : undefined;
+  const track = variant === "track";
 
   return (
-    <div className={cn("space-y-3", className)}>
-      <div className="flex flex-wrap items-start justify-between gap-2 text-xs" role="status">
-        <span
-          className={cn(
-            "font-medium",
-            job.status === "failed" && "text-sale",
-          )}
-        >
-          {view.title}
-        </span>
-        <span className="tabular-nums text-mute">{formatPercent(job.progress)}</span>
-      </div>
-      <ol className="grid grid-cols-3 gap-x-2 gap-y-3" aria-label="Progress stages">
+    <div className={cn(track ? "space-y-4" : "space-y-3", className)}>
+      {track ? null : (
+        <div className="flex flex-wrap items-start justify-between gap-2 text-xs" role="status">
+          <span
+            className={cn(
+              "font-medium",
+              job.status === "failed" && "text-sale",
+            )}
+          >
+            {view.title}
+          </span>
+          <span className="tabular-nums text-mute">{formatPercent(job.progress)}</span>
+        </div>
+      )}
+      <ol
+        className="grid gap-x-3 gap-y-3"
+        style={{ gridTemplateColumns: `repeat(${Math.max(view.phases.length, 1)}, minmax(0, 1fr))` }}
+        aria-label="Progress stages"
+      >
         {view.phases.map((phase) => (
           <li
             key={phase.key}
@@ -102,16 +112,16 @@ export function JobStepper({
           >
             <div
               className={cn(
-                "mb-2 h-0.5 bg-hairline",
+                "mb-2 h-1 bg-hairline",
                 phase.status === "done" && "bg-ink",
-                phase.status === "running" && "animate-pulse bg-ink",
+                phase.status === "running" && "bg-ink",
                 phase.status === "failed" && "bg-sale",
               )}
               aria-hidden
             />
             <span
               className={cn(
-                "flex items-center gap-1.5 text-[10px]",
+                "flex items-center gap-1.5 text-xs font-medium",
                 phase.status === "pending" && "text-mute",
               )}
             >
@@ -124,7 +134,7 @@ export function JobStepper({
       {error ? (
         <p className="text-xs leading-relaxed break-words text-sale">{error}</p>
       ) : null}
-      {!view.terminal ? (
+      {!view.terminal && !track ? (
         <p className="text-[11px] leading-relaxed text-mute">
           You can keep browsing. Updates appear here automatically.
         </p>

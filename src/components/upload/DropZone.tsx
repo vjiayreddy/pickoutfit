@@ -152,7 +152,7 @@ export function DropZone({
       onDrop={onDropFiles}
       className={cn(
         "group relative flex flex-col items-center justify-center gap-3 border border-dashed border-hairline bg-canvas text-center transition-colors",
-        size === "lg" ? "min-h-56 px-5 py-6" : "px-4 py-5",
+        size === "lg" ? "min-h-72 px-5 py-8 sm:min-h-80 sm:px-8" : "px-4 py-5",
         disabled
           ? "pointer-events-none opacity-60"
           : "cursor-pointer hover:border-ink/40 hover:bg-soft-cloud/60",
@@ -185,11 +185,17 @@ export function DropZone({
         onChange={onChange}
         onClick={(e) => e.stopPropagation()}
       />
-      <div className={cn("text-ink", size === "lg" ? "size-7" : "size-6")} aria-hidden>
+      <div
+        className={cn(
+          "flex items-center justify-center rounded-full bg-canvas text-ink",
+          size === "lg" ? "size-14" : "size-10",
+        )}
+        aria-hidden
+      >
         {dragActive ? (
-          <UploadCloud className="size-5" />
+          <UploadCloud className={size === "lg" ? "size-6" : "size-5"} />
         ) : (
-          <ImagePlus className="size-5" />
+          <ImagePlus className={size === "lg" ? "size-6" : "size-5"} />
         )}
       </div>
       <div className="space-y-2">
@@ -208,7 +214,7 @@ export function DropZone({
           Take a photo or choose one from your library.
         </p>
       </div>
-      <div className="flex w-full max-w-xs flex-col gap-2 lg:hidden">
+      <div className="flex w-full max-w-sm flex-col gap-2 sm:max-w-md sm:flex-row lg:hidden">
         <button
           type="button"
           disabled={disabled}
@@ -216,7 +222,7 @@ export function DropZone({
             event.stopPropagation();
             cameraRef.current?.click();
           }}
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas disabled:opacity-50"
+          className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-ink px-6 text-base font-medium text-canvas disabled:opacity-50"
         >
           <Camera className="size-4" aria-hidden />
           Take photo
@@ -228,7 +234,7 @@ export function DropZone({
             event.stopPropagation();
             inputRef.current?.click();
           }}
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-soft-cloud px-6 text-base font-medium text-ink disabled:opacity-50"
+          className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full border border-hairline bg-canvas px-6 text-base font-medium text-ink disabled:opacity-50"
         >
           Photo library
         </button>

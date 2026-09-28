@@ -61,6 +61,37 @@ export function formatRelative(ms: number): string {
   return formatDate(ms);
 }
 
+/** Storage keys and camera dumps are not names. Real filenames still read as labels. */
+function isOpaqueFileId(fileName: string): boolean {
+  const stem = fileName.replace(/\.[^.]+$/, "");
+  return (
+    /^[0-9a-f-]{16,}$/i.test(stem) ||
+    /^(img|image|photo|picture|dsc|pxl)[-_ ]?\d+$/i.test(stem)
+  );
+}
+
+/** Piece names when we have them. Otherwise a readable filename, never a raw image id. */
+export function photoLabel(
+  fileName: string,
+  names: readonly string[],
+  fallback: string,
+): string {
+  const related = names.map((name) => name.trim()).filter(Boolean);
+  if (related.length > 0) {
+    const shown = related.slice(0, 3);
+    const rest = related.length - shown.length;
+    return rest > 0 ? `${shown.join(", ")} +${rest}` : shown.join(", ");
+  }
+  if (!isOpaqueFileId(fileName)) {
+    const cleaned = fileName
+      .replace(/\.[^.]+$/, "")
+      .replace(/[_-]+/g, " ")
+      .trim();
+    if (cleaned) return cleaned;
+  }
+  return fallback;
+}
+
 export function titleCase(value: string): string {
   return value
     .replace(/(^|[\s-])([a-z])/g, (match) => match.toUpperCase())

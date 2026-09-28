@@ -70,6 +70,26 @@ body {
   animation-delay: -4.67s;
 }
 
+@keyframes scan-line {
+  from {
+    top: 0;
+  }
+  to {
+    top: calc(100% - 2px);
+  }
+}
+
+.scan-line {
+  animation: scan-line 2.2s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-line {
+    animation: none;
+    top: 42%;
+  }
+}
+
 @keyframes tryon-wave {
   0% {
     transform: scale(0.58);
