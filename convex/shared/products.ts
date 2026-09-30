@@ -13,6 +13,15 @@ export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
 export const ORDER_STATUSES = ["placed", "fulfilled", "cancelled"] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
+export const ORDER_LINE_STATUSES = ["placed", "shipped", "cancelled", "returned"] as const;
+export type OrderLineStatus = (typeof ORDER_LINE_STATUSES)[number];
+
+export const SHIPMENT_STATUSES = ["pending", "shipped", "delivered"] as const;
+export type ShipmentStatus = (typeof SHIPMENT_STATUSES)[number];
+
+export const RETURN_STATUSES = ["requested", "accepted", "rejected"] as const;
+export type ReturnStatus = (typeof RETURN_STATUSES)[number];
+
 /** Draft rows are only visible to the vendor; archived rows keep order history intact. */
 export const PRODUCT_STATUSES = ["draft", "active", "archived"] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
@@ -194,6 +203,25 @@ export const vOrderStatus = v.union(
   v.literal("placed"),
   v.literal("fulfilled"),
   v.literal("cancelled"),
+);
+
+export const vOrderLineStatus = v.union(
+  v.literal("placed"),
+  v.literal("shipped"),
+  v.literal("cancelled"),
+  v.literal("returned"),
+);
+
+export const vShipmentStatus = v.union(
+  v.literal("pending"),
+  v.literal("shipped"),
+  v.literal("delivered"),
+);
+
+export const vReturnStatus = v.union(
+  v.literal("requested"),
+  v.literal("accepted"),
+  v.literal("rejected"),
 );
 
 export const vProductStatus = v.union(
@@ -378,9 +406,15 @@ export const vCartView = v.object({
 export const vOrderItemView = v.object({
   id: v.id("orderItems"),
   productId: v.union(v.id("products"), v.null()),
+  vendorId: v.union(v.id("vendors"), v.null()),
+  variantId: v.union(v.id("productVariants"), v.null()),
   name: v.string(),
+  sku: v.union(v.string(), v.null()),
+  size: v.union(v.string(), v.null()),
+  colour: v.union(v.string(), v.null()),
   quantity: v.number(),
   priceInr: v.number(),
+  lineStatus: v.union(vOrderLineStatus, v.null()),
 });
 
 export const vOrderView = v.object({
@@ -395,6 +429,63 @@ export const vOrderView = v.object({
   totalInr: v.number(),
   createdAt: v.number(),
   items: v.array(vOrderItemView),
+});
+
+export const vShipmentView = v.object({
+  id: v.id("shipments"),
+  orderId: v.id("orders"),
+  orderItemIds: v.array(v.id("orderItems")),
+  carrier: v.union(v.string(), v.null()),
+  trackingNumber: v.union(v.string(), v.null()),
+  status: vShipmentStatus,
+  shippedAt: v.union(v.number(), v.null()),
+  createdAt: v.number(),
+});
+
+export const vReturnView = v.object({
+  id: v.id("returns"),
+  orderId: v.id("orders"),
+  orderItemId: v.id("orderItems"),
+  quantity: v.number(),
+  reason: v.string(),
+  status: vReturnStatus,
+  restocked: v.boolean(),
+  createdAt: v.number(),
+  resolvedAt: v.union(v.number(), v.null()),
+});
+
+/** One vendor's slice of an order for the desk list. */
+export const vVendorOrderListItem = v.object({
+  orderId: v.id("orders"),
+  createdAt: v.number(),
+  buyerName: v.string(),
+  city: v.string(),
+  orderStatus: vOrderStatus,
+  itemCount: v.number(),
+  totalInr: v.number(),
+  placedCount: v.number(),
+  shippedCount: v.number(),
+  cancelledCount: v.number(),
+  returnedCount: v.number(),
+  openReturnCount: v.number(),
+});
+
+export const vVendorOrderDetail = v.object({
+  orderId: v.id("orders"),
+  createdAt: v.number(),
+  orderStatus: vOrderStatus,
+  buyer: v.object({
+    name: v.string(),
+    email: v.string(),
+    phone: v.string(),
+    address: v.string(),
+    city: v.string(),
+    pincode: v.string(),
+  }),
+  totalInr: v.number(),
+  items: v.array(vOrderItemView),
+  shipments: v.array(vShipmentView),
+  returns: v.array(vReturnView),
 });
 
 export const MAX_CART_QTY = 10;

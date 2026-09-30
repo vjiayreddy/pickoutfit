@@ -1,8 +1,17 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { appError } from "../lib/errors";
-import { ORDER_SAMPLE_CAP, type OrderStatus } from "../shared/products";
-import { cartLines, resolveCartLine, type VendorCache } from "./products";
+import {
+  ORDER_SAMPLE_CAP,
+  type OrderLineStatus,
+  type OrderStatus,
+} from "../shared/products";
+import {
+  adjustStock,
+  cartLines,
+  resolveCartLine,
+  type VendorCache,
+} from "./products";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -45,11 +54,72 @@ export function cleanCheckout(input: CheckoutInput): CheckoutInput {
   return { name, email, phone, address, city, pincode };
 }
 
-export async function toOrderView(ctx: Ctx, order: Doc<"orders">) {
-  const items = await ctx.db
+export function lineStatusOf(item: Doc<"orderItems">): OrderLineStatus {
+  return item.lineStatus ?? "placed";
+}
+
+export async function orderItemsFor(ctx: Ctx, orderId: Id<"orders">) {
+  return ctx.db
     .query("orderItems")
-    .withIndex("by_orderId", (q) => q.eq("orderId", order._id))
+    .withIndex("by_orderId", (q) => q.eq("orderId", orderId))
     .take(30);
+}
+
+export async function vendorOrderItems(
+  ctx: Ctx,
+  orderId: Id<"orders">,
+  vendorId: Id<"vendors">,
+) {
+  const items = await orderItemsFor(ctx, orderId);
+  return items.filter((item) => item.vendorId === vendorId);
+}
+
+/**
+ * Derives the order header from line statuses:
+ * - all cancelled → cancelled
+ * - every non-cancelled line is shipped or returned → fulfilled
+ * - otherwise → placed
+ */
+export function deriveOrderStatus(items: Doc<"orderItems">[]): OrderStatus {
+  if (items.length === 0) return "cancelled";
+  const statuses = items.map(lineStatusOf);
+  if (statuses.every((status) => status === "cancelled")) return "cancelled";
+  const open = statuses.filter((status) => status !== "cancelled");
+  if (open.every((status) => status === "shipped" || status === "returned")) {
+    return "fulfilled";
+  }
+  return "placed";
+}
+
+export async function recomputeOrderStatus(ctx: MutationCtx, orderId: Id<"orders">) {
+  const order = await ctx.db.get(orderId);
+  if (!order) throw appError("NOT_FOUND", "That order doesn't exist.");
+  const items = await orderItemsFor(ctx, orderId);
+  const status = deriveOrderStatus(items);
+  if (order.status !== status) {
+    await ctx.db.patch(order._id, { status });
+  }
+  return status;
+}
+
+export function toOrderItemView(item: Doc<"orderItems">) {
+  return {
+    id: item._id,
+    productId: item.productId ?? null,
+    vendorId: item.vendorId ?? null,
+    variantId: item.variantId ?? null,
+    name: item.name,
+    sku: item.sku ?? null,
+    size: item.size ?? null,
+    colour: item.colour ?? null,
+    quantity: item.quantity,
+    priceInr: item.priceInr,
+    lineStatus: item.lineStatus ?? null,
+  };
+}
+
+export async function toOrderView(ctx: Ctx, order: Doc<"orders">) {
+  const items = await orderItemsFor(ctx, order._id);
   return {
     id: order._id,
     name: order.name,
@@ -61,13 +131,7 @@ export async function toOrderView(ctx: Ctx, order: Doc<"orders">) {
     status: order.status,
     totalInr: order.totalInr,
     createdAt: order.createdAt,
-    items: items.map((item) => ({
-      id: item._id,
-      productId: item.productId ?? null,
-      name: item.name,
-      quantity: item.quantity,
-      priceInr: item.priceInr,
-    })),
+    items: items.map(toOrderItemView),
   };
 }
 
@@ -81,17 +145,22 @@ export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: Ch
   const lines = await cartLines(ctx, cart._id);
   if (lines.length === 0) throw appError("INVALID_INPUT", "Your bag is empty.");
 
-  const kept: Doc<"cartItems">[] = [];
+  type Kept = {
+    line: Doc<"cartItems">;
+    vendor: Doc<"vendors">;
+    variant: Doc<"productVariants">;
+  };
+  const kept: Kept[] = [];
   const droppedNames: string[] = [];
   const cache: VendorCache = new Map();
   for (const line of lines) {
-    const { available } = await resolveCartLine(ctx, line, cache);
-    if (!available) {
+    const { available, vendor, variant } = await resolveCartLine(ctx, line, cache);
+    if (!available || !vendor || !variant) {
       droppedNames.push(line.name);
       await ctx.db.delete(line._id);
       continue;
     }
-    kept.push(line);
+    kept.push({ line, vendor, variant });
   }
   if (kept.length === 0) {
     throw appError(
@@ -102,21 +171,33 @@ export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: Ch
     );
   }
 
-  const totalInr = kept.reduce((sum, line) => sum + line.priceInr * line.quantity, 0);
+  const now = Date.now();
+  const totalInr = kept.reduce((sum, { line }) => sum + line.priceInr * line.quantity, 0);
   const orderId = await ctx.db.insert("orders", {
     userId: user._id,
     ...buyer,
     status: "placed",
     totalInr,
-    createdAt: Date.now(),
+    createdAt: now,
   });
-  for (const line of kept) {
-    await ctx.db.insert("orderItems", {
+
+  for (const { line, vendor, variant } of kept) {
+    const orderItemId = await ctx.db.insert("orderItems", {
       orderId,
       productId: line.productId,
+      vendorId: vendor._id,
+      variantId: variant._id,
       name: line.name,
+      sku: variant.sku,
+      ...(variant.size ? { size: variant.size } : {}),
+      ...(variant.colour ? { colour: variant.colour.name } : {}),
       quantity: line.quantity,
       priceInr: line.priceInr,
+      lineStatus: "placed",
+      createdAt: now,
+    });
+    await adjustStock(ctx, vendor, variant._id, -line.quantity, "order_reserve", {
+      orderItemId,
     });
     await ctx.db.delete(line._id);
   }

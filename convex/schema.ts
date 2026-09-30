@@ -6,11 +6,14 @@ import {
   vDiscountScope,
   vInventoryReason,
   vOccasion,
+  vOrderLineStatus,
   vOrderStatus,
   vProductCategory,
   vProductImageKind,
   vProductSource,
   vProductStatus,
+  vReturnStatus,
+  vShipmentStatus,
   vVariantColour,
 } from "./shared/products";
 import { vShopOffer } from "./shared/shop";
@@ -646,10 +649,52 @@ export default defineSchema({
   orderItems: defineTable({
     orderId: v.id("orders"),
     productId: v.optional(v.id("products")),
+    /** Set on new checkouts; absent on legacy rows until backfill. */
+    vendorId: v.optional(v.id("vendors")),
+    variantId: v.optional(v.id("productVariants")),
     name: v.string(),
+    sku: v.optional(v.string()),
+    size: v.optional(v.string()),
+    colour: v.optional(v.string()),
     quantity: v.number(),
     priceInr: v.number(),
-  }).index("by_orderId", ["orderId"]),
+    lineStatus: v.optional(vOrderLineStatus),
+    /** Copied from the order so vendors can page their lines by time. */
+    createdAt: v.optional(v.number()),
+  })
+    .index("by_orderId", ["orderId"])
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
+    .index("by_vendorId_and_lineStatus_and_createdAt", ["vendorId", "lineStatus", "createdAt"]),
+
+  /** Vendor shipment with optional carrier tracking. One shipment can cover several lines. */
+  shipments: defineTable({
+    orderId: v.id("orders"),
+    vendorId: v.id("vendors"),
+    orderItemIds: v.array(v.id("orderItems")),
+    carrier: v.optional(v.string()),
+    trackingNumber: v.optional(v.string()),
+    status: vShipmentStatus,
+    shippedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
+    .index("by_orderId", ["orderId"]),
+
+  /** Vendor-ops returns. Accepting restocks via inventory reason `return`. */
+  returns: defineTable({
+    orderId: v.id("orders"),
+    orderItemId: v.id("orderItems"),
+    vendorId: v.id("vendors"),
+    quantity: v.number(),
+    reason: v.string(),
+    status: vReturnStatus,
+    restocked: v.boolean(),
+    createdAt: v.number(),
+    resolvedAt: v.optional(v.number()),
+  })
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
+    .index("by_orderItemId", ["orderItemId"])
+    .index("by_vendorId_and_status_and_createdAt", ["vendorId", "status", "createdAt"]),
 
   /** Running average duration per step prefix ("detect", "extract", "render") for ETAs. */
   stepStats: defineTable({
