@@ -8,8 +8,9 @@ import { usageToUsd } from "../shared/credits";
 import { vTokenUsage } from "../shared/validators";
 
 /**
- * Transactional half of the vendor extraction pipeline. `ai/openai.extractProductCutout` reads
- * `productExtractContext`, does the image edit, then lands everything in `productCutoutReady`.
+ * Transactional half of the vendor extraction pipeline.
+ * Multi-piece imports use `ai/vendorCutout.cutVendorSelection` (one grid board + local crops);
+ * single-piece / fallback uses `ai/openai.extractProductCutout`. Both land in `productCutoutReady`.
  */
 
 export const productExtractContext = internalQuery({

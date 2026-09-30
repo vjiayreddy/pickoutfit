@@ -101,7 +101,7 @@ export function VendorImport() {
           title="Scan a look photo"
           description="Lookbook shots, model photos or flat lays. Every garment in the frame is detected and you pick which become products."
           buttonLabel={busy ? "Uploading…" : "Choose photos"}
-          hint={`Up to ${pluralize(maxPhotos, "photo")} at a time. Scanning is free; each cutout uses one extraction.`}
+          hint={`Up to ${pluralize(maxPhotos, "photo")} at a time. Scanning is free. Importing several pieces uses one catalogue pass (quota still counts per piece).`}
         />
         <aside className="space-y-4 bg-soft-cloud p-5">
           <div>
@@ -347,7 +347,8 @@ function ImportReview({ upload }: { upload: UploadView }) {
       </fieldset>
 
       <p className="text-xs text-mute">
-        {pluralize(selected.size, "extraction")} will be used
+        {pluralize(selected.size, "piece")} will use {pluralize(selected.size, "quota slot")}
+        {selected.size >= 2 ? " (one shared catalogue cutout)" : ""}
         {quotaLeft !== null ? ` · ${quotaLeft} left this month` : ""}.
         {overQuota ? " Deselect some pieces or upgrade your plan." : ""}
       </p>
