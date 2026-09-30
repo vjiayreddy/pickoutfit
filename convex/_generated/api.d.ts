@@ -9,13 +9,16 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as adminVendors from "../adminVendors.js";
 import type * as agent from "../agent.js";
 import type * as ai_colours from "../ai/colours.js";
 import type * as ai_image_input from "../ai/image_input.js";
 import type * as ai_openai from "../ai/openai.js";
 import type * as ai_pipeline from "../ai/pipeline.js";
+import type * as ai_productDraft from "../ai/productDraft.js";
 import type * as ai_prompts from "../ai/prompts.js";
 import type * as ai_shop from "../ai/shop.js";
+import type * as ai_vendorPipeline from "../ai/vendorPipeline.js";
 import type * as auth from "../auth.js";
 import type * as avatars from "../avatars.js";
 import type * as billing from "../billing.js";
@@ -29,9 +32,10 @@ import type * as jobs from "../jobs.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_env from "../lib/env.js";
 import type * as lib_errors from "../lib/errors.js";
-import type * as lib_ownerAuth from "../lib/ownerAuth.js";
+import type * as migrations_vendorsBackfill from "../migrations/vendorsBackfill.js";
 import type * as model_admin from "../model/admin.js";
 import type * as model_avatars from "../model/avatars.js";
+import type * as model_catalog from "../model/catalog.js";
 import type * as model_credits from "../model/credits.js";
 import type * as model_demo_wardrobe from "../model/demo_wardrobe.js";
 import type * as model_items from "../model/items.js";
@@ -48,9 +52,10 @@ import type * as model_subscriptions from "../model/subscriptions.js";
 import type * as model_threads from "../model/threads.js";
 import type * as model_uploads from "../model/uploads.js";
 import type * as model_users from "../model/users.js";
+import type * as model_vendorIngest from "../model/vendorIngest.js";
+import type * as model_vendors from "../model/vendors.js";
 import type * as orders from "../orders.js";
 import type * as outfits from "../outfits.js";
-import type * as owner from "../owner.js";
 import type * as products from "../products.js";
 import type * as renders from "../renders.js";
 import type * as services from "../services.js";
@@ -62,16 +67,23 @@ import type * as shared_products from "../shared/products.js";
 import type * as shared_services from "../shared/services.js";
 import type * as shared_shop from "../shared/shop.js";
 import type * as shared_validators from "../shared/validators.js";
+import type * as shared_vendors from "../shared/vendors.js";
 import type * as shared_wardrobe from "../shared/wardrobe.js";
 import type * as shop from "../shop.js";
 import type * as threads from "../threads.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
+import type * as vendorCollections from "../vendorCollections.js";
+import type * as vendorDiscounts from "../vendorDiscounts.js";
+import type * as vendorProducts from "../vendorProducts.js";
+import type * as vendorUploads from "../vendorUploads.js";
+import type * as vendors from "../vendors.js";
 import type * as views from "../views.js";
 import type * as workflows_groom from "../workflows/groom.js";
 import type * as workflows_ingest from "../workflows/ingest.js";
 import type * as workflows_manager from "../workflows/manager.js";
 import type * as workflows_render from "../workflows/render.js";
+import type * as workflows_vendorIngest from "../workflows/vendorIngest.js";
 
 import type {
   ApiFromModules,
@@ -81,13 +93,16 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  adminVendors: typeof adminVendors;
   agent: typeof agent;
   "ai/colours": typeof ai_colours;
   "ai/image_input": typeof ai_image_input;
   "ai/openai": typeof ai_openai;
   "ai/pipeline": typeof ai_pipeline;
+  "ai/productDraft": typeof ai_productDraft;
   "ai/prompts": typeof ai_prompts;
   "ai/shop": typeof ai_shop;
+  "ai/vendorPipeline": typeof ai_vendorPipeline;
   auth: typeof auth;
   avatars: typeof avatars;
   billing: typeof billing;
@@ -101,9 +116,10 @@ declare const fullApi: ApiFromModules<{
   "lib/auth": typeof lib_auth;
   "lib/env": typeof lib_env;
   "lib/errors": typeof lib_errors;
-  "lib/ownerAuth": typeof lib_ownerAuth;
+  "migrations/vendorsBackfill": typeof migrations_vendorsBackfill;
   "model/admin": typeof model_admin;
   "model/avatars": typeof model_avatars;
+  "model/catalog": typeof model_catalog;
   "model/credits": typeof model_credits;
   "model/demo_wardrobe": typeof model_demo_wardrobe;
   "model/items": typeof model_items;
@@ -120,9 +136,10 @@ declare const fullApi: ApiFromModules<{
   "model/threads": typeof model_threads;
   "model/uploads": typeof model_uploads;
   "model/users": typeof model_users;
+  "model/vendorIngest": typeof model_vendorIngest;
+  "model/vendors": typeof model_vendors;
   orders: typeof orders;
   outfits: typeof outfits;
-  owner: typeof owner;
   products: typeof products;
   renders: typeof renders;
   services: typeof services;
@@ -134,16 +151,23 @@ declare const fullApi: ApiFromModules<{
   "shared/services": typeof shared_services;
   "shared/shop": typeof shared_shop;
   "shared/validators": typeof shared_validators;
+  "shared/vendors": typeof shared_vendors;
   "shared/wardrobe": typeof shared_wardrobe;
   shop: typeof shop;
   threads: typeof threads;
   uploads: typeof uploads;
   users: typeof users;
+  vendorCollections: typeof vendorCollections;
+  vendorDiscounts: typeof vendorDiscounts;
+  vendorProducts: typeof vendorProducts;
+  vendorUploads: typeof vendorUploads;
+  vendors: typeof vendors;
   views: typeof views;
   "workflows/groom": typeof workflows_groom;
   "workflows/ingest": typeof workflows_ingest;
   "workflows/manager": typeof workflows_manager;
   "workflows/render": typeof workflows_render;
+  "workflows/vendorIngest": typeof workflows_vendorIngest;
 }>;
 
 /**

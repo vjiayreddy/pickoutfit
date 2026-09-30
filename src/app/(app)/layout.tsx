@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { AppShell } from "@/components/AppShell";
 
+/** Shared authenticated app root — no chrome. Segment layouts own their shells. */
 export default function AppLayout({ children }: { children: ReactNode }) {
-  return <AppShell>{children}</AppShell>;
+  return children;
 }

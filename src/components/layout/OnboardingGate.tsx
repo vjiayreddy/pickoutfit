@@ -12,6 +12,7 @@ const STORE_USER_TIMEOUT_MS = 5000;
 
 /**
  * Sends users without onboardedAt to onboarding and keeps onboarded users out of it.
+ * Platform admins skip wardrobe onboarding and are sent to `/admin`.
  * Also redirects unsigned-in sessions to sign-in.
  */
 export function OnboardingGate({ children }: { children: ReactNode }) {
@@ -34,7 +35,8 @@ function AccountOnboardingGate({ children }: { children: ReactNode }) {
   const isAuthenticated = Boolean(session.data?.session);
   const isLoading =
     session.isPending || (isAuthenticated && me === undefined);
-  const needsOnboarding = Boolean(me && !me.onboardedAt);
+  const isAdmin = me?.role === "admin";
+  const needsOnboarding = Boolean(me && !me.onboardedAt && !isAdmin);
   const missingUser = isAuthenticated && !isLoading && me === null;
   const [timedOut, setTimedOut] = useState(false);
 
@@ -47,6 +49,10 @@ function AccountOnboardingGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isLoading || !me) return;
+    if (me.role === "admin") {
+      router.replace(routes.admin);
+      return;
+    }
     if (needsOnboarding && !onOnboarding) router.replace(routes.onboarding);
     if (!needsOnboarding && onOnboarding) router.replace(routes.wardrobe);
   }, [isLoading, me, needsOnboarding, onOnboarding, router]);
@@ -84,6 +90,14 @@ function AccountOnboardingGate({ children }: { children: ReactNode }) {
         >
           Refresh
         </Link>
+      </main>
+    );
+  }
+
+  if (isAdmin) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-canvas text-mute">
+        Redirecting to platform…
       </main>
     );
   }

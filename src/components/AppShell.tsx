@@ -20,7 +20,6 @@ import {
   Settings,
   ShoppingBag,
   Sparkles,
-  Shield,
   Shirt,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
@@ -90,6 +89,7 @@ function parentHref(pathname: string): string {
   if (pathname.startsWith(`${routes.services}/`)) return routes.services;
   if (pathname.startsWith(routes.gridDemo)) return routes.add;
   if (pathname.startsWith(routes.checkout)) return routes.cart;
+  if (pathname.startsWith(`${routes.orders}/`)) return routes.orders;
   return routes.wardrobe;
 }
 
@@ -107,7 +107,8 @@ function fallbackTitle(pathname: string): string {
   if (pathname.startsWith(routes.services)) return "Services";
   if (pathname.startsWith(routes.settings)) return "Settings";
   if (pathname.startsWith(routes.billing)) return "Billing";
-  if (pathname.startsWith(routes.admin)) return "Admin";
+  if (pathname.startsWith("/store/")) return "Store";
+  if (pathname.startsWith(routes.orders)) return "Orders";
   if (pathname.startsWith(routes.checkoutComplete)) return "Order";
   if (pathname.startsWith(routes.checkout)) return "Checkout";
   if (pathname.startsWith(routes.cart)) return "Bag";
@@ -182,7 +183,6 @@ function AppFrame({ children }: { children: ReactNode }) {
       {showChrome ? (
         <Sidebar
           pathname={pathname}
-          isAdmin={me?.role === "admin"}
           onSignOut={() => void signOut()}
         />
       ) : null}
@@ -305,11 +305,9 @@ function AppFrame({ children }: { children: ReactNode }) {
 
 function Sidebar({
   pathname,
-  isAdmin,
   onSignOut,
 }: {
   pathname: string;
-  isAdmin: boolean;
   onSignOut: () => void;
 }) {
   return (
@@ -348,14 +346,6 @@ function Sidebar({
           icon={Settings}
           active={isActivePath(pathname, routes.settings)}
         />
-        {isAdmin ? (
-          <SidebarLink
-            href={routes.admin}
-            label="Admin"
-            icon={Shield}
-            active={isActivePath(pathname, routes.admin)}
-          />
-        ) : null}
         <button
           type="button"
           onClick={onSignOut}

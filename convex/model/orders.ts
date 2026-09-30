@@ -2,7 +2,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { appError } from "../lib/errors";
 import { ORDER_SAMPLE_CAP, type OrderStatus } from "../shared/products";
-import { cartLines } from "./products";
+import { cartLines, resolveCartLine, type VendorCache } from "./products";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -83,9 +83,10 @@ export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: Ch
 
   const kept: Doc<"cartItems">[] = [];
   const droppedNames: string[] = [];
+  const cache: VendorCache = new Map();
   for (const line of lines) {
-    const product = await ctx.db.get(line.productId);
-    if (!product || !product.active) {
+    const { available } = await resolveCartLine(ctx, line, cache);
+    if (!available) {
       droppedNames.push(line.name);
       await ctx.db.delete(line._id);
       continue;

@@ -1,4 +1,4 @@
-export const JOB_TYPES = ["ingest", "render", "groom"] as const;
+export const JOB_TYPES = ["ingest", "render", "groom", "vendor_ingest"] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const JOB_STATUSES = [

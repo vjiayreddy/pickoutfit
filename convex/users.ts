@@ -9,7 +9,7 @@ import {
   deleteUserRow,
   purgeUserBatch,
 } from "./model/users";
-import { vFeature, vPlanId, vPrefs } from "./shared/validators";
+import { vFeature, vPlanId, vPrefs, vUserRole } from "./shared/validators";
 
 export const vBalance = v.object({
   plan: vPlanId,
@@ -28,7 +28,7 @@ export const vMe = v.object({
   email: v.optional(v.string()),
   name: v.optional(v.string()),
   imageUrl: v.optional(v.string()),
-  role: v.union(v.literal("user"), v.literal("admin")),
+  role: vUserRole,
   onboardedAt: v.optional(v.number()),
   defaultAvatarId: v.optional(v.id("avatars")),
   prefs: vPrefs,

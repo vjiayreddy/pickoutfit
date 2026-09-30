@@ -1,7 +1,14 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser } from "./lib/auth";
-import { addCartLine, cartLines, setCartQuantity, toCartView } from "./model/products";
+import {
+  addCartLine,
+  cartLines,
+  resolveCartLine,
+  setCartQuantity,
+  toCartView,
+  type VendorCache,
+} from "./model/products";
 import { vCartView } from "./shared/products";
 
 export const current = query({
@@ -24,21 +31,36 @@ export const count = query({
       .unique();
     if (!cart) return 0;
     const lines = await cartLines(ctx, cart._id);
+    const cache: VendorCache = new Map();
     let total = 0;
     for (const line of lines) {
-      const product = await ctx.db.get(line.productId);
-      if (product?.active) total += line.quantity;
+      const { available } = await resolveCartLine(ctx, line, cache);
+      if (available) total += line.quantity;
     }
     return total;
   },
 });
 
+export const vAddedFrom = v.union(
+  v.literal("similar"),
+  v.literal("outfit"),
+  v.literal("agent"),
+  v.literal("rail"),
+  v.literal("store"),
+);
+
 export const add = mutation({
-  args: { productId: v.id("products"), quantity: v.optional(v.number()) },
+  args: {
+    productId: v.id("products"),
+    variantId: v.optional(v.id("productVariants")),
+    quantity: v.optional(v.number()),
+    addedFrom: v.optional(vAddedFrom),
+    sourceItemId: v.optional(v.id("items")),
+  },
   returns: v.null(),
-  handler: async (ctx, { productId, quantity }) => {
+  handler: async (ctx, { productId, ...opts }) => {
     const user = await requireUser(ctx);
-    await addCartLine(ctx, user, productId, quantity ?? 1);
+    await addCartLine(ctx, user, productId, opts);
     return null;
   },
 });

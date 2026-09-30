@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "convex/react";
-import { Menu, Shield } from "lucide-react";
+import { Menu } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -84,16 +84,6 @@ export function AccountMenu() {
                 active={isActivePath(pathname, routes.settings)}
                 onNavigate={() => setOpen(false)}
               />
-              {me?.role === "admin" ? (
-                <Link
-                  href={routes.admin}
-                  onClick={() => setOpen(false)}
-                  className="flex h-12 items-center gap-2 px-4 text-sm font-medium"
-                >
-                  <Shield className="size-4" aria-hidden />
-                  Admin
-                </Link>
-              ) : null}
               <button
                 type="button"
                 onClick={() => void signOut()}

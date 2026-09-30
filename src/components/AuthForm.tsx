@@ -11,7 +11,20 @@ type Mode = "sign-in" | "sign-up";
 const fieldClassName =
   "h-12 w-full rounded-[24px] border-2 border-transparent bg-soft-cloud px-4 text-base font-normal text-ink outline-none transition-[background-color,border-color,box-shadow] placeholder:text-mute focus:border-ink focus:bg-canvas focus:shadow-[0_0_0_4px_var(--soft-cloud)]";
 
-export function AuthForm({ mode }: { mode: Mode }) {
+export function AuthForm({
+  mode,
+  redirectTo = routes.wardrobe,
+  switchHref,
+  switchLabel,
+}: {
+  mode: Mode;
+  /** Where to land after a successful sign-in or sign-up. */
+  redirectTo?: string;
+  /** Override the opposite-mode link (defaults to consumer sign-in / sign-up). */
+  switchHref?: string;
+  /** Link text for the opposite mode. */
+  switchLabel?: string;
+}) {
   const router = useRouter();
   const formId = useId();
   const [name, setName] = useState("");
@@ -20,6 +33,12 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  const isSignUp = mode === "sign-up";
+  const oppositeHref =
+    switchHref ?? (isSignUp ? routes.signIn : routes.signUp);
+  const oppositeLabel =
+    switchLabel ?? (isSignUp ? "Sign in" : "Create an account");
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -46,7 +65,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
           return;
         }
       }
-      router.replace(routes.wardrobe);
+      router.replace(redirectTo);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -55,7 +74,6 @@ export function AuthForm({ mode }: { mode: Mode }) {
     }
   }
 
-  const isSignUp = mode === "sign-up";
   const passwordId = `${formId}-password`;
 
   return (
@@ -152,20 +170,20 @@ export function AuthForm({ mode }: { mode: Mode }) {
           <>
             Already have an account?{" "}
             <Link
-              href={routes.signIn}
+              href={oppositeHref}
               className="font-medium text-ink underline underline-offset-4"
             >
-              Sign in
+              {oppositeLabel}
             </Link>
           </>
         ) : (
           <>
             New here?{" "}
             <Link
-              href={routes.signUp}
+              href={oppositeHref}
               className="font-medium text-ink underline underline-offset-4"
             >
-              Create an account
+              {oppositeLabel}
             </Link>
           </>
         )}

@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p convex/tsconfig.json && tsc --noEmit -p agent/tsconfig.json"
   },
   "dependencies": {
@@ -33,16 +34,19 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^24",
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "convex-test": "^0.0.60",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "just-bash": "^3.4.2",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.2"
   },
   "packageManager": "pnpm@10.18.3",
   "pnpm": {
