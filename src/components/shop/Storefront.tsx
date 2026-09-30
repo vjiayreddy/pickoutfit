@@ -12,6 +12,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_LABELS, type ProductCategory } from "@convex/shared/products";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppHeaderTitle } from "@/components/layout/app-header";
+import { ShopProductCard } from "@/components/shop/ShopProductCard";
 import { Button } from "@/components/ui/button";
 import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
@@ -47,7 +48,14 @@ export function Storefront({ slug }: { slug: string }) {
 
   if (data === undefined) return <div className="h-64 animate-pulse bg-soft-cloud" />;
   if (data === null) {
-    return <EmptyState icon={Store} title="This store isn't open" description="It may be new, paused, or the link is wrong." action={<Button href={routes.wardrobe}>Back to wardrobe</Button>} />;
+    return (
+      <EmptyState
+        icon={Store}
+        title="This store isn't open"
+        description="It may be new, paused, or the link is wrong."
+        action={<Button href={routes.shop}>Back to shop</Button>}
+      />
+    );
   }
 
   const { vendor, products } = data;
@@ -151,33 +159,12 @@ export function Storefront({ slug }: { slug: string }) {
       ) : (
         <ul className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
           {shown.map((product) => (
-            <li key={product.id} className="space-y-2">
-              <Link href={routes.storeProduct(vendor.slug, product.slug)} className="block space-y-2">
-                <div className="relative aspect-square bg-soft-cloud">
-                  {product.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />
-                  ) : null}
-                  {product.totalStock === 0 ? <span className="absolute top-2 left-2 rounded-full bg-canvas px-2.5 py-1 text-[11px] font-medium text-mute">Sold out</span> : null}
-                </div>
-                <p className="truncate text-sm font-medium">{product.name}</p>
-                <p className="truncate text-xs text-mute">{product.subcategory}</p>
-                <p className="text-sm">
-                  {formatInr(product.priceInr)}
-                  {product.compareAtPriceInr && product.compareAtPriceInr > product.priceInr ? (
-                    <span className="ml-2 text-mute line-through">{formatInr(product.compareAtPriceInr)}</span>
-                  ) : null}
-                </p>
-              </Link>
-              <button
-                type="button"
-                disabled={pendingId === product.id || product.totalStock === 0}
-                onClick={() => void addToBag(product)}
-                className="h-10 rounded-full bg-ink px-4 text-sm font-medium text-canvas disabled:opacity-50"
-              >
-                {pendingId === product.id ? "Adding…" : product.variants.filter((v) => v.active).length > 1 ? "Choose size" : "Add"}
-              </button>
-            </li>
+            <ShopProductCard
+              key={product.id}
+              product={product}
+              pending={pendingId === product.id}
+              onAdd={() => void addToBag(product)}
+            />
           ))}
         </ul>
       )}

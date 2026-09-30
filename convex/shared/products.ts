@@ -299,6 +299,19 @@ export const vProductView = v.object({
   updatedAt: v.number(),
 });
 
+/** How a catalog product relates to something already in the shopper's wardrobe. */
+export const vWardrobeRelation = v.object({
+  kind: v.union(v.literal("similar"), v.literal("pairs")),
+  itemId: v.id("items"),
+  itemName: v.string(),
+  itemImageUrl: v.union(v.string(), v.null()),
+});
+
+/** Catalog rail row: product plus optional wardrobe relation for buy UX. */
+export const vRailProductView = vProductView.extend({
+  relation: v.union(v.null(), vWardrobeRelation),
+});
+
 export const vDiscountView = v.object({
   id: v.id("discounts"),
   name: v.string(),

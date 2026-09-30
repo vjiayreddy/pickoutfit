@@ -14,6 +14,7 @@ export const routes = {
   newOutfit: "/outfits/new",
   outfit: (outfitId: Id<"outfits"> | string) => `/outfits/${outfitId}`,
   lookbook: "/lookbook",
+  shop: "/shop",
   services: "/services",
   service: (id: string) => `/services/${id}`,
   share: (token: string) => `/share/${token}`,

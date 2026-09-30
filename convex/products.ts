@@ -5,21 +5,35 @@ import { appError } from "./lib/errors";
 import {
   getPublicProduct,
   getPublicProductById,
-  listCatalog,
+  listCatalogForWardrobe,
+  listShopCatalog,
   listStorefront,
   shopTheLook,
 } from "./model/catalog";
 import { toStorefrontView } from "./model/vendors";
-import { vProductCategory, vProductView } from "./shared/products";
+import { vProductCategory, vProductView, vRailProductView } from "./shared/products";
 import { vStorefrontView, vendorSellable } from "./shared/vendors";
 
-/** Active catalog rows for the signed-in user's presentation. */
+/**
+ * Active catalog rows for the signed-in user's presentation, tagged against their wardrobe
+ * (similar / pairs) and sorted for the buy rail.
+ */
 export const listForCategory = query({
   args: { category: vProductCategory, vendorId: v.optional(v.id("vendors")) },
-  returns: v.array(vProductView),
+  returns: v.array(vRailProductView),
   handler: async (ctx, { category, vendorId }) => {
     const user = await requireUser(ctx);
-    return listCatalog(ctx, category, user.prefs.presentation, { vendorId });
+    return listCatalogForWardrobe(ctx, user._id, category, user.prefs.presentation, { vendorId });
+  },
+});
+
+/** Cross-vendor shop browse for the signed-in shopper's presentation. */
+export const listShop = query({
+  args: { category: v.optional(vProductCategory) },
+  returns: v.array(vProductView),
+  handler: async (ctx, { category }) => {
+    const user = await requireUser(ctx);
+    return listShopCatalog(ctx, user.prefs.presentation, { category });
   },
 });
 

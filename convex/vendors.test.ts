@@ -155,6 +155,33 @@ describe("vendorProducts", () => {
     expect(await asUser(t, shopper).query(api.products.listForCategory, { category: "clothes" })).toEqual([]);
   });
 
+  test("shop browse lists active products across categories", async () => {
+    const { t, owner, vendorId } = await activeStore();
+    const productId = await asUser(t, owner).mutation(api.vendorProducts.create, PRODUCT_INPUT);
+    const shopper = await seedUser(t);
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["png"])));
+    await asUser(t, owner).mutation(api.vendorProducts.update, {
+      productId,
+      ...PRODUCT_INPUT,
+      imageIds: [storageId],
+    });
+    await asUser(t, owner).mutation(api.vendorProducts.publish, { productId });
+
+    const all = await asUser(t, shopper).query(api.products.listShop, {});
+    expect(all.map((p) => p.id)).toEqual([productId]);
+
+    const clothes = await asUser(t, shopper).query(api.products.listShop, { category: "clothes" });
+    expect(clothes.map((p) => p.id)).toEqual([productId]);
+
+    const accessories = await asUser(t, shopper).query(api.products.listShop, {
+      category: "accessories",
+    });
+    expect(accessories).toEqual([]);
+
+    await t.run((ctx) => ctx.db.patch(vendorId, { status: "suspended" }));
+    expect(await asUser(t, shopper).query(api.products.listShop, {})).toEqual([]);
+  });
+
   test("cart picks the only variant and enforces stock", async () => {
     const { t, owner } = await activeStore();
     const productId = await asUser(t, owner).mutation(api.vendorProducts.create, PRODUCT_INPUT);

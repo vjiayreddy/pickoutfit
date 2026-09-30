@@ -71,6 +71,7 @@ import type * as shared_shop from "../shared/shop.js";
 import type * as shared_validators from "../shared/validators.js";
 import type * as shared_vendors from "../shared/vendors.js";
 import type * as shared_wardrobe from "../shared/wardrobe.js";
+import type * as shared_wardrobeMatch from "../shared/wardrobeMatch.js";
 import type * as shop from "../shop.js";
 import type * as threads from "../threads.js";
 import type * as uploads from "../uploads.js";
@@ -157,6 +158,7 @@ declare const fullApi: ApiFromModules<{
   "shared/validators": typeof shared_validators;
   "shared/vendors": typeof shared_vendors;
   "shared/wardrobe": typeof shared_wardrobe;
+  "shared/wardrobeMatch": typeof shared_wardrobeMatch;
   shop: typeof shop;
   threads: typeof threads;
   uploads: typeof uploads;
