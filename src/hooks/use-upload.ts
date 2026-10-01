@@ -6,7 +6,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { imageUploadMimeType } from "@/lib/image-upload";
 
-export type UploadTarget = "items" | "avatars" | "vendor";
+export type UploadTarget = "items" | "avatars" | "vendor" | "category";
 export type UploadProgress = Record<string, number>;
 export type UploadEntry = { key: string; file: File };
 export type UploadSuccess = {
@@ -124,6 +124,7 @@ export function useUpload(target: UploadTarget = "items") {
   const generateItemUrl = useMutation(api.uploads.generateUploadUrl);
   const generateAvatarUrl = useMutation(api.avatars.generateUploadUrl);
   const generateVendorUrl = useMutation(api.vendorProducts.generateUploadUrl);
+  const generateCategoryUrl = useMutation(api.categories.generateUploadUrl);
   const [progress, setProgress] = useState<UploadProgress>({});
   const inFlight = useRef(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -139,7 +140,9 @@ export function useUpload(target: UploadTarget = "items") {
             ? await generateAvatarUrl({})
             : target === "vendor"
               ? await generateVendorUrl({})
-              : await generateItemUrl({});
+              : target === "category"
+                ? await generateCategoryUrl({})
+                : await generateItemUrl({});
         return await postFile(url, file, (fraction) =>
           setProgress((current) => ({ ...current, [key]: fraction })),
         );
@@ -148,7 +151,7 @@ export function useUpload(target: UploadTarget = "items") {
         if (inFlight.current === 0) setIsUploading(false);
       }
     },
-    [generateAvatarUrl, generateItemUrl, generateVendorUrl, target],
+    [generateAvatarUrl, generateCategoryUrl, generateItemUrl, generateVendorUrl, target],
   );
 
   const uploadMany = useCallback(

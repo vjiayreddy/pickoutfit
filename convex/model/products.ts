@@ -20,6 +20,12 @@ import {
 import { MAX_PRODUCT_VARIANTS, VENDOR_PLANS, slugify, vendorSellable } from "../shared/vendors";
 import type { Fit, Formality, Presentation, Season } from "../shared/wardrobe";
 import { bumpSystemCounter } from "./stats";
+import {
+  legacyFieldsFromOptions,
+  optionRefsFor,
+  requireActiveVariantTypes,
+  resolveOptionIds,
+} from "./variants";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -35,6 +41,8 @@ export type ProductView = Infer<typeof vProductView>;
 
 export type ProductInput = {
   category: ProductCategory;
+  /** Nested taxonomy node. Optional during migration from flat enums. */
+  categoryId?: Id<"categories">;
   presentation: Presentation;
   name: string;
   brand?: string;
@@ -52,6 +60,8 @@ export type ProductInput = {
   occasion?: Occasion;
   priceInr: number;
   compareAtPriceInr?: number;
+  /** Payload-style option dimensions enabled on this product. */
+  variantTypeIds?: Id<"variantTypes">[];
   /** Photos in display order. Existing rows are matched by storageId. */
   imageIds: Id<"_storage">[];
   variants: VariantInput[];
@@ -126,6 +136,7 @@ export function cleanProductInput(input: ProductInput): ProductInput {
     material: material || undefined,
     imageIds,
     variants,
+    variantTypeIds: input.variantTypeIds,
     size: size || undefined,
     priceInr,
     compareAtPriceInr: compareAtPriceInr && compareAtPriceInr > 0 ? compareAtPriceInr : undefined,
@@ -156,8 +167,10 @@ function cleanVariant(variant: VariantInput, basePrice: number): VariantInput {
     const hex = normalHex(colour.hex) ?? "";
     colour = name || hex ? { name, hex } : undefined;
   }
+  const optionIds = variant.optionIds ? [...new Set(variant.optionIds)] : undefined;
   return {
     ...(variant.id ? { id: variant.id } : {}),
+    ...(optionIds && optionIds.length > 0 ? { optionIds } : {}),
     ...(size ? { size } : {}),
     ...(colour ? { colour } : {}),
     ...(priceInr !== undefined ? { priceInr } : {}),
@@ -241,10 +254,17 @@ export async function vendorFor(
   return vendor;
 }
 
-export function toVariantView(variant: Doc<"productVariants">, product: Doc<"products">): VariantView {
+export async function toVariantView(
+  ctx: Ctx,
+  variant: Doc<"productVariants">,
+  product: Doc<"products">,
+): Promise<VariantView> {
+  const optionIds = variant.optionIds ?? [];
   return {
     id: variant._id,
     sku: variant.sku,
+    optionIds,
+    options: await optionRefsFor(ctx, optionIds),
     size: variant.size ?? null,
     colour: variant.colour ?? null,
     priceInr: effectivePrice(product, variant),
@@ -280,7 +300,7 @@ export async function toProductView(
       url: await ctx.storage.getUrl(storageId),
     })),
   ]);
-  const variants = variantRows.map((variant) => toVariantView(variant, product));
+  const variants = await Promise.all(variantRows.map((variant) => toVariantView(ctx, variant, product)));
   const status = productStatus(product);
   return {
     id: product._id,
@@ -291,6 +311,7 @@ export async function toProductView(
     source: product.source ?? "manual",
     slug: product.slug ?? "",
     category: product.category,
+    categoryId: product.categoryId ?? null,
     presentation: product.presentation,
     name: product.name,
     sku: product.sku ?? null,
@@ -307,6 +328,7 @@ export async function toProductView(
     priceInr: product.priceInr,
     compareAtPriceInr: product.compareAtPriceInr ?? null,
     hasVariants: product.hasVariants ?? false,
+    variantTypeIds: product.variantTypeIds ?? [],
     totalStock: variants.filter((variant) => variant.active).reduce((sum, variant) => sum + variant.stock, 0),
     active: status === "active",
     imageUrl: images[0]?.url ?? null,
@@ -390,6 +412,17 @@ export async function requireVendorProduct(
   return product;
 }
 
+async function resolveCategoryId(
+  ctx: Ctx,
+  categoryId: Id<"categories"> | undefined,
+): Promise<Id<"categories"> | undefined> {
+  if (!categoryId) return undefined;
+  const category = await ctx.db.get(categoryId);
+  if (!category) throw appError("NOT_FOUND", "That category doesn't exist.");
+  if (!category.isActive) throw appError("INVALID_INPUT", "That category is not active.");
+  return categoryId;
+}
+
 export async function createProduct(
   ctx: MutationCtx,
   vendor: Doc<"vendors">,
@@ -397,6 +430,10 @@ export async function createProduct(
   extra: { source?: Doc<"products">["source"]; status?: ProductStatus } = {},
 ): Promise<Id<"products">> {
   const clean = cleanProductInput(input);
+  const categoryId = await resolveCategoryId(ctx, clean.categoryId);
+  const variantTypeIds = clean.variantTypeIds?.length
+    ? await requireActiveVariantTypes(ctx, clean.variantTypeIds)
+    : [];
   const plan = VENDOR_PLANS[vendor.plan];
   if (vendor.productCount >= plan.maxProducts) {
     throw appError("RATE_LIMITED", `Your plan allows ${plan.maxProducts} products. Archive some or upgrade.`);
@@ -410,6 +447,7 @@ export async function createProduct(
     slug,
     source: extra.source ?? "manual",
     category: clean.category,
+    ...(categoryId ? { categoryId } : {}),
     presentation: clean.presentation,
     name: clean.name,
     sku,
@@ -429,6 +467,7 @@ export async function createProduct(
     priceInr: clean.priceInr,
     ...(clean.compareAtPriceInr ? { compareAtPriceInr: clean.compareAtPriceInr } : {}),
     hasVariants: hasRealVariants(clean.variants),
+    ...(variantTypeIds.length > 0 ? { variantTypeIds } : {}),
     active: extra.status === "active",
     searchText: buildProductSearchText(clean),
     soldCount: 0,
@@ -439,7 +478,7 @@ export async function createProduct(
   const product = await ctx.db.get(productId);
   if (!product) throw appError("NOT_FOUND", "Product was not created.");
   await syncImages(ctx, product, vendor, clean.imageIds);
-  await syncVariants(ctx, product, vendor, clean.variants);
+  await syncVariants(ctx, product, vendor, clean.variants, undefined, variantTypeIds);
   await ctx.db.patch(vendor._id, { productCount: vendor.productCount + 1, updatedAt: now });
   return productId;
 }
@@ -452,6 +491,16 @@ export async function updateProduct(
 ): Promise<void> {
   const product = await requireVendorProduct(ctx, vendor, productId);
   const clean = cleanProductInput(input);
+  const categoryId =
+    clean.categoryId !== undefined
+      ? await resolveCategoryId(ctx, clean.categoryId)
+      : product.categoryId;
+  const variantTypeIds =
+    clean.variantTypeIds !== undefined
+      ? clean.variantTypeIds.length > 0
+        ? await requireActiveVariantTypes(ctx, clean.variantTypeIds)
+        : []
+      : (product.variantTypeIds ?? []);
   const sku = product.sku ?? (await allocateSku(ctx, vendor, clean.category));
   const slug =
     product.slug && product.name === clean.name
@@ -460,6 +509,7 @@ export async function updateProduct(
   await ctx.db.patch(product._id, {
     slug,
     category: clean.category,
+    categoryId,
     presentation: clean.presentation,
     name: clean.name,
     sku,
@@ -479,6 +529,7 @@ export async function updateProduct(
     priceInr: clean.priceInr,
     compareAtPriceInr: clean.compareAtPriceInr,
     hasVariants: hasRealVariants(clean.variants),
+    variantTypeIds: variantTypeIds.length > 0 ? variantTypeIds : undefined,
     searchText: buildProductSearchText(clean),
     // Legacy fields are superseded by productImages rows.
     imageIds: undefined,
@@ -486,11 +537,14 @@ export async function updateProduct(
     updatedAt: Date.now(),
   });
   await syncImages(ctx, product, vendor, clean.imageIds);
-  await syncVariants(ctx, product, vendor, clean.variants);
+  await syncVariants(ctx, product, vendor, clean.variants, undefined, variantTypeIds);
 }
 
 function hasRealVariants(variants: VariantInput[]): boolean {
-  return variants.length > 1 || variants.some((variant) => Boolean(variant.size || variant.colour));
+  return (
+    variants.length > 1 ||
+    variants.some((variant) => Boolean(variant.size || variant.colour || variant.optionIds?.length))
+  );
 }
 
 /** Makes `productImages` match `imageIds` in order; removed photos are deleted from storage. */
@@ -537,8 +591,10 @@ export async function syncVariants(
   vendor: Doc<"vendors">,
   variants: VariantInput[],
   actorUserId?: Id<"users">,
+  allowedTypeIds?: Id<"variantTypes">[],
 ): Promise<void> {
   const now = Date.now();
+  const typeIds = allowedTypeIds ?? product.variantTypeIds ?? [];
   const existing = await loadVariants(ctx, product._id);
   const keep = new Set(variants.map((variant) => variant.id).filter(Boolean));
   for (const row of existing) {
@@ -549,10 +605,21 @@ export async function syncVariants(
   for (const [position, variant] of variants.entries()) {
     const row = variant.id ? existing.find((candidate) => candidate._id === variant.id) : undefined;
     if (variant.id && !row) throw appError("NOT_FOUND", "One of the options no longer exists.");
+    let optionIds = variant.optionIds;
+    let size = variant.size;
+    let colour = variant.colour;
+    if (optionIds?.length) {
+      const resolved = await resolveOptionIds(ctx, optionIds, typeIds.length > 0 ? typeIds : undefined);
+      optionIds = resolved.optionIds;
+      const legacy = legacyFieldsFromOptions(resolved.options, resolved.types);
+      size = legacy.size ?? size;
+      colour = legacy.colour ?? colour;
+    }
     if (row) {
       await ctx.db.patch(row._id, {
-        size: variant.size,
-        colour: variant.colour,
+        optionIds: optionIds && optionIds.length > 0 ? optionIds : undefined,
+        size,
+        colour,
         priceInr: variant.priceInr,
         compareAtPriceInr: variant.compareAtPriceInr,
         active: variant.active,
@@ -577,8 +644,9 @@ export async function syncVariants(
       productId: product._id,
       vendorId: vendor._id,
       sku: `${baseSku}-${String(nextSuffix).padStart(2, "0")}`,
-      ...(variant.size ? { size: variant.size } : {}),
-      ...(variant.colour ? { colour: variant.colour } : {}),
+      ...(optionIds && optionIds.length > 0 ? { optionIds } : {}),
+      ...(size ? { size } : {}),
+      ...(colour ? { colour } : {}),
       ...(variant.priceInr !== undefined ? { priceInr: variant.priceInr } : {}),
       ...(variant.compareAtPriceInr ? { compareAtPriceInr: variant.compareAtPriceInr } : {}),
       stock: variant.stock,

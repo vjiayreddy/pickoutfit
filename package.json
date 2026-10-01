@@ -18,6 +18,8 @@
     "@convex-dev/stripe": "^0.1.6",
     "@convex-dev/workflow": "^0.4.8",
     "@gsap/react": "^2.1.2",
+    "ag-grid-community": "^36.2.0",
+    "ag-grid-react": "^36.2.0",
     "better-auth": "^1.6.33",
     "convex": "^1.46.0",
     "eve": "^0.56.0",

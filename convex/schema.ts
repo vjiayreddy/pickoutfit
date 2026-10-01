@@ -446,6 +446,57 @@ export default defineSchema({
     .index("by_styleRef", ["styleRefId"]),
 
   /**
+   * Nested catalog taxonomy (Clothes → Men → Shirt → Formal).
+   * Roots omit `parentId`. `path` is the slug breadcrumb for branch queries.
+   */
+  categories: defineTable({
+    name: v.string(),
+    slug: v.string(),
+    parentId: v.optional(v.id("categories")),
+    path: v.string(),
+    /** Optional cover / icon for the category. */
+    imageStorageId: v.optional(v.id("_storage")),
+    sortOrder: v.number(),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_parentId", ["parentId"])
+    .index("by_slug", ["slug"])
+    .index("by_parentId_and_slug", ["parentId", "slug"])
+    .index("by_path", ["path"]),
+
+  /**
+   * Option dimensions (Payload `variantTypes`): Size, Colour, etc.
+   * Platform-level; products opt in via `variantTypeIds`.
+   */
+  variantTypes: defineTable({
+    label: v.string(),
+    slug: v.string(),
+    sortOrder: v.number(),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_slug", ["slug"])
+    .index("by_sortOrder", ["sortOrder"]),
+
+  /**
+   * Values on a dimension (Payload `variantOptions`): S/M/L, Black/Navy, etc.
+   */
+  variantOptions: defineTable({
+    variantTypeId: v.id("variantTypes"),
+    label: v.string(),
+    value: v.string(),
+    sortOrder: v.number(),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_variantTypeId_and_sortOrder", ["variantTypeId", "sortOrder"])
+    .index("by_variantTypeId_and_value", ["variantTypeId", "value"]),
+
+  /**
    * Marketplace catalog. One row per sellable product, owned by a vendor.
    * `vendorId` / `status` are optional only until the House-vendor backfill has run.
    */
@@ -456,6 +507,8 @@ export default defineSchema({
     slug: v.optional(v.string()),
     source: v.optional(vProductSource),
     category: vProductCategory,
+    /** Nested taxonomy leaf (or any node). Optional until products are backfilled. */
+    categoryId: v.optional(v.id("categories")),
     presentation: vPresentation,
     name: v.string(),
     /** Assigned once at create. Absent on rows saved before SKUs existed. */
@@ -480,6 +533,11 @@ export default defineSchema({
     /** MRP shown struck through when higher than `priceInr`. */
     compareAtPriceInr: v.optional(v.number()),
     hasVariants: v.optional(v.boolean()),
+    /**
+     * Option dimensions enabled on this product (Payload `variantTypes` relation).
+     * Empty / absent means free-form size+colour fields only.
+     */
+    variantTypeIds: v.optional(v.array(v.id("variantTypes"))),
     /** Cover image. The first entry of `imageIds` when that list is set. Legacy; see `productImages`. */
     storageId: v.optional(v.id("_storage")),
     /** Legacy photo list, moved to `productImages` by the backfill. */
@@ -499,6 +557,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_category_and_presentation", ["category", "presentation"])
+    .index("by_categoryId", ["categoryId"])
     .index("by_createdAt", ["createdAt"])
     .index("by_sku", ["sku"])
     .index("by_vendorId_and_status", ["vendorId", "status"])
@@ -525,11 +584,16 @@ export default defineSchema({
     .index("by_vendorId", ["vendorId"])
     .index("by_storageId", ["storageId"]),
 
-  /** Size/colour options with their own stock. A product without variants gets one default row. */
+  /**
+   * Sellable SKUs (Payload `variants`).
+   * Prefer `optionIds` (one option per enabled type); `size`/`colour` stay for cart labels + legacy rows.
+   */
   productVariants: defineTable({
     productId: v.id("products"),
     vendorId: v.id("vendors"),
     sku: v.string(),
+    /** Selected `variantOptions` for this SKU (Payload `variants.options`). */
+    optionIds: v.optional(v.array(v.id("variantOptions"))),
     size: v.optional(v.string()),
     colour: v.optional(vVariantColour),
     /** Unset means the product price. */

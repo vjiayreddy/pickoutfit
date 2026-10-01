@@ -1,13 +1,14 @@
 "use client";
 
 import { useAction, useMutation, useQuery } from "convex/react";
-import { ImagePlus, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, ImagePlus, Plus, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import { COLOUR_HEX } from "@convex/shared/variants";
 import {
   AGE_GROUPS,
   AGE_GROUP_LABELS,
@@ -15,8 +16,6 @@ import {
   MAX_PRODUCT_IMAGES,
   OCCASIONS,
   OCCASION_LABELS,
-  PRODUCT_CATEGORIES,
-  PRODUCT_CATEGORY_LABELS,
   productTypeLabel,
   productTypesFor,
   type AgeGroup,
@@ -28,10 +27,12 @@ import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { CategoryTreePicker } from "@/components/vendor/CategoryTreePicker";
 import { useVendor } from "@/components/vendor/VendorDesk";
 import { useUpload } from "@/hooks/use-upload";
 import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
+import { formatInr } from "@/lib/format";
 import { routes } from "@/lib/routes";
 
 const AUDIENCE: { value: Presentation; label: string }[] = [
@@ -47,6 +48,7 @@ type Slot = { key: string; storageId?: Id<"_storage">; previewUrl: string; uploa
 type VariantRow = {
   key: string;
   id?: Id<"productVariants">;
+  optionIds: Id<"variantOptions">[];
   size: string;
   colourName: string;
   colourHex: string;
@@ -62,6 +64,7 @@ type Draft = {
   subcategory: string;
   description: string;
   category: ProductCategory;
+  categoryId: Id<"categories"> | null;
   presentation: Presentation;
   colourPrimary: string;
   colourSecondary: string;
@@ -73,11 +76,22 @@ type Draft = {
   occasion: Occasion | "";
   priceInr: string;
   compareAtPriceInr: string;
+  /** Payload-style dimensions enabled on this product. */
+  variantTypeIds: Id<"variantTypes">[];
   variants: VariantRow[];
 };
 
 function newVariant(): VariantRow {
-  return { key: crypto.randomUUID(), size: "", colourName: "", colourHex: "", priceInr: "", stock: "0", active: true };
+  return {
+    key: crypto.randomUUID(),
+    optionIds: [],
+    size: "",
+    colourName: "",
+    colourHex: "",
+    priceInr: "",
+    stock: "0",
+    active: true,
+  };
 }
 
 const EMPTY: Draft = {
@@ -87,6 +101,7 @@ const EMPTY: Draft = {
   subcategory: "",
   description: "",
   category: "clothes",
+  categoryId: null,
   presentation: "neutral",
   colourPrimary: "",
   colourSecondary: "",
@@ -98,10 +113,44 @@ const EMPTY: Draft = {
   occasion: "",
   priceInr: "",
   compareAtPriceInr: "",
+  variantTypeIds: [],
   variants: [newVariant()],
 };
 
 type ProductView = NonNullable<FunctionReturnType<typeof api.vendorProducts.get>>;
+type VariantCatalog = FunctionReturnType<typeof api.variants.catalog>;
+type CatalogType = VariantCatalog[number];
+type CatalogOption = CatalogType["options"][number];
+
+function optionById(catalog: VariantCatalog, optionId: Id<"variantOptions">): CatalogOption | undefined {
+  for (const type of catalog) {
+    const match = type.options.find((option) => option.id === optionId);
+    if (match) return match;
+  }
+  return undefined;
+}
+
+/** Keep free-text size/colour in sync with selected catalog options. */
+function labelsFromOptions(
+  catalog: VariantCatalog,
+  optionIds: Id<"variantOptions">[],
+): Pick<VariantRow, "size" | "colourName" | "colourHex"> {
+  let size = "";
+  let colourName = "";
+  let colourHex = "";
+  for (const optionId of optionIds) {
+    const option = optionById(catalog, optionId);
+    if (!option) continue;
+    const type = catalog.find((row) => row.id === option.variantTypeId);
+    if (!type) continue;
+    if (type.slug === "size") size = option.label;
+    if (type.slug === "colour") {
+      colourName = option.label;
+      colourHex = COLOUR_HEX[option.value] ?? colourHex;
+    }
+  }
+  return { size, colourName, colourHex };
+}
 
 function draftFrom(product: ProductView): Draft {
   return {
@@ -111,6 +160,7 @@ function draftFrom(product: ProductView): Draft {
     subcategory: product.subcategory,
     description: product.description,
     category: product.category,
+    categoryId: product.categoryId,
     presentation: product.presentation,
     colourPrimary: product.colours.primary,
     colourSecondary: product.colours.secondary.join(", "),
@@ -122,10 +172,12 @@ function draftFrom(product: ProductView): Draft {
     occasion: product.occasion ?? "",
     priceInr: String(product.priceInr),
     compareAtPriceInr: product.compareAtPriceInr ? String(product.compareAtPriceInr) : "",
+    variantTypeIds: product.variantTypeIds,
     variants: product.variants.length
       ? product.variants.map((variant) => ({
           key: variant.id,
           id: variant.id,
+          optionIds: variant.optionIds,
           size: variant.size ?? "",
           colourName: variant.colour?.name ?? "",
           colourHex: variant.colour?.hex ?? "",
@@ -153,6 +205,8 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
   const unpublish = useMutation(api.vendorProducts.unpublish);
   const archive = useMutation(api.vendorProducts.archive);
   const discardImage = useMutation(api.vendorProducts.discardImage);
+  const seedVariantDefaults = useMutation(api.variants.seedDefaults);
+  const catalog = useQuery(api.variants.catalog, {});
   const describe = useAction(api.ai.openai.describeProduct);
   const { upload } = useUpload("vendor");
 
@@ -168,12 +222,119 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
   const [selectedKey, setSelectedKey] = useState<string | null>(product?.images[0]?.storageId ?? null);
   const [saving, setSaving] = useState(false);
   const [filling, setFilling] = useState(false);
+  const [seedingCatalog, setSeedingCatalog] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const seededOnce = useRef(false);
+  /** Skip auto Size/Colour enable when editing an existing product. */
+  const defaultedTypes = useRef(Boolean(product));
   const locked = me.vendor.status === "suspended" || me.vendor.status === "closed";
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
+
+  // Bootstrap Size + Colour once so the desk has options to pick.
+  useEffect(() => {
+    if (catalog === undefined || catalog.length > 0 || seededOnce.current || locked) return;
+    seededOnce.current = true;
+    setSeedingCatalog(true);
+    void seedVariantDefaults({})
+      .then(() => toast.success("Size and colour options ready."))
+      .catch((caught) => {
+        seededOnce.current = false;
+        toast.error(reportError(caught).message);
+      })
+      .finally(() => setSeedingCatalog(false));
+  }, [catalog, locked, seedVariantDefaults]);
+
+  // New products default to Size + Colour once the catalog loads.
+  useEffect(() => {
+    if (product || !catalog?.length || defaultedTypes.current) return;
+    defaultedTypes.current = true;
+    const defaults = catalog.filter((type) => type.slug === "size" || type.slug === "colour").map((type) => type.id);
+    if (defaults.length > 0) {
+      setDraft((current) =>
+        current.variantTypeIds.length > 0 ? current : { ...current, variantTypeIds: defaults },
+      );
+    }
+  }, [catalog, product]);
+
+  const enabledTypes = useMemo(() => {
+    if (!catalog) return [];
+    return catalog.filter((type) => draft.variantTypeIds.includes(type.id));
+  }, [catalog, draft.variantTypeIds]);
+
+  function toggleVariantType(typeId: Id<"variantTypes">) {
+    const on = draft.variantTypeIds.includes(typeId);
+    const nextIds = on ? draft.variantTypeIds.filter((id) => id !== typeId) : [...draft.variantTypeIds, typeId];
+    const removedOptionIds = new Set<Id<"variantOptions">>();
+    if (on && catalog) {
+      const type = catalog.find((row) => row.id === typeId);
+      for (const option of type?.options ?? []) removedOptionIds.add(option.id);
+    }
+    setDraft((current) => ({
+      ...current,
+      variantTypeIds: nextIds,
+      variants: current.variants.map((row) => {
+        if (removedOptionIds.size === 0) return row;
+        const optionIds = row.optionIds.filter((id) => !removedOptionIds.has(id));
+        return {
+          ...row,
+          optionIds,
+          ...(catalog ? labelsFromOptions(catalog, optionIds) : {}),
+        };
+      }),
+    }));
+  }
+
+  function setRowOption(rowKey: string, type: CatalogType, optionId: string) {
+    if (!catalog) return;
+    setDraft((current) => ({
+      ...current,
+      variants: current.variants.map((row) => {
+        if (row.key !== rowKey) return row;
+        const withoutType = row.optionIds.filter((id) => {
+          const option = optionById(catalog, id);
+          return option?.variantTypeId !== type.id;
+        });
+        const optionIds = optionId
+          ? [...withoutType, optionId as Id<"variantOptions">]
+          : withoutType;
+        return { ...row, optionIds, ...labelsFromOptions(catalog, optionIds) };
+      }),
+    }));
+  }
+
+  /** Build one SKU row per combination of enabled type options (capped). */
+  function fillAllCombinations() {
+    if (!catalog || enabledTypes.length === 0) return;
+    const lists = enabledTypes.map((type) => type.options);
+    if (lists.some((list) => list.length === 0)) {
+      toast.error("Each enabled dimension needs at least one option.");
+      return;
+    }
+    const MAX_ROWS = 48;
+    let combos: CatalogOption[][] = [[]];
+    for (const options of lists) {
+      const next: CatalogOption[][] = [];
+      for (const prefix of combos) {
+        for (const option of options) {
+          next.push([...prefix, option]);
+          if (next.length >= MAX_ROWS) break;
+        }
+        if (next.length >= MAX_ROWS) break;
+      }
+      combos = next;
+    }
+    set(
+      "variants",
+      combos.map((picked) => {
+        const optionIds = picked.map((option) => option.id);
+        return { ...newVariant(), optionIds, ...labelsFromOptions(catalog, optionIds), stock: "0" };
+      }),
+    );
+    toast.success(`Created ${combos.length} variant row${combos.length === 1 ? "" : "s"}.`);
+  }
 
   const chosen = slots.find((slot) => slot.key === selectedKey) ?? slots[0] ?? null;
   const uploading = slots.some((slot) => slot.uploading);
@@ -271,6 +432,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     const subcategory = draft.productType ? productTypeLabel(draft.productType) : draft.subcategory.trim();
     return {
       category: draft.category,
+      categoryId: draft.categoryId ?? undefined,
       presentation: draft.presentation,
       name: draft.name.trim(),
       brand: draft.brand.trim() || undefined,
@@ -289,9 +451,11 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       occasion: draft.occasion || undefined,
       priceInr: Math.round(price),
       compareAtPriceInr: compareAt && compareAt > 0 ? Math.round(compareAt) : undefined,
+      variantTypeIds: draft.variantTypeIds.length > 0 ? draft.variantTypeIds : undefined,
       imageIds: slots.flatMap((slot) => (slot.storageId ? [slot.storageId] : [])),
       variants: draft.variants.map((row) => ({
         id: row.id,
+        optionIds: row.optionIds.length > 0 ? row.optionIds : undefined,
         size: row.size.trim() || undefined,
         colour:
           row.colourName.trim() || /^#[0-9a-fA-F]{6}$/.test(row.colourHex)
@@ -340,30 +504,64 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
 
   const knownTypes = productTypesFor(draft.category);
   const coverKey = slots[0]?.key;
+  const status = product?.status;
+  const statusText =
+    status === "active" ? "Live" : status === "draft" ? "Draft" : status === "archived" ? "Archived" : "New";
+  const totalStock = draft.variants.reduce((sum, row) => sum + Math.max(0, Math.round(Number(row.stock) || 0)), 0);
+  const displayName = draft.name.trim() || (product ? "Untitled product" : "New product");
+  const busy = saving || uploading || locked;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-medium tracking-tight">{product ? product.name || "Edit product" : "New product"}</h2>
-          <p className="text-sm text-mute">
-            {product?.sku ? `SKU ${product.sku}` : "A SKU is assigned when you save."}
-            {product ? ` · ${product.status === "active" ? "Live" : product.status === "draft" ? "Draft" : "Archived"}` : ""}
-          </p>
-        </div>
-        {product ? (
-          <div className="flex flex-wrap gap-2">
-            {product.status === "active" ? (
-              <Button variant="secondary" size="sm" disabled={locked} onClick={() => void unpublish({ productId: product.id }).then(() => toast.success("Hidden from the shop.")).catch((e) => toast.error(reportError(e).message))}>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="sticky top-0 z-20 shrink-0 border-b border-hairline bg-canvas px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button href={routes.vendorProducts} variant="ghost" size="icon-sm" aria-label="Back to products">
+            <ArrowLeft className="size-4" />
+          </Button>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="truncate text-lg font-medium tracking-tight capitalize">{displayName}</h2>
+              <span
+                className={cn(
+                  "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
+                  status === "active" && "bg-soft-cloud text-success",
+                  status === "draft" && "bg-soft-cloud text-mute",
+                  status === "archived" && "bg-canvas text-mute ring-1 ring-inset ring-hairline",
+                  !status && "bg-soft-cloud text-mute",
+                )}
+              >
+                {statusText}
+              </span>
+            </div>
+            <p className="truncate text-xs text-mute">
+              {product?.sku ? `SKU ${product.sku}` : "SKU assigned on save"}
+              {" · "}
+              {draft.variants.length} variant{draft.variants.length === 1 ? "" : "s"}
+              {" · "}
+              <span className={totalStock === 0 ? "text-sale" : undefined}>{totalStock} in stock</span>
+              {draft.priceInr ? ` · ${formatInr(Number(draft.priceInr) || 0)}` : ""}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {product?.status === "active" ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={locked}
+                onClick={() =>
+                  void unpublish({ productId: product.id })
+                    .then(() => toast.success("Hidden from the shop."))
+                    .catch((e) => toast.error(reportError(e).message))
+                }
+              >
                 Unpublish
               </Button>
             ) : null}
-            {product.status !== "archived" ? (
+            {product && product.status !== "archived" ? (
               <ConfirmDialog
                 trigger={
-                  <Button variant="destructive" size="sm" disabled={locked}>
-                    <Trash2 />
-                    Archive
+                  <Button variant="ghost" size="icon-sm" disabled={locked} aria-label="Archive product">
+                    <Trash2 className="size-4 text-sale" />
                   </Button>
                 }
                 title="Archive this product?"
@@ -376,34 +574,63 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 }}
               />
             ) : null}
+            <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => void save()}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+            {product?.status !== "active" ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy || me.vendor.status !== "active"}
+                onClick={() => void saveAndPublish()}
+              >
+                Publish
+              </Button>
+            ) : null}
           </div>
+        </div>
+        {error ? <p className="mt-2 text-sm text-sale">{error}</p> : null}
+        {me.vendor.status !== "active" ? (
+          <p className="mt-2 text-xs text-mute">Publishing unlocks once the store is approved.</p>
         ) : null}
       </div>
 
-      <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-        <section className="space-y-4 lg:sticky lg:top-20">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="grid items-start gap-8 px-4 py-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+        <aside className="space-y-3 lg:sticky lg:top-0 lg:self-start">
+          <SectionHead title="Media" hint={`Up to ${MAX_PRODUCT_IMAGES} photos · JPEG, PNG, WebP`} />
           <div className="relative aspect-square bg-soft-cloud">
             {chosen?.previewUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={chosen.previewUrl} alt="" className={cn("h-full w-full object-cover", chosen.uploading && "opacity-50")} />
+              <img
+                src={chosen.previewUrl}
+                alt=""
+                className={cn("h-full w-full object-cover", chosen.uploading && "opacity-50")}
+              />
             ) : (
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center"
+                className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center transition hover:bg-hairline-soft"
               >
                 <ImagePlus className="size-6" aria-hidden />
-                <p className="text-sm font-medium">Add a product photo</p>
-                <p className="text-sm text-mute">JPEG, PNG, or WebP. Up to {MAX_PRODUCT_IMAGES} photos, 5 MB each.</p>
+                <p className="text-sm font-medium">Add cover photo</p>
+                <p className="text-xs text-mute">First image is the shop cover</p>
               </button>
             )}
             {chosen?.uploading ? (
-              <p className="absolute inset-x-0 bottom-0 bg-ink/80 px-4 py-3 text-sm font-medium text-canvas">Uploading…</p>
+              <p className="absolute inset-x-0 bottom-0 bg-ink/80 px-4 py-3 text-sm font-medium text-canvas">
+                Uploading…
+              </p>
             ) : filling ? (
-              <p className="absolute inset-x-0 bottom-0 bg-ink/80 px-4 py-3 text-sm font-medium text-canvas">Reading this photo…</p>
+              <p className="absolute inset-x-0 bottom-0 bg-ink/80 px-4 py-3 text-sm font-medium text-canvas">
+                Reading this photo…
+              </p>
             ) : null}
             {chosen && chosen.key === coverKey ? (
-              <span className="absolute top-3 left-3 rounded-full bg-canvas px-3 py-1 text-xs font-medium">Cover</span>
+              <span className="absolute top-3 left-3 rounded-full bg-canvas px-3 py-1 text-xs font-medium">
+                Cover
+              </span>
             ) : null}
           </div>
           <ul className="grid grid-cols-4 gap-2">
@@ -414,7 +641,10 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                   onClick={() => setSelectedKey(slot.key)}
                   aria-pressed={slot.key === chosen?.key}
                   aria-label={`Photo ${index + 1}`}
-                  className={cn("block aspect-square w-full bg-soft-cloud", slot.key === chosen?.key && "ring-2 ring-ink ring-offset-2")}
+                  className={cn(
+                    "block aspect-square w-full bg-soft-cloud",
+                    slot.key === chosen?.key && "ring-2 ring-ink ring-offset-2",
+                  )}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={slot.previewUrl} alt="" className="h-full w-full object-cover" />
@@ -423,9 +653,9 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                   type="button"
                   onClick={() => void removeSlot(slot)}
                   aria-label={`Remove photo ${index + 1}`}
-                  className="absolute top-1 right-1 flex size-8 items-center justify-center rounded-full bg-canvas text-ink"
+                  className="absolute top-1 right-1 flex size-7 items-center justify-center rounded-full bg-canvas text-ink"
                 >
-                  <X className="size-4" aria-hidden />
+                  <X className="size-3.5" aria-hidden />
                 </button>
               </li>
             ))}
@@ -434,7 +664,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="flex aspect-square w-full flex-col items-center justify-center gap-1 bg-soft-cloud text-sm font-medium"
+                  className="flex aspect-square w-full flex-col items-center justify-center gap-1 bg-soft-cloud text-xs font-medium text-mute transition hover:text-ink"
                 >
                   <ImagePlus className="size-4" aria-hidden />
                   Add
@@ -454,7 +684,13 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
             }}
           />
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" size="sm" disabled={!chosen?.storageId || filling || saving} onClick={() => void fillFromPhoto()}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={!chosen?.storageId || filling || saving}
+              onClick={() => void fillFromPhoto()}
+            >
               {filling ? "Reading…" : "Fill from photo"}
             </Button>
             {chosen && chosen.key !== coverKey ? (
@@ -463,18 +699,28 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
               </Button>
             ) : null}
           </div>
-          <p className="text-sm text-mute">The first photo is the shop cover. Select a photo and fill the listing from it, then adjust anything.</p>
-        </section>
+        </aside>
 
-        <section className="space-y-8">
-          <div className="space-y-4">
-            <h3 className="text-sm font-medium">Listing</h3>
+        <div className="min-w-0 space-y-8">
+          <section className="space-y-4">
+            <SectionHead title="Basics" hint="What shoppers see first on the product page." />
             <Field label="Name">
-              <Input required maxLength={80} value={draft.name} onChange={(e) => set("name", e.target.value)} />
+              <Input
+                required
+                maxLength={80}
+                value={draft.name}
+                onChange={(e) => set("name", e.target.value)}
+                placeholder="Khaki slim trousers"
+              />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Brand">
-                <Input maxLength={80} value={draft.brand} onChange={(e) => set("brand", e.target.value)} />
+                <Input
+                  maxLength={80}
+                  value={draft.brand}
+                  onChange={(e) => set("brand", e.target.value)}
+                  placeholder="Optional"
+                />
               </Field>
               <Field label="Type">
                 <select
@@ -494,105 +740,337 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 </select>
               </Field>
             </div>
-            <Field label="Description">
-              <Textarea rows={4} maxLength={400} value={draft.description} onChange={(e) => set("description", e.target.value)} />
+            <Field label="Description" hint={`${draft.description.length}/400`}>
+              <Textarea
+                rows={4}
+                maxLength={400}
+                value={draft.description}
+                onChange={(e) => set("description", e.target.value)}
+                placeholder="Fit, fabric, and how to wear it."
+              />
             </Field>
-          </div>
+          </section>
 
-          <ChoiceGroup
-            legend="Category"
-            value={draft.category}
-            onChange={(next) => {
-              set("category", next as ProductCategory);
-              if (!isProductType(next as ProductCategory, draft.productType)) set("productType", "");
-            }}
-            options={PRODUCT_CATEGORIES.map((item) => ({ value: item, label: PRODUCT_CATEGORY_LABELS[item] }))}
-          />
-          <ChoiceGroup legend="Who it is for" value={draft.presentation} onChange={(next) => set("presentation", next as Presentation)} options={AUDIENCE} />
-          <ChoiceGroup legend="Age" value={draft.ageGroup} onChange={(next) => set("ageGroup", next as AgeGroup | "")} options={AGE_GROUPS.map((item) => ({ value: item, label: AGE_GROUP_LABELS[item] }))} clearable />
-          <ChoiceGroup legend="Occasion" value={draft.occasion} onChange={(next) => set("occasion", next as Occasion | "")} options={OCCASIONS.map((item) => ({ value: item, label: OCCASION_LABELS[item] }))} clearable />
-
-          <div className="grid gap-4 border-t border-hairline pt-8 sm:grid-cols-2">
-            <Field label="Colour">
-              <Input maxLength={40} value={draft.colourPrimary} onChange={(e) => set("colourPrimary", e.target.value)} />
-            </Field>
-            <Field label="Colour value">
-              <span className="flex gap-2">
-                <input
-                  type="color"
-                  aria-label="Pick a colour"
-                  value={/^#[0-9a-fA-F]{6}$/.test(draft.colourHex) ? draft.colourHex : "#111111"}
-                  onChange={(e) => set("colourHex", e.target.value)}
-                  className="h-12 w-14 shrink-0 rounded-full bg-soft-cloud"
-                />
-                <Input value={draft.colourHex} onChange={(e) => set("colourHex", e.target.value)} placeholder="#1b2a4a" maxLength={7} />
-              </span>
-            </Field>
-            <Field label="Other colours">
-              <Input value={draft.colourSecondary} onChange={(e) => set("colourSecondary", e.target.value)} placeholder="navy, white" />
-            </Field>
-            <Field label="Pattern">
-              <Input maxLength={40} value={draft.pattern} onChange={(e) => set("pattern", e.target.value)} placeholder="solid, stripe, check" />
-            </Field>
-            <Field label="Material">
-              <Input maxLength={60} value={draft.material} onChange={(e) => set("material", e.target.value)} placeholder="100% linen" />
-            </Field>
-            <Field label="One size / fit note">
-              <Input maxLength={24} value={draft.size} onChange={(e) => set("size", e.target.value)} placeholder="Only for one-size pieces" />
-            </Field>
-          </div>
-
-          <div className="grid gap-4 border-t border-hairline pt-8 sm:grid-cols-2">
-            <Field label="Price (INR)">
-              <Input type="number" required min={0} step={1} value={draft.priceInr} onChange={(e) => set("priceInr", e.target.value)} />
-            </Field>
-            <Field label="Compare-at price (INR)" hint="Shown struck through when higher than the price.">
-              <Input type="number" min={0} step={1} value={draft.compareAtPriceInr} onChange={(e) => set("compareAtPriceInr", e.target.value)} />
-            </Field>
-          </div>
-
-          <div className="space-y-3 border-t border-hairline pt-8">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-medium">Sizes, colours and stock</h3>
-                <p className="text-sm text-mute">One row per sellable option. Leave price blank to use the product price.</p>
-              </div>
-              <Button type="button" variant="secondary" size="sm" onClick={() => set("variants", [...draft.variants, newVariant()])}>
-                <Plus />
-                Add option
-              </Button>
+          <section className="space-y-4 border-t border-hairline pt-8">
+            <SectionHead title="Classification" hint="Category tree and who this piece is for." />
+            <CategoryTreePicker
+              value={draft.categoryId}
+              onChange={(pick) => {
+                if (!pick) {
+                  setDraft((prev) => ({ ...prev, categoryId: null }));
+                  return;
+                }
+                setDraft((prev) => {
+                  const nextType =
+                    pick.productTypeHint && isProductType(pick.legacyCategory, pick.productTypeHint)
+                      ? pick.productTypeHint
+                      : isProductType(pick.legacyCategory, prev.productType)
+                        ? prev.productType
+                        : "";
+                  return {
+                    ...prev,
+                    categoryId: pick.categoryId,
+                    category: pick.legacyCategory,
+                    productType: nextType,
+                    subcategory: pick.name,
+                  };
+                });
+              }}
+            />
+            <ChoiceGroup
+              legend="Audience"
+              value={draft.presentation}
+              onChange={(next) => set("presentation", next as Presentation)}
+              options={AUDIENCE}
+            />
+            <div className="grid gap-6 sm:grid-cols-2">
+              <ChoiceGroup
+                legend="Age"
+                value={draft.ageGroup}
+                onChange={(next) => set("ageGroup", next as AgeGroup | "")}
+                options={AGE_GROUPS.map((item) => ({ value: item, label: AGE_GROUP_LABELS[item] }))}
+                clearable
+              />
+              <ChoiceGroup
+                legend="Occasion"
+                value={draft.occasion}
+                onChange={(next) => set("occasion", next as Occasion | "")}
+                options={OCCASIONS.map((item) => ({ value: item, label: OCCASION_LABELS[item] }))}
+                clearable
+              />
             </div>
+          </section>
+
+          <section className="space-y-4 border-t border-hairline pt-8">
+            <SectionHead title="Attributes" hint="Helps search and outfit matching." />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Primary colour">
+                <Input
+                  maxLength={40}
+                  value={draft.colourPrimary}
+                  onChange={(e) => set("colourPrimary", e.target.value)}
+                  placeholder="Khaki"
+                />
+              </Field>
+              <Field label="Colour hex">
+                <span className="flex gap-2">
+                  <input
+                    type="color"
+                    aria-label="Pick a colour"
+                    value={/^#[0-9a-fA-F]{6}$/.test(draft.colourHex) ? draft.colourHex : "#111111"}
+                    onChange={(e) => set("colourHex", e.target.value)}
+                    className="h-12 w-14 shrink-0 rounded-full bg-soft-cloud"
+                  />
+                  <Input
+                    value={draft.colourHex}
+                    onChange={(e) => set("colourHex", e.target.value)}
+                    placeholder="#c4a574"
+                    maxLength={7}
+                  />
+                </span>
+              </Field>
+              <Field label="Other colours">
+                <Input
+                  value={draft.colourSecondary}
+                  onChange={(e) => set("colourSecondary", e.target.value)}
+                  placeholder="navy, white"
+                />
+              </Field>
+              <Field label="Pattern">
+                <Input
+                  maxLength={40}
+                  value={draft.pattern}
+                  onChange={(e) => set("pattern", e.target.value)}
+                  placeholder="solid, stripe, check"
+                />
+              </Field>
+              <Field label="Material">
+                <Input
+                  maxLength={60}
+                  value={draft.material}
+                  onChange={(e) => set("material", e.target.value)}
+                  placeholder="Cotton twill"
+                />
+              </Field>
+              <Field label="One-size note" hint="Only if this piece has no size variants.">
+                <Input
+                  maxLength={24}
+                  value={draft.size}
+                  onChange={(e) => set("size", e.target.value)}
+                  placeholder="One size"
+                />
+              </Field>
+            </div>
+          </section>
+
+          <section className="space-y-4 border-t border-hairline pt-8">
+            <SectionHead title="Pricing" hint="Base price for the product. Variants can override." />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Price (INR)">
+                <Input
+                  type="number"
+                  required
+                  min={0}
+                  step={1}
+                  value={draft.priceInr}
+                  onChange={(e) => set("priceInr", e.target.value)}
+                  placeholder="2499"
+                />
+              </Field>
+              <Field label="Compare-at (INR)" hint="Shown struck through when higher than price.">
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={draft.compareAtPriceInr}
+                  onChange={(e) => set("compareAtPriceInr", e.target.value)}
+                />
+              </Field>
+            </div>
+          </section>
+
+          <section className="space-y-4 border-t border-hairline pt-8">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <SectionHead
+                title="Variants & stock"
+                hint="Enable Size / Colour, then set stock per SKU. Manage the option lists in Variants."
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button href={routes.vendorVariants} variant="ghost" size="sm">
+                  Manage options
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={locked || enabledTypes.length === 0}
+                  onClick={fillAllCombinations}
+                >
+                  Fill combinations
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={locked}
+                  onClick={() => set("variants", [...draft.variants, newVariant()])}
+                >
+                  <Plus />
+                  Add row
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Option dimensions</p>
+              {catalog === undefined || seedingCatalog ? (
+                <p className="text-sm text-mute">Loading size and colour options…</p>
+              ) : catalog.length === 0 ? (
+                <p className="text-sm text-mute">No variant catalog yet. Refresh after seeding completes.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {catalog.map((type) => {
+                    const selected = draft.variantTypeIds.includes(type.id);
+                    return (
+                      <button
+                        key={type.id}
+                        type="button"
+                        disabled={locked}
+                        aria-pressed={selected}
+                        onClick={() => toggleVariantType(type.id)}
+                        className={cn(
+                          "inline-flex h-10 items-center rounded-full px-4 text-sm font-medium transition active:scale-95 active:opacity-50 disabled:opacity-40",
+                          selected ? "bg-ink text-canvas" : "bg-canvas text-ink ring-1 ring-inset ring-hairline",
+                        )}
+                      >
+                        {type.label}
+                        <span className={cn("ml-1.5", selected ? "text-canvas/70" : "text-mute")}>
+                          {type.options.length}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full min-w-[40rem] text-sm">
                 <thead>
                   <tr className="text-left text-xs text-mute">
-                    <th className="py-2 pr-2 font-medium">Size</th>
-                    <th className="py-2 pr-2 font-medium">Colour</th>
-                    <th className="py-2 pr-2 font-medium">Hex</th>
+                    {enabledTypes.length > 0 ? (
+                      enabledTypes.map((type) => (
+                        <th key={type.id} className="py-2 pr-2 font-medium">
+                          {type.label}
+                        </th>
+                      ))
+                    ) : (
+                      <>
+                        <th className="py-2 pr-2 font-medium">Size</th>
+                        <th className="py-2 pr-2 font-medium">Colour</th>
+                        <th className="py-2 pr-2 font-medium">Hex</th>
+                      </>
+                    )}
                     <th className="py-2 pr-2 font-medium">Price</th>
                     <th className="py-2 pr-2 font-medium">Stock</th>
-                    <th className="py-2 pr-2 font-medium">On sale</th>
+                    <th className="py-2 pr-2 font-medium">Active</th>
                     <th className="py-2 font-medium" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-hairline">
                   {draft.variants.map((row, index) => {
                     const patch = (changes: Partial<VariantRow>) =>
-                      set("variants", draft.variants.map((item) => (item.key === row.key ? { ...item, ...changes } : item)));
+                      set(
+                        "variants",
+                        draft.variants.map((item) => (item.key === row.key ? { ...item, ...changes } : item)),
+                      );
                     return (
                       <tr key={row.key}>
-                        <td className="py-2 pr-2"><Input className="h-10" placeholder="M" value={row.size} onChange={(e) => patch({ size: e.target.value })} /></td>
-                        <td className="py-2 pr-2"><Input className="h-10" placeholder="Oat" value={row.colourName} onChange={(e) => patch({ colourName: e.target.value })} /></td>
-                        <td className="py-2 pr-2"><Input className="h-10" placeholder="#d8cbb4" maxLength={7} value={row.colourHex} onChange={(e) => patch({ colourHex: e.target.value })} /></td>
-                        <td className="py-2 pr-2"><Input className="h-10" type="number" min={0} placeholder={draft.priceInr || "—"} value={row.priceInr} onChange={(e) => patch({ priceInr: e.target.value })} /></td>
-                        <td className="py-2 pr-2"><Input className="h-10" type="number" min={0} value={row.stock} onChange={(e) => patch({ stock: e.target.value })} /></td>
+                        {enabledTypes.length > 0 ? (
+                          enabledTypes.map((type) => {
+                            const selected =
+                              row.optionIds.find((id) => optionById(catalog ?? [], id)?.variantTypeId === type.id) ??
+                              "";
+                            return (
+                              <td key={type.id} className="py-2 pr-2">
+                                <select
+                                  value={selected}
+                                  disabled={locked}
+                                  aria-label={`${type.label} for option ${index + 1}`}
+                                  onChange={(e) => setRowOption(row.key, type, e.target.value)}
+                                  className="h-10 w-full min-w-[6.5rem] rounded-full bg-soft-cloud px-3 text-sm outline-none focus:bg-canvas focus:ring-2 focus:ring-ink disabled:opacity-40"
+                                >
+                                  <option value="">Choose…</option>
+                                  {type.options.map((option) => (
+                                    <option key={option.id} value={option.id}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                            );
+                          })
+                        ) : (
+                          <>
+                            <td className="py-2 pr-2">
+                              <Input
+                                className="h-10"
+                                placeholder="M"
+                                value={row.size}
+                                onChange={(e) => patch({ size: e.target.value })}
+                              />
+                            </td>
+                            <td className="py-2 pr-2">
+                              <Input
+                                className="h-10"
+                                placeholder="Oat"
+                                value={row.colourName}
+                                onChange={(e) => patch({ colourName: e.target.value })}
+                              />
+                            </td>
+                            <td className="py-2 pr-2">
+                              <Input
+                                className="h-10"
+                                placeholder="#d8cbb4"
+                                maxLength={7}
+                                value={row.colourHex}
+                                onChange={(e) => patch({ colourHex: e.target.value })}
+                              />
+                            </td>
+                          </>
+                        )}
                         <td className="py-2 pr-2">
-                          <input type="checkbox" checked={row.active} onChange={(e) => patch({ active: e.target.checked })} className="size-5 accent-ink" aria-label={`Option ${index + 1} on sale`} />
+                          <Input
+                            className="h-10"
+                            type="number"
+                            min={0}
+                            placeholder={draft.priceInr || "—"}
+                            value={row.priceInr}
+                            onChange={(e) => patch({ priceInr: e.target.value })}
+                          />
+                        </td>
+                        <td className="py-2 pr-2">
+                          <Input
+                            className="h-10"
+                            type="number"
+                            min={0}
+                            value={row.stock}
+                            onChange={(e) => patch({ stock: e.target.value })}
+                          />
+                        </td>
+                        <td className="py-2 pr-2">
+                          <input
+                            type="checkbox"
+                            checked={row.active}
+                            onChange={(e) => patch({ active: e.target.checked })}
+                            className="size-5 accent-ink"
+                            aria-label={`Option ${index + 1} active`}
+                          />
                         </td>
                         <td className="py-2 text-right">
                           <button
                             type="button"
-                            disabled={draft.variants.length === 1}
+                            disabled={draft.variants.length === 1 || locked}
                             onClick={() => set("variants", draft.variants.filter((item) => item.key !== row.key))}
                             aria-label={`Remove option ${index + 1}`}
                             className="flex size-9 items-center justify-center rounded-full bg-soft-cloud disabled:opacity-40"
@@ -606,27 +1084,47 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 </tbody>
               </table>
             </div>
-          </div>
 
-          {error ? <p className="text-sm text-sale">{error}</p> : null}
-          <div className="flex flex-wrap items-center gap-3 border-t border-hairline pt-8">
-            <Button type="button" disabled={saving || uploading || locked} onClick={() => void save()}>
-              {saving ? "Saving…" : product ? "Save changes" : "Save draft"}
+            {error ? <p className="text-sm text-sale">{error}</p> : null}
+          </section>
+        </div>
+        </div>
+      </div>
+
+      <div className="shrink-0 border-t border-hairline bg-canvas px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-mute">
+            {uploading ? "Uploading photos…" : saving ? "Saving…" : "Changes save when you press Save."}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button href={routes.vendorProducts} variant="ghost" size="sm">
+              Cancel
+            </Button>
+            <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => void save()}>
+              {saving ? "Saving…" : "Save"}
             </Button>
             {product?.status !== "active" ? (
-              <Button type="button" variant="secondary" disabled={saving || uploading || locked || me.vendor.status !== "active"} onClick={() => void saveAndPublish()}>
-                Save and publish
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy || me.vendor.status !== "active"}
+                onClick={() => void saveAndPublish()}
+              >
+                Publish
               </Button>
             ) : null}
-            <Button href={routes.vendorProducts} variant="ghost">
-              Back to products
-            </Button>
-            {me.vendor.status !== "active" ? (
-              <p className="basis-full text-xs text-mute">Publishing unlocks once the store is approved.</p>
-            ) : null}
           </div>
-        </section>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function SectionHead({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="space-y-0.5">
+      <h3 className="text-sm font-medium tracking-tight text-ink">{title}</h3>
+      {hint ? <p className="text-xs text-mute">{hint}</p> : null}
     </div>
   );
 }

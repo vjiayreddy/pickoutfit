@@ -257,9 +257,18 @@ export const vDiscountScope = v.union(
 
 export const vVariantColour = v.object({ name: v.string(), hex: v.string() });
 
+export const vVariantOptionRef = v.object({
+  id: v.id("variantOptions"),
+  variantTypeId: v.id("variantTypes"),
+  label: v.string(),
+  value: v.string(),
+});
+
 export const vVariantView = v.object({
   id: v.id("productVariants"),
   sku: v.string(),
+  optionIds: v.array(v.id("variantOptions")),
+  options: v.array(vVariantOptionRef),
   size: v.union(v.string(), v.null()),
   colour: v.union(vVariantColour, v.null()),
   priceInr: v.number(),
@@ -272,6 +281,8 @@ export const vVariantView = v.object({
 /** Editable variant fields. `id` present means update, absent means create. */
 export const vVariantInput = v.object({
   id: v.optional(v.id("productVariants")),
+  /** Preferred: one option per product variant type (Payload-style). */
+  optionIds: v.optional(v.array(v.id("variantOptions"))),
   size: v.optional(v.string()),
   colour: v.optional(vVariantColour),
   priceInr: v.optional(v.number()),
@@ -297,6 +308,8 @@ export const vProductView = v.object({
   source: vProductSource,
   slug: v.string(),
   category: vProductCategory,
+  /** Nested taxonomy node when set; legacy flat `category` remains. */
+  categoryId: v.union(v.id("categories"), v.null()),
   presentation: vPresentation,
   name: v.string(),
   sku: v.union(v.string(), v.null()),
@@ -313,6 +326,8 @@ export const vProductView = v.object({
   priceInr: v.number(),
   compareAtPriceInr: v.union(v.number(), v.null()),
   hasVariants: v.boolean(),
+  /** Enabled option dimensions (Payload `variantTypes` on the product). */
+  variantTypeIds: v.array(v.id("variantTypes")),
   totalStock: v.number(),
   /** `status === "active"`; kept so older UI keeps working. */
   active: v.boolean(),

@@ -3,6 +3,8 @@
 import { useQuery } from "convex/react";
 import {
   ClipboardList,
+  FolderTree,
+  Layers,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -41,6 +43,8 @@ const NAV = [
   { href: routes.vendor, label: "Overview", icon: LayoutDashboard, exact: true },
   { href: routes.vendorProducts, label: "Products", icon: Package },
   { href: routes.vendorOrders, label: "Orders", icon: ClipboardList },
+  { href: routes.vendorCategories, label: "Categories", icon: FolderTree },
+  { href: routes.vendorVariants, label: "Variants", icon: Layers },
   { href: routes.vendorDiscounts, label: "Discounts", icon: Percent },
   { href: routes.vendorCollections, label: "Collections", icon: Tags },
   { href: routes.vendorPayouts, label: "Payouts", icon: Wallet },
@@ -100,28 +104,18 @@ export function VendorDesk({ children }: { children: ReactNode }) {
     );
   }
 
+  const flushPage =
+    pathname.startsWith(routes.vendorCategories) ||
+    pathname.startsWith(routes.vendorVariants) ||
+    pathname.startsWith(routes.vendorDiscounts) ||
+    pathname.startsWith(routes.vendorProducts);
+
   return (
     <VendorContext value={me}>
-      <VendorShell onSignOut={() => void signOut()} me={me} showNav>
-        <div className="space-y-6">
-          <div className="flex flex-col gap-3 border-b border-hairline pb-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="font-mono text-[10px] font-medium tracking-[0.16em] text-mute uppercase">
-                Store desk
-              </p>
-              <h1 className="truncate text-2xl font-medium tracking-tight">{me.vendor.name}</h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusPill status={me.vendor.status} />
-              {me.vendor.status === "active" ? (
-                <Button href={routes.store(me.vendor.slug)} variant="secondary" size="sm">
-                  View storefront
-                </Button>
-              ) : null}
-            </div>
-          </div>
+      <VendorShell onSignOut={() => void signOut()} me={me} showNav flush={flushPage}>
+        <div className={cn("flex min-h-full flex-1 flex-col", flushPage ? "gap-0" : "gap-6")}>
           <StatusNotice me={me} />
-          {children}
+          <div className="flex min-h-0 flex-1 flex-col">{children}</div>
         </div>
       </VendorShell>
     </VendorContext>
@@ -133,11 +127,14 @@ function VendorShell({
   me,
   showNav,
   onSignOut,
+  flush = false,
 }: {
   children: ReactNode;
   me: VendorMe | null;
   showNav: boolean;
   onSignOut: () => void;
+  /** Edge-to-edge content (no main padding / max-width). */
+  flush?: boolean;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -156,18 +153,18 @@ function VendorShell({
   }, [mobileOpen]);
 
   return (
-    <div className="min-h-dvh bg-canvas text-ink">
-      <div className="flex min-h-dvh">
+    <div className="h-dvh overflow-hidden bg-canvas text-ink">
+      <div className="flex h-full">
         {showNav ? (
-          <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-hairline bg-canvas lg:flex">
+          <aside className="hidden h-full w-64 shrink-0 flex-col border-r border-hairline bg-canvas lg:flex">
             <SidebarBrand storeName={me?.vendor.name ?? null} />
             <SidebarNav pathname={pathname} />
             <SidebarFooter onSignOut={onSignOut} />
           </aside>
         ) : null}
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-30 border-b border-hairline bg-canvas pt-[env(safe-area-inset-top)]">
+        <div className="flex h-full min-w-0 flex-1 flex-col">
+          <header className="z-30 shrink-0 border-b border-hairline bg-canvas pt-[env(safe-area-inset-top)]">
             <div className="flex h-14 items-center gap-2 px-4 sm:gap-3 sm:px-8">
               {showNav ? (
                 <button
@@ -219,7 +216,14 @@ function VendorShell({
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-10">
+          <main
+            className={cn(
+              "flex min-h-0 w-full flex-1 flex-col",
+              flush
+                ? "overflow-hidden p-0"
+                : "mx-auto max-w-6xl overflow-y-auto px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-10",
+            )}
+          >
             {children}
           </main>
         </div>

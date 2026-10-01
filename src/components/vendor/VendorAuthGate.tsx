@@ -15,9 +15,27 @@ const STORE_USER_TIMEOUT_MS = 5000;
  * Does not force wardrobe onboarding — sellers can open a store without a fitting photo.
  */
 export function VendorAuthGate({ children }: { children: ReactNode }) {
-  const session = authClient.useSession();
-  const sessionKey = session.data?.session?.id ?? "signed-out";
-  return <VendorSessionGate key={sessionKey}>{children}</VendorSessionGate>;
+  // Don't key on session id during SSR — cookie session vs pending client
+  // session produced a hydration mismatch ("Loading…" vs "Redirecting…").
+  return <VendorSessionGate>{children}</VendorSessionGate>;
+}
+
+function LoadingShell({ message }: { message: string }) {
+  return (
+    <main
+      className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 py-12 sm:px-8"
+      // Auth session cookies can differ between SSR HTML and the first client paint.
+      suppressHydrationWarning
+    >
+      <p role="status" className="mb-6 text-sm text-mute" suppressHydrationWarning>
+        {message}
+      </p>
+      <div className="space-y-4">
+        <div className="h-10 w-48 animate-pulse bg-soft-cloud" />
+        <div className="h-64 animate-pulse bg-soft-cloud" />
+      </div>
+    </main>
+  );
 }
 
 function VendorSessionGate({ children }: { children: ReactNode }) {
@@ -28,13 +46,20 @@ function VendorSessionGate({ children }: { children: ReactNode }) {
   const isLoading = session.isPending || (isAuthenticated && me === undefined);
   const missingUser = isAuthenticated && !isLoading && me === null;
   const [timedOut, setTimedOut] = useState(false);
+  // Session differs between SSR and the first client paint — wait until mounted
+  // so we don't hydrate with "Redirecting…" vs "Loading…" mismatch.
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    if (session.isPending) return;
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted || session.isPending) return;
     if (!session.data?.session) {
       router.replace(routes.vendorSignIn);
     }
-  }, [session.isPending, session.data?.session, router]);
+  }, [mounted, session.isPending, session.data?.session, router]);
 
   useEffect(() => {
     if (!missingUser) return;
@@ -42,7 +67,11 @@ function VendorSessionGate({ children }: { children: ReactNode }) {
     return () => clearTimeout(timeout);
   }, [missingUser]);
 
-  if (!session.isPending && !session.data?.session) {
+  if (!mounted || isLoading) {
+    return <LoadingShell message="Loading your account…" />;
+  }
+
+  if (!session.data?.session) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-canvas text-mute">
         Redirecting to sign in…
@@ -50,39 +79,32 @@ function VendorSessionGate({ children }: { children: ReactNode }) {
     );
   }
 
-  if (missingUser && timedOut) {
-    return (
-      <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col justify-center px-4 py-12">
-        <h1 className="font-display text-3xl tracking-tight text-ink uppercase">
-          Account not ready
-        </h1>
-        <p className="mt-3 text-sm text-mute">
-          You&apos;re signed in, but your WardrobeAI profile hasn&apos;t finished setting up.
-          Refresh the page in a moment.
-        </p>
-        <Link
-          href={routes.vendor}
-          className="mt-6 inline-flex h-12 items-center rounded-full bg-ink px-8 text-base font-medium text-canvas"
-          onClick={() => window.location.reload()}
-        >
-          Refresh
-        </Link>
-      </main>
-    );
+  if (missingUser) {
+    if (timedOut) {
+      return (
+        <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col justify-center px-4 py-12">
+          <h1 className="font-display text-3xl tracking-tight text-ink uppercase">
+            Account not ready
+          </h1>
+          <p className="mt-3 text-sm text-mute">
+            You&apos;re signed in, but your WardrobeAI profile hasn&apos;t finished setting up.
+            Refresh the page in a moment.
+          </p>
+          <Link
+            href={routes.vendor}
+            className="mt-6 inline-flex h-12 items-center rounded-full bg-ink px-8 text-base font-medium text-canvas"
+            onClick={() => window.location.reload()}
+          >
+            Refresh
+          </Link>
+        </main>
+      );
+    }
+    return <LoadingShell message="Setting up your account…" />;
   }
 
-  if (isLoading || !me) {
-    return (
-      <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 py-12 sm:px-8">
-        <p role="status" className="mb-6 text-sm text-mute">
-          {missingUser ? "Setting up your account…" : "Loading your account…"}
-        </p>
-        <div className="space-y-4">
-          <div className="h-10 w-48 animate-pulse bg-soft-cloud" />
-          <div className="h-64 animate-pulse bg-soft-cloud" />
-        </div>
-      </main>
-    );
+  if (!me) {
+    return <LoadingShell message="Loading your account…" />;
   }
 
   return <>{children}</>;

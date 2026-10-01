@@ -27,6 +27,7 @@ import { vColours, vFit, vFormality, vPresentation, vSeason } from "./shared/val
 
 const vProductFields = {
   category: vProductCategory,
+  categoryId: v.optional(v.id("categories")),
   presentation: vPresentation,
   name: v.string(),
   brand: v.optional(v.string()),
@@ -44,6 +45,8 @@ const vProductFields = {
   occasion: v.optional(vOccasion),
   priceInr: v.number(),
   compareAtPriceInr: v.optional(v.number()),
+  /** Payload-style dimensions enabled on this product (Size, Colour, …). */
+  variantTypeIds: v.optional(v.array(v.id("variantTypes"))),
   imageIds: v.array(v.id("_storage")),
   variants: v.array(vVariantInput),
 };
