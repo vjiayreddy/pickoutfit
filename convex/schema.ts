@@ -6,10 +6,13 @@ import {
   vDiscountScope,
   vInventoryReason,
   vOccasion,
+  vOfferKind,
   vOrderLineStatus,
   vOrderStatus,
+  vProductAttribute,
   vProductCategory,
   vProductImageKind,
+  vProductInfoSection,
   vProductSource,
   vProductStatus,
   vReturnStatus,
@@ -498,7 +501,7 @@ export default defineSchema({
 
   /**
    * Marketplace catalog. One row per sellable product, owned by a vendor.
-   * `vendorId` / `status` are optional only until the House-vendor backfill has run.
+   * Typed fashion columns below remain optional for legacy rows; new writes prefer `attributes`.
    */
   products: defineTable({
     vendorId: v.optional(v.id("vendors")),
@@ -513,19 +516,23 @@ export default defineSchema({
     name: v.string(),
     /** Assigned once at create. Absent on rows saved before SKUs existed. */
     sku: v.optional(v.string()),
-    /** Absent on rows created before catalog details. */
     brand: v.optional(v.string()),
-    subcategory: v.optional(v.string()),
-    /** Controlled type for the shop section, e.g. t-shirt or serum. */
-    productType: v.optional(v.string()),
     description: v.optional(v.string()),
+    /** Dynamic short traits (color, fit, fabric, custom). */
+    attributes: v.optional(v.array(vProductAttribute)),
+    /** Dynamic PDP accordion sections (wash care, FAQ, …). */
+    infoSections: v.optional(v.array(vProductInfoSection)),
+    /** @deprecated Prefer attributes[product_type] / attributes[subcategory]. */
+    subcategory: v.optional(v.string()),
+    /** @deprecated Prefer attributes[product_type]. */
+    productType: v.optional(v.string()),
+    /** @deprecated Prefer attributes. */
     colours: v.optional(vColours),
     pattern: v.optional(v.string()),
     material: v.optional(v.string()),
     season: v.optional(v.array(vSeason)),
     formality: v.optional(vFormality),
     fit: v.optional(vFit),
-    /** Only when a size label is visible. Absent when unknown. */
     size: v.optional(v.string()),
     ageGroup: v.optional(vAgeGroup),
     occasion: v.optional(vOccasion),
@@ -533,16 +540,12 @@ export default defineSchema({
     /** MRP shown struck through when higher than `priceInr`. */
     compareAtPriceInr: v.optional(v.number()),
     hasVariants: v.optional(v.boolean()),
-    /**
-     * Option dimensions enabled on this product (Payload `variantTypes` relation).
-     * Empty / absent means free-form size+colour fields only.
-     */
     variantTypeIds: v.optional(v.array(v.id("variantTypes"))),
-    /** Cover image. The first entry of `imageIds` when that list is set. Legacy; see `productImages`. */
+    /** @deprecated Prefer productImages. */
     storageId: v.optional(v.id("_storage")),
-    /** Legacy photo list, moved to `productImages` by the backfill. */
+    /** @deprecated Prefer productImages. */
     imageIds: v.optional(v.array(v.id("_storage"))),
-    /** Legacy flag, replaced by `status`. */
+    /** @deprecated Prefer status. */
     active: v.boolean(),
     /** Extraction provenance: the look photo this garment was cut from. */
     sourceUploadId: v.optional(v.id("uploads")),
@@ -576,11 +579,13 @@ export default defineSchema({
     vendorId: v.id("vendors"),
     storageId: v.id("_storage"),
     kind: vProductImageKind,
+    /** Set when the photo belongs to a specific variant (e.g. colourway). */
     variantId: v.optional(v.id("productVariants")),
     position: v.number(),
     createdAt: v.number(),
   })
     .index("by_productId_and_position", ["productId", "position"])
+    .index("by_variantId_and_position", ["variantId", "position"])
     .index("by_vendorId", ["vendorId"])
     .index("by_storageId", ["storageId"]),
 
@@ -623,7 +628,10 @@ export default defineSchema({
     .index("by_variantId_and_createdAt", ["variantId", "createdAt"])
     .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"]),
 
-  /** Vendor promotions. No `code` means the discount applies automatically. */
+  /**
+   * Vendor promotions / offers. No `code` means the discount applies automatically.
+   * `offerKind` + `badge` support occasion/clearance/flash merchandising.
+   */
   discounts: defineTable({
     vendorId: v.id("vendors"),
     name: v.string(),
@@ -631,9 +639,15 @@ export default defineSchema({
     kind: vDiscountKind,
     value: v.number(),
     scope: vDiscountScope,
+    offerKind: v.optional(vOfferKind),
+    badge: v.optional(v.string()),
+    priority: v.optional(v.number()),
     categories: v.optional(v.array(vProductCategory)),
     collectionId: v.optional(v.id("collections")),
     productIds: v.optional(v.array(v.id("products"))),
+    /** When scope is `attribute`, match products.attributes[key] ∈ values. */
+    attributeKey: v.optional(v.string()),
+    attributeValues: v.optional(v.array(v.string())),
     minOrderInr: v.optional(v.number()),
     maxUses: v.optional(v.number()),
     usedCount: v.number(),
@@ -644,7 +658,9 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_vendorId_and_active", ["vendorId", "active"])
-    .index("by_code", ["code"]),
+    .index("by_code", ["code"])
+    /** Expire cron: active offers whose endsAt has passed. */
+    .index("by_active_and_endsAt", ["active", "endsAt"]),
 
   /** Vendor-defined groupings. Categories stay a platform taxonomy. */
   collections: defineTable({

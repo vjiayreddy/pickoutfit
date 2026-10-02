@@ -6,6 +6,7 @@ import {
   type OrderLineStatus,
   type OrderStatus,
 } from "../shared/products";
+import { pricedUnitInr } from "./offers";
 import {
   adjustStock,
   cartLines,
@@ -147,20 +148,24 @@ export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: Ch
 
   type Kept = {
     line: Doc<"cartItems">;
+    product: Doc<"products">;
     vendor: Doc<"vendors">;
     variant: Doc<"productVariants">;
+    priceInr: number;
   };
   const kept: Kept[] = [];
   const droppedNames: string[] = [];
   const cache: VendorCache = new Map();
+  const now = Date.now();
   for (const line of lines) {
-    const { available, vendor, variant } = await resolveCartLine(ctx, line, cache);
-    if (!available || !vendor || !variant) {
+    const { available, product, vendor, variant } = await resolveCartLine(ctx, line, cache);
+    if (!available || !product || !vendor || !variant) {
       droppedNames.push(line.name);
       await ctx.db.delete(line._id);
       continue;
     }
-    kept.push({ line, vendor, variant });
+    const priceInr = await pricedUnitInr(ctx, product, variant, now);
+    kept.push({ line, product, vendor, variant, priceInr });
   }
   if (kept.length === 0) {
     throw appError(
@@ -171,8 +176,7 @@ export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: Ch
     );
   }
 
-  const now = Date.now();
-  const totalInr = kept.reduce((sum, { line }) => sum + line.priceInr * line.quantity, 0);
+  const totalInr = kept.reduce((sum, row) => sum + row.priceInr * row.line.quantity, 0);
   const orderId = await ctx.db.insert("orders", {
     userId: user._id,
     ...buyer,
@@ -181,7 +185,7 @@ export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: Ch
     createdAt: now,
   });
 
-  for (const { line, vendor, variant } of kept) {
+  for (const { line, vendor, variant, priceInr } of kept) {
     const orderItemId = await ctx.db.insert("orderItems", {
       orderId,
       productId: line.productId,
@@ -192,7 +196,7 @@ export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: Ch
       ...(variant.size ? { size: variant.size } : {}),
       ...(variant.colour ? { colour: variant.colour.name } : {}),
       quantity: line.quantity,
-      priceInr: line.priceInr,
+      priceInr,
       lineStatus: "placed",
       createdAt: now,
     });

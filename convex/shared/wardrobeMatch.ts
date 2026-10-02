@@ -1,5 +1,28 @@
+import { legacyFromAttributes } from "./products";
 import type { Category, Formality, Slot } from "./wardrobe";
 import { slotForCategory } from "./wardrobe";
+
+function matchFields(product: MatchProduct) {
+  if (product.attributes?.length) {
+    const derived = legacyFromAttributes(product.attributes);
+    return {
+      subcategory: derived.subcategory || product.subcategory || "",
+      productType: derived.productType || product.productType || null,
+      colours: derived.colours.primary ? derived.colours : product.colours,
+      pattern: derived.pattern || product.pattern || null,
+      material: derived.material || product.material || null,
+      formality: derived.formality || product.formality || null,
+    };
+  }
+  return {
+    subcategory: product.subcategory ?? "",
+    productType: product.productType ?? null,
+    colours: product.colours,
+    pattern: product.pattern ?? null,
+    material: product.material ?? null,
+    formality: product.formality ?? null,
+  };
+}
 
 /** Product fields the rail matcher reads. */
 export type MatchProduct = {
@@ -11,6 +34,8 @@ export type MatchProduct = {
   pattern?: string | null;
   material?: string | null;
   formality?: Formality | string | null;
+  /** Preferred source; legacy columns are used when attributes are absent. */
+  attributes?: { key: string; label: string; value: string }[] | null;
 };
 
 /** Ready wardrobe item fields the rail matcher reads. */
@@ -168,18 +193,19 @@ function coloursOverlap(
 
 /** Infer a wardrobe category from catalog type / subcategory / name. */
 export function inferProductWardrobeCategory(product: MatchProduct): Category | null {
-  const type = product.productType ? norm(product.productType) : "";
+  const fields = matchFields(product);
+  const type = fields.productType ? norm(fields.productType) : "";
   if (type && PRODUCT_TYPE_CATEGORY[type]) return PRODUCT_TYPE_CATEGORY[type];
 
   if (product.category === "accessories" || product.category === "eyewear") {
-    const text = `${product.subcategory ?? ""} ${product.name}`.toLowerCase();
+    const text = `${fields.subcategory} ${product.name}`.toLowerCase();
     if (/\bbag\b|tote|backpack|clutch/.test(text)) return "bag";
     if (/\bhat\b|cap|beanie/.test(text)) return "headwear";
     return "accessory";
   }
   if (product.category !== "clothes") return null;
 
-  const text = `${product.subcategory ?? ""} ${product.name}`.toLowerCase();
+  const text = `${fields.subcategory} ${product.name}`.toLowerCase();
   if (/\bdress\b|gown|frock/.test(text)) return "dress";
   if (/\bshoe|trainer|sneaker|boot|loafer|sandal|heel/.test(text)) return "shoes";
   if (/\bjacket|coat|blazer|parka|puffer|overcoat/.test(text)) return "outerwear";
@@ -202,12 +228,13 @@ function nameOverlap(a: string, b: string): number {
 export function scoreSimilar(product: MatchProduct, item: MatchItem): number {
   const productCategory = inferProductWardrobeCategory(product);
   if (!productCategory || productCategory !== item.category) return 0;
+  const fields = matchFields(product);
 
   let score = 2; // same category is the floor
 
-  if (product.colours && coloursOverlap(product.colours, item.colours)) score += 2;
+  if (fields.colours && coloursOverlap(fields.colours, item.colours)) score += 2;
 
-  const productPattern = product.pattern ? patternFamily(product.pattern) : "";
+  const productPattern = fields.pattern ? patternFamily(fields.pattern) : "";
   const itemPattern = patternFamily(item.pattern);
   if (productPattern && itemPattern && productPattern === itemPattern) score += 2;
   else if (
@@ -217,22 +244,22 @@ export function scoreSimilar(product: MatchProduct, item: MatchItem): number {
     score += 1;
   } else if (
     itemPattern === "stripe" &&
-    /stripe|pinstripe/.test(`${norm(product.name)} ${norm(product.subcategory ?? "")}`)
+    /stripe|pinstripe/.test(`${norm(product.name)} ${norm(fields.subcategory)}`)
   ) {
     score += 1;
   }
 
-  const type = product.productType ? norm(product.productType) : "";
+  const type = fields.productType ? norm(fields.productType) : "";
   const sub = norm(item.subcategory);
   if (type && (sub.includes(type) || type.includes(sub.split(" ")[0] ?? ""))) score += 1;
 
   score += Math.min(2, nameOverlap(product.name, item.name));
 
-  if (product.formality && item.formality && norm(String(product.formality)) === norm(String(item.formality))) {
+  if (fields.formality && item.formality && norm(String(fields.formality)) === norm(String(item.formality))) {
     score += 1;
   }
 
-  const productMaterial = product.material ? norm(product.material) : "";
+  const productMaterial = fields.material ? norm(fields.material) : "";
   if (productMaterial && productMaterial === norm(item.material)) score += 1;
 
   return score;
@@ -242,19 +269,20 @@ export function scoreSimilar(product: MatchProduct, item: MatchItem): number {
 export function scorePairs(product: MatchProduct, item: MatchItem): number {
   const productCategory = inferProductWardrobeCategory(product);
   if (!productCategory) return 0;
+  const fields = matchFields(product);
   const productSlot = slotForCategory(productCategory);
   const itemSlot = slotForCategory(item.category);
   if (productSlot === itemSlot) return 0;
   if (!PAIR_SLOTS[productSlot].includes(itemSlot)) return 0;
 
   let score = 2;
-  if (product.formality && item.formality && norm(String(product.formality)) === norm(String(item.formality))) {
+  if (fields.formality && item.formality && norm(String(fields.formality)) === norm(String(item.formality))) {
     score += 2;
   }
   // Soft colour coordination: same family or both neutrals reads as intentional.
-  if (product.colours && coloursOverlap(product.colours, item.colours)) score += 1;
-  else if (product.colours) {
-    const a = colourFamily(product.colours.primary);
+  if (fields.colours && coloursOverlap(fields.colours, item.colours)) score += 1;
+  else if (fields.colours) {
+    const a = colourFamily(fields.colours.primary);
     const b = colourFamily(item.colours.primary);
     const neutrals = new Set(["white", "black", "grey", "neutral", "brown"]);
     if (neutrals.has(a) || neutrals.has(b)) score += 1;

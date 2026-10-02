@@ -3,15 +3,23 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { appError } from "../lib/errors";
 import {
+  attributesFromLegacy,
+  ATTR,
+  attributeValue,
   isProductType,
+  legacyFromAttributes,
   MAX_CART_LINES,
   MAX_CART_QTY,
+  MAX_INFO_SECTIONS,
+  MAX_PRODUCT_ATTRIBUTES,
   MAX_PRODUCT_IMAGES,
   PRODUCT_SKU_PREFIX,
   productTypeLabel,
   type AgeGroup,
   type Occasion,
+  type ProductAttribute,
   type ProductCategory,
+  type ProductInfoSection,
   type ProductStatus,
   type vProductView,
   type vVariantInput,
@@ -20,6 +28,7 @@ import {
 import { MAX_PRODUCT_VARIANTS, VENDOR_PLANS, slugify, vendorSellable } from "../shared/vendors";
 import type { Fit, Formality, Presentation, Season } from "../shared/wardrobe";
 import { bumpSystemCounter } from "./stats";
+import { pricedUnitInr } from "./offers";
 import {
   legacyFieldsFromOptions,
   optionRefsFor,
@@ -46,10 +55,15 @@ export type ProductInput = {
   presentation: Presentation;
   name: string;
   brand?: string;
-  subcategory: string;
-  productType?: string;
   description: string;
-  colours: ProductColours;
+  /** Dynamic short traits. When set, wins over legacy typed fields. */
+  attributes?: ProductAttribute[];
+  /** Dynamic PDP accordion sections. */
+  infoSections?: ProductInfoSection[];
+  /** @deprecated Prefer attributes; still accepted and merged into attributes. */
+  subcategory?: string;
+  productType?: string;
+  colours?: ProductColours;
   pattern?: string;
   material?: string;
   season?: Season[];
@@ -82,20 +96,58 @@ export function normalHex(value: string): string | null {
   return /^#[0-9a-f]{6}$/.test(withHash) ? withHash : null;
 }
 
-export function cleanProductInput(input: ProductInput): ProductInput {
+function cleanAttributes(rows: ProductAttribute[] | undefined): ProductAttribute[] {
+  if (!rows?.length) return [];
+  const seen = new Set<string>();
+  const out: ProductAttribute[] = [];
+  for (const row of rows.slice(0, MAX_PRODUCT_ATTRIBUTES)) {
+    const key = row.key.trim().toLowerCase().replace(/\s+/g, "_").slice(0, 40);
+    const value = row.value.trim().slice(0, 120);
+    const label = row.label.trim().slice(0, 60) || key;
+    if (!key || !value || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, label, value });
+  }
+  return out;
+}
+
+function cleanInfoSections(rows: ProductInfoSection[] | undefined): ProductInfoSection[] {
+  if (!rows?.length) return [];
+  return rows.slice(0, MAX_INFO_SECTIONS).map((row, index) => {
+    const title = row.title.trim().slice(0, 80);
+    if (!title) throw appError("INVALID_INPUT", "Each info section needs a title.");
+    const id = (row.id.trim() || `sec_${Date.now().toString(36)}_${index}`).slice(0, 64);
+    const body = row.body?.trim().slice(0, 4000) || undefined;
+    const cleanedRows = row.rows
+      ?.map((entry) => ({
+        label: entry.label.trim().slice(0, 120),
+        value: entry.value.trim().slice(0, 1000),
+      }))
+      .filter((entry) => entry.label && entry.value)
+      .slice(0, 40);
+    return {
+      id,
+      title,
+      kind: row.kind,
+      ...(body ? { body } : {}),
+      ...(cleanedRows && cleanedRows.length > 0 ? { rows: cleanedRows } : {}),
+      position: Number.isFinite(row.position) ? row.position : index,
+    };
+  });
+}
+
+export function cleanProductInput(input: ProductInput): ProductInput & {
+  attributes: ProductAttribute[];
+  infoSections: ProductInfoSection[];
+  colours: ProductColours;
+  subcategory: string;
+} {
   const name = input.name.trim();
   if (name.length < 1 || name.length > 80) {
     throw appError("INVALID_INPUT", "Product name must be 1–80 characters.");
   }
   const brand = input.brand?.trim() ?? "";
   if (brand.length > 80) throw appError("INVALID_INPUT", "Brand must be 80 characters or fewer.");
-  const productType = input.productType?.trim() ?? "";
-  if (productType && !isProductType(input.category, productType)) {
-    throw appError("INVALID_INPUT", "Choose a type from this category.");
-  }
-  const subcategory = (input.subcategory.trim() || (productType ? productTypeLabel(productType) : "")).slice(0, 80);
-  const size = input.size?.trim() ?? "";
-  if (size.length > 24) throw appError("INVALID_INPUT", "Size must be 24 characters or fewer.");
   const description = input.description.trim();
   if (description.length > 400) {
     throw appError("INVALID_INPUT", "Description must be 400 characters or fewer.");
@@ -117,34 +169,72 @@ export function cleanProductInput(input: ProductInput): ProductInput {
     throw appError("INVALID_INPUT", `A product can have at most ${MAX_PRODUCT_VARIANTS} options.`);
   }
   const variants = input.variants.map((variant) => cleanVariant(variant, priceInr));
-  const primary = input.colours.primary.trim().slice(0, 40);
-  const secondary = input.colours.secondary
+
+  const coloursIn = input.colours ?? EMPTY_COLOURS;
+  const primary = coloursIn.primary.trim().slice(0, 40);
+  const secondary = coloursIn.secondary
     .map((colour) => colour.trim())
     .filter((colour) => colour.length > 0)
     .slice(0, 6)
     .map((colour) => colour.slice(0, 40));
+  const hex = coloursIn.hex.map(normalHex).filter((value): value is string => value !== null).slice(0, 6);
+  const colours: ProductColours = { primary, secondary, hex };
+
+  const productType = input.productType?.trim() ?? "";
+  if (productType && !isProductType(input.category, productType)) {
+    throw appError("INVALID_INPUT", "Choose a type from this category.");
+  }
+  const size = input.size?.trim() ?? "";
+  if (size.length > 24) throw appError("INVALID_INPUT", "Size must be 24 characters or fewer.");
   const pattern = input.pattern?.trim().slice(0, 40) ?? "";
   const material = input.material?.trim().slice(0, 40) ?? "";
+  const subcategory = (
+    input.subcategory?.trim() ||
+    (productType ? productTypeLabel(productType) : "") ||
+    attributeValue(input.attributes, ATTR.subcategory) ||
+    ""
+  ).slice(0, 80);
+
+  // Prefer explicit attributes; merge legacy typed fields so older clients keep working.
+  const attributes = attributesFromLegacy({
+    attributes: cleanAttributes(input.attributes),
+    colours,
+    pattern: pattern || undefined,
+    material: material || undefined,
+    fit: input.fit,
+    formality: input.formality,
+    season: input.season,
+    size: size || undefined,
+    productType: productType || undefined,
+    subcategory: subcategory || undefined,
+    occasion: input.occasion,
+  });
+  const derived = legacyFromAttributes(attributes);
+  const infoSections = cleanInfoSections(input.infoSections);
+
   return {
     ...input,
     name,
     brand: brand.length > 0 ? brand : undefined,
-    subcategory,
-    productType: productType || undefined,
     description,
-    pattern: pattern || undefined,
-    material: material || undefined,
+    attributes,
+    infoSections,
+    subcategory: derived.subcategory || subcategory || input.category,
+    productType: derived.productType || productType || undefined,
+    pattern: derived.pattern,
+    material: derived.material,
+    fit: (derived.fit as Fit | undefined) ?? input.fit,
+    formality: (derived.formality as Formality | undefined) ?? input.formality,
+    season: (derived.season as Season[] | undefined) ?? input.season,
     imageIds,
     variants,
     variantTypeIds: input.variantTypeIds,
-    size: size || undefined,
+    size: derived.size || size || undefined,
     priceInr,
     compareAtPriceInr: compareAtPriceInr && compareAtPriceInr > 0 ? compareAtPriceInr : undefined,
-    colours: {
-      primary,
-      secondary,
-      hex: input.colours.hex.map(normalHex).filter((hex): hex is string => hex !== null).slice(0, 6),
-    },
+    colours: derived.colours.primary || colours.primary ? derived.colours : colours,
+    ageGroup: input.ageGroup,
+    occasion: (derived.occasion as Occasion | undefined) ?? input.occasion,
   };
 }
 
@@ -288,6 +378,7 @@ export async function toProductView(
       id: row._id,
       storageId: row.storageId,
       kind: row.kind,
+      variantId: row.variantId ?? null,
       position: row.position,
       url: await ctx.storage.getUrl(row.storageId),
     })),
@@ -296,12 +387,28 @@ export async function toProductView(
       id: `${product._id}:${position}` as unknown as Id<"productImages">,
       storageId,
       kind: "studio" as const,
+      variantId: null as Id<"productVariants"> | null,
       position,
       url: await ctx.storage.getUrl(storageId),
     })),
   ]);
   const variants = await Promise.all(variantRows.map((variant) => toVariantView(ctx, variant, product)));
   const status = productStatus(product);
+  const attributes =
+    product.attributes ??
+    attributesFromLegacy({
+      colours: product.colours,
+      pattern: product.pattern,
+      material: product.material,
+      fit: product.fit,
+      formality: product.formality,
+      season: product.season,
+      size: product.size,
+      productType: product.productType,
+      subcategory: product.subcategory,
+      occasion: product.occasion,
+    });
+  const derived = legacyFromAttributes(attributes);
   return {
     id: product._id,
     vendorId: product.vendorId ?? ("" as Id<"vendors">),
@@ -316,17 +423,20 @@ export async function toProductView(
     name: product.name,
     sku: product.sku ?? null,
     brand: product.brand ?? null,
-    subcategory: product.subcategory ?? "",
-    productType: product.productType ?? null,
+    subcategory: derived.subcategory || product.subcategory || "",
+    productType: derived.productType || product.productType || null,
     description: product.description ?? "",
-    colours: product.colours ?? EMPTY_COLOURS,
-    pattern: product.pattern ?? null,
-    material: product.material ?? null,
-    size: product.size ?? null,
+    attributes,
+    infoSections: product.infoSections ?? [],
+    colours: derived.colours.primary ? derived.colours : (product.colours ?? EMPTY_COLOURS),
+    pattern: derived.pattern ?? product.pattern ?? null,
+    material: derived.material ?? product.material ?? null,
+    size: derived.size ?? product.size ?? null,
     ageGroup: product.ageGroup ?? null,
-    occasion: product.occasion ?? null,
+    occasion: (derived.occasion as Occasion | undefined) ?? product.occasion ?? null,
     priceInr: product.priceInr,
     compareAtPriceInr: product.compareAtPriceInr ?? null,
+    offer: null,
     hasVariants: product.hasVariants ?? false,
     variantTypeIds: product.variantTypeIds ?? [],
     totalStock: variants.filter((variant) => variant.active).reduce((sum, variant) => sum + variant.stock, 0),
@@ -361,6 +471,7 @@ export function buildProductSearchText(product: {
   pattern?: string;
   material?: string;
   description?: string;
+  attributes?: ProductAttribute[];
 }): string {
   return [
     product.name,
@@ -373,6 +484,7 @@ export function buildProductSearchText(product: {
     product.pattern,
     product.material,
     product.description,
+    ...(product.attributes ?? []).flatMap((row) => [row.label, row.value]),
   ]
     .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
     .join(" ")
@@ -452,9 +564,12 @@ export async function createProduct(
     name: clean.name,
     sku,
     ...(clean.brand ? { brand: clean.brand } : {}),
+    description: clean.description,
+    attributes: clean.attributes,
+    ...(clean.infoSections.length > 0 ? { infoSections: clean.infoSections } : {}),
+    // Mirror into legacy columns so wardrobe match / older indexes keep working.
     subcategory: clean.subcategory,
     ...(clean.productType ? { productType: clean.productType } : {}),
-    description: clean.description,
     colours: clean.colours,
     ...(clean.pattern ? { pattern: clean.pattern } : {}),
     ...(clean.material ? { material: clean.material } : {}),
@@ -514,9 +629,11 @@ export async function updateProduct(
     name: clean.name,
     sku,
     brand: clean.brand,
+    description: clean.description,
+    attributes: clean.attributes,
+    infoSections: clean.infoSections.length > 0 ? clean.infoSections : undefined,
     subcategory: clean.subcategory,
     productType: clean.productType,
-    description: clean.description,
     colours: clean.colours,
     pattern: clean.pattern,
     material: clean.material,
@@ -788,6 +905,8 @@ export async function toCartView(ctx: Ctx, userId: Id<"users">) {
   const lines = [];
   for (const line of rows) {
     const { product, variant, vendor, available } = await resolveCartLine(ctx, line, cache);
+    const priceInr =
+      product && available ? await pricedUnitInr(ctx, product, variant) : line.priceInr;
     lines.push({
       id: line._id,
       productId: line.productId,
@@ -797,7 +916,7 @@ export async function toCartView(ctx: Ctx, userId: Id<"users">) {
       vendorName: vendor?.name ?? "",
       name: line.name,
       quantity: line.quantity,
-      priceInr: line.priceInr,
+      priceInr,
       imageUrl: product ? await coverUrl(ctx, product) : null,
       available,
     });
@@ -847,7 +966,7 @@ export async function addCartLine(
       stock: variant.stock,
     });
   }
-  const price = effectivePrice(product, variant);
+  const price = await pricedUnitInr(ctx, product, variant);
   const cart = await getOrCreateCart(ctx, user._id);
   const existing = await ctx.db
     .query("cartItems")

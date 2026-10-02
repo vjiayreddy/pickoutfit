@@ -12,13 +12,17 @@ import { COLOUR_HEX } from "@convex/shared/variants";
 import {
   AGE_GROUPS,
   AGE_GROUP_LABELS,
+  ATTR,
+  attrLabel,
   isProductType,
+  MAX_INFO_SECTIONS,
   MAX_PRODUCT_IMAGES,
   OCCASIONS,
   OCCASION_LABELS,
   productTypeLabel,
   productTypesFor,
   type AgeGroup,
+  type InfoSectionKind,
   type Occasion,
   type ProductCategory,
 } from "@convex/shared/products";
@@ -57,6 +61,17 @@ type VariantRow = {
   active: boolean;
 };
 
+type AttrRow = { key: string; keyInput: string; label: string; value: string };
+type InfoRow = {
+  id: string;
+  title: string;
+  kind: InfoSectionKind;
+  body: string;
+  rows: { label: string; value: string }[];
+};
+
+const KNOWN_ATTR_KEYS = new Set<string>(Object.values(ATTR));
+
 type Draft = {
   name: string;
   brand: string;
@@ -74,12 +89,25 @@ type Draft = {
   size: string;
   ageGroup: AgeGroup | "";
   occasion: Occasion | "";
+  /** Extra vendor-defined attributes beyond the known fashion fields. */
+  customAttributes: AttrRow[];
+  infoSections: InfoRow[];
   priceInr: string;
   compareAtPriceInr: string;
   /** Payload-style dimensions enabled on this product. */
   variantTypeIds: Id<"variantTypes">[];
   variants: VariantRow[];
 };
+
+function newInfoSection(title = ""): InfoRow {
+  return {
+    id: crypto.randomUUID(),
+    title,
+    kind: "rich_text",
+    body: "",
+    rows: [],
+  };
+}
 
 function newVariant(): VariantRow {
   return {
@@ -111,6 +139,13 @@ const EMPTY: Draft = {
   size: "",
   ageGroup: "",
   occasion: "",
+  customAttributes: [],
+  infoSections: [
+    newInfoSection("Fit, Fabric & Wash Care"),
+    newInfoSection("Manufacturing Details"),
+    newInfoSection("Alterations, Returns & Exchanges"),
+    { ...newInfoSection("FAQ"), kind: "faq" as const },
+  ],
   priceInr: "",
   compareAtPriceInr: "",
   variantTypeIds: [],
@@ -153,6 +188,27 @@ function labelsFromOptions(
 }
 
 function draftFrom(product: ProductView): Draft {
+  const customAttributes = (product.attributes ?? [])
+    .filter((row) => !KNOWN_ATTR_KEYS.has(row.key))
+    .map((row) => ({
+      key: row.key,
+      keyInput: row.key,
+      label: row.label,
+      value: row.value,
+    }));
+  const infoSections =
+    product.infoSections.length > 0
+      ? product.infoSections
+          .slice()
+          .sort((a, b) => a.position - b.position)
+          .map((section) => ({
+            id: section.id,
+            title: section.title,
+            kind: section.kind,
+            body: section.body ?? "",
+            rows: (section.rows ?? []).map((row) => ({ label: row.label, value: row.value })),
+          }))
+      : EMPTY.infoSections.map((section) => ({ ...section, id: crypto.randomUUID() }));
   return {
     name: product.name,
     brand: product.brand ?? "",
@@ -170,6 +226,8 @@ function draftFrom(product: ProductView): Draft {
     size: product.size ?? "",
     ageGroup: product.ageGroup ?? "",
     occasion: product.occasion ?? "",
+    customAttributes,
+    infoSections,
     priceInr: String(product.priceInr),
     compareAtPriceInr: product.compareAtPriceInr ? String(product.compareAtPriceInr) : "",
     variantTypeIds: product.variantTypeIds,
@@ -430,15 +488,48 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     const compareAt = draft.compareAtPriceInr ? Number(draft.compareAtPriceInr) : undefined;
     const hex = draft.colourHex.trim();
     const subcategory = draft.productType ? productTypeLabel(draft.productType) : draft.subcategory.trim();
+    const customAttributes = draft.customAttributes
+      .map((row) => {
+        const key = row.keyInput.trim().toLowerCase().replace(/\s+/g, "_");
+        const value = row.value.trim();
+        if (!key || !value || KNOWN_ATTR_KEYS.has(key)) return null;
+        return { key, label: row.label.trim() || attrLabel(key), value };
+      })
+      .filter((row): row is { key: string; label: string; value: string } => row !== null);
+    const infoSections = draft.infoSections
+      .map((section, position) => {
+        const title = section.title.trim();
+        if (!title) return null;
+        const body = section.body.trim();
+        const rows =
+          section.kind === "rich_text"
+            ? undefined
+            : section.rows
+                .map((row) => ({ label: row.label.trim(), value: row.value.trim() }))
+                .filter((row) => row.label && row.value);
+        const hasContent = section.kind === "rich_text" ? Boolean(body) : Boolean(rows?.length);
+        if (!hasContent) return null;
+        return {
+          id: section.id,
+          title,
+          kind: section.kind,
+          body: body || undefined,
+          rows,
+          position,
+        };
+      })
+      .filter((section): section is NonNullable<typeof section> => section !== null);
     return {
       category: draft.category,
       categoryId: draft.categoryId ?? undefined,
       presentation: draft.presentation,
       name: draft.name.trim(),
       brand: draft.brand.trim() || undefined,
+      description: draft.description.trim(),
+      attributes: customAttributes,
+      infoSections: infoSections.length > 0 ? infoSections : undefined,
       subcategory: subcategory || draft.category,
       productType: draft.productType || undefined,
-      description: draft.description.trim(),
       colours: {
         primary: draft.colourPrimary.trim(),
         secondary: draft.colourSecondary.split(",").map((part) => part.trim()).filter(Boolean),
@@ -861,6 +952,249 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 />
               </Field>
             </div>
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium">Custom attributes</p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    set(
+                      "customAttributes",
+                      [
+                        ...draft.customAttributes,
+                        { key: "", keyInput: "", label: "", value: "" },
+                      ],
+                    )
+                  }
+                >
+                  <Plus className="size-3.5" aria-hidden />
+                  Add
+                </Button>
+              </div>
+              {draft.customAttributes.length === 0 ? (
+                <p className="text-xs text-mute">Optional. Add neckline, SPF, frame shape, or any trait.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {draft.customAttributes.map((row, index) => (
+                    <li key={`attr-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                      <Input
+                        value={row.keyInput}
+                        onChange={(e) => {
+                          const keyInput = e.target.value;
+                          set(
+                            "customAttributes",
+                            draft.customAttributes.map((item, i) =>
+                              i === index
+                                ? {
+                                    ...item,
+                                    keyInput,
+                                    label: item.label || attrLabel(keyInput.trim().toLowerCase().replace(/\s+/g, "_")),
+                                  }
+                                : item,
+                            ),
+                          );
+                        }}
+                        placeholder="Key (e.g. neckline)"
+                        maxLength={40}
+                      />
+                      <Input
+                        value={row.value}
+                        onChange={(e) =>
+                          set(
+                            "customAttributes",
+                            draft.customAttributes.map((item, i) =>
+                              i === index ? { ...item, value: e.target.value } : item,
+                            ),
+                          )
+                        }
+                        placeholder="Value"
+                        maxLength={120}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Remove attribute"
+                        onClick={() =>
+                          set(
+                            "customAttributes",
+                            draft.customAttributes.filter((_, i) => i !== index),
+                          )
+                        }
+                      >
+                        <X className="size-3.5" aria-hidden />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+
+          <section className="space-y-4 border-t border-hairline pt-8">
+            <div className="flex items-start justify-between gap-3">
+              <SectionHead
+                title="Product information"
+                hint="Accordion sections on the product page. Add, rename, or remove freely."
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={draft.infoSections.length >= MAX_INFO_SECTIONS}
+                onClick={() => set("infoSections", [...draft.infoSections, newInfoSection()])}
+              >
+                <Plus className="size-3.5" aria-hidden />
+                Section
+              </Button>
+            </div>
+            <ul className="space-y-6">
+              {draft.infoSections.map((section, index) => (
+                <li key={section.id} className="space-y-3 border border-hairline p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      value={section.title}
+                      onChange={(e) =>
+                        set(
+                          "infoSections",
+                          draft.infoSections.map((item, i) =>
+                            i === index ? { ...item, title: e.target.value } : item,
+                          ),
+                        )
+                      }
+                      placeholder="Section title"
+                      maxLength={80}
+                      className="min-w-0 flex-1"
+                    />
+                    <select
+                      value={section.kind}
+                      onChange={(e) =>
+                        set(
+                          "infoSections",
+                          draft.infoSections.map((item, i) =>
+                            i === index
+                              ? { ...item, kind: e.target.value as InfoSectionKind }
+                              : item,
+                          ),
+                        )
+                      }
+                      className="h-12 rounded-full bg-soft-cloud px-4 text-sm outline-none focus:bg-canvas focus:ring-2 focus:ring-ink"
+                    >
+                      <option value="rich_text">Text</option>
+                      <option value="key_value">Key / value</option>
+                      <option value="faq">FAQ</option>
+                    </select>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Remove section"
+                      onClick={() =>
+                        set(
+                          "infoSections",
+                          draft.infoSections.filter((_, i) => i !== index),
+                        )
+                      }
+                    >
+                      <X className="size-3.5" aria-hidden />
+                    </Button>
+                  </div>
+                  {section.kind === "rich_text" ? (
+                    <Textarea
+                      rows={4}
+                      maxLength={4000}
+                      value={section.body}
+                      onChange={(e) =>
+                        set(
+                          "infoSections",
+                          draft.infoSections.map((item, i) =>
+                            i === index ? { ...item, body: e.target.value } : item,
+                          ),
+                        )
+                      }
+                      placeholder="Details shoppers see when they expand this section."
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      {section.rows.map((row, rowIndex) => (
+                        <div key={`${section.id}-row-${rowIndex}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                          <Input
+                            value={row.label}
+                            onChange={(e) =>
+                              set(
+                                "infoSections",
+                                draft.infoSections.map((item, i) => {
+                                  if (i !== index) return item;
+                                  const rows = item.rows.map((entry, j) =>
+                                    j === rowIndex ? { ...entry, label: e.target.value } : entry,
+                                  );
+                                  return { ...item, rows };
+                                }),
+                              )
+                            }
+                            placeholder={section.kind === "faq" ? "Question" : "Label"}
+                          />
+                          <Input
+                            value={row.value}
+                            onChange={(e) =>
+                              set(
+                                "infoSections",
+                                draft.infoSections.map((item, i) => {
+                                  if (i !== index) return item;
+                                  const rows = item.rows.map((entry, j) =>
+                                    j === rowIndex ? { ...entry, value: e.target.value } : entry,
+                                  );
+                                  return { ...item, rows };
+                                }),
+                              )
+                            }
+                            placeholder={section.kind === "faq" ? "Answer" : "Value"}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Remove row"
+                            onClick={() =>
+                              set(
+                                "infoSections",
+                                draft.infoSections.map((item, i) =>
+                                  i === index
+                                    ? { ...item, rows: item.rows.filter((_, j) => j !== rowIndex) }
+                                    : item,
+                                ),
+                              )
+                            }
+                          >
+                            <X className="size-3.5" aria-hidden />
+                          </Button>
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() =>
+                          set(
+                            "infoSections",
+                            draft.infoSections.map((item, i) =>
+                              i === index
+                                ? { ...item, rows: [...item.rows, { label: "", value: "" }] }
+                                : item,
+                            ),
+                          )
+                        }
+                      >
+                        <Plus className="size-3.5" aria-hidden />
+                        Row
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
           </section>
 
           <section className="space-y-4 border-t border-hairline pt-8">

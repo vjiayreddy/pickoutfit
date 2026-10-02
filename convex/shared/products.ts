@@ -44,8 +44,57 @@ export type InventoryReason = (typeof INVENTORY_REASONS)[number];
 export const DISCOUNT_KINDS = ["percent", "flat"] as const;
 export type DiscountKind = (typeof DISCOUNT_KINDS)[number];
 
-export const DISCOUNT_SCOPES = ["all", "category", "collection", "products"] as const;
+export const DISCOUNT_SCOPES = ["all", "category", "collection", "products", "attribute"] as const;
 export type DiscountScope = (typeof DISCOUNT_SCOPES)[number];
+
+/** Merchandising face for a discount (Diwali, clearance, flash, …). */
+export const OFFER_KINDS = [
+  "standard",
+  "occasion",
+  "clearance",
+  "flash",
+  "seasonal",
+  "custom",
+] as const;
+export type OfferKind = (typeof OFFER_KINDS)[number];
+
+export const INFO_SECTION_KINDS = ["rich_text", "key_value", "faq"] as const;
+export type InfoSectionKind = (typeof INFO_SECTION_KINDS)[number];
+
+/** Canonical keys for fashion/traits stored in `products.attributes`. */
+export const ATTR = {
+  color: "color",
+  colorSecondary: "color_secondary",
+  colorHex: "color_hex",
+  pattern: "pattern",
+  fabric: "fabric",
+  fit: "fit",
+  formality: "formality",
+  season: "season",
+  size: "size",
+  productType: "product_type",
+  subcategory: "subcategory",
+  occasion: "occasion",
+} as const;
+
+export const ATTR_LABELS: Record<string, string> = {
+  [ATTR.color]: "Color",
+  [ATTR.colorSecondary]: "Other colors",
+  [ATTR.colorHex]: "Color hex",
+  [ATTR.pattern]: "Pattern",
+  [ATTR.fabric]: "Fabric",
+  [ATTR.fit]: "Fit",
+  [ATTR.formality]: "Formality",
+  [ATTR.season]: "Season",
+  [ATTR.size]: "Size",
+  [ATTR.productType]: "Type",
+  [ATTR.subcategory]: "Style",
+  [ATTR.occasion]: "Occasion",
+};
+
+export function attrLabel(key: string): string {
+  return ATTR_LABELS[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export const PRODUCT_SKU_PREFIX: Record<ProductCategory, string> = {
   clothes: "CL",
@@ -253,7 +302,43 @@ export const vDiscountScope = v.union(
   v.literal("category"),
   v.literal("collection"),
   v.literal("products"),
+  v.literal("attribute"),
 );
+
+export const vOfferKind = v.union(
+  v.literal("standard"),
+  v.literal("occasion"),
+  v.literal("clearance"),
+  v.literal("flash"),
+  v.literal("seasonal"),
+  v.literal("custom"),
+);
+
+export const vInfoSectionKind = v.union(
+  v.literal("rich_text"),
+  v.literal("key_value"),
+  v.literal("faq"),
+);
+
+export const vProductAttribute = v.object({
+  key: v.string(),
+  label: v.string(),
+  value: v.string(),
+});
+
+export const vInfoSectionRow = v.object({
+  label: v.string(),
+  value: v.string(),
+});
+
+export const vProductInfoSection = v.object({
+  id: v.string(),
+  title: v.string(),
+  kind: vInfoSectionKind,
+  body: v.optional(v.string()),
+  rows: v.optional(v.array(vInfoSectionRow)),
+  position: v.number(),
+});
 
 export const vVariantColour = v.object({ name: v.string(), hex: v.string() });
 
@@ -295,8 +380,33 @@ export const vProductImageView = v.object({
   id: v.id("productImages"),
   storageId: v.id("_storage"),
   kind: vProductImageKind,
+  variantId: v.union(v.id("productVariants"), v.null()),
   position: v.number(),
   url: v.union(v.string(), v.null()),
+});
+
+/** Live auto-offer currently applied to a product (display + sale price). */
+export const vAppliedOffer = v.object({
+  id: v.id("discounts"),
+  name: v.string(),
+  badge: v.union(v.string(), v.null()),
+  kind: vDiscountKind,
+  value: v.number(),
+  offerKind: vOfferKind,
+  endsAt: v.union(v.number(), v.null()),
+});
+
+/** Storefront banner for the best live auto offer. */
+export const vLiveOfferBanner = v.object({
+  id: v.id("discounts"),
+  name: v.string(),
+  badge: v.union(v.string(), v.null()),
+  kind: vDiscountKind,
+  value: v.number(),
+  offerKind: vOfferKind,
+  endsAt: v.union(v.number(), v.null()),
+  startsAt: v.number(),
+  scopeLabel: v.string(),
 });
 
 export const vProductView = v.object({
@@ -317,6 +427,11 @@ export const vProductView = v.object({
   subcategory: v.string(),
   productType: v.union(v.string(), v.null()),
   description: v.string(),
+  /** Dynamic short traits (color, fit, fabric, custom). */
+  attributes: v.array(vProductAttribute),
+  /** Dynamic PDP accordion blocks. */
+  infoSections: v.array(vProductInfoSection),
+  /** Derived from attributes / legacy columns for older UI. */
   colours: vColours,
   pattern: v.union(v.string(), v.null()),
   material: v.union(v.string(), v.null()),
@@ -325,6 +440,8 @@ export const vProductView = v.object({
   occasion: v.union(vOccasion, v.null()),
   priceInr: v.number(),
   compareAtPriceInr: v.union(v.number(), v.null()),
+  /** Present when a live auto offer reduced the price. */
+  offer: v.union(vAppliedOffer, v.null()),
   hasVariants: v.boolean(),
   /** Enabled option dimensions (Payload `variantTypes` on the product). */
   variantTypeIds: v.array(v.id("variantTypes")),
@@ -362,9 +479,14 @@ export const vDiscountView = v.object({
   kind: vDiscountKind,
   value: v.number(),
   scope: vDiscountScope,
+  offerKind: vOfferKind,
+  badge: v.union(v.string(), v.null()),
+  priority: v.number(),
   categories: v.array(vProductCategory),
   collectionId: v.union(v.id("collections"), v.null()),
   productIds: v.array(v.id("products")),
+  attributeKey: v.union(v.string(), v.null()),
+  attributeValues: v.array(v.string()),
   minOrderInr: v.union(v.number(), v.null()),
   maxUses: v.union(v.number(), v.null()),
   usedCount: v.number(),
@@ -507,6 +629,109 @@ export const MAX_CART_QTY = 10;
 export const MAX_CART_LINES = 30;
 export const ORDER_SAMPLE_CAP = 200;
 export const MAX_PRODUCT_IMAGES = 6;
+export const MAX_PRODUCT_ATTRIBUTES = 40;
+export const MAX_INFO_SECTIONS = 12;
+
+export type ProductAttribute = { key: string; label: string; value: string };
+export type ProductInfoSection = {
+  id: string;
+  title: string;
+  kind: InfoSectionKind;
+  body?: string;
+  rows?: { label: string; value: string }[];
+  position: number;
+};
+
+export function attributeValue(
+  attributes: ProductAttribute[] | undefined,
+  key: string,
+): string | undefined {
+  const hit = attributes?.find((row) => row.key === key);
+  const value = hit?.value.trim();
+  return value ? value : undefined;
+}
+
+export function upsertAttribute(
+  attributes: ProductAttribute[],
+  key: string,
+  value: string | undefined,
+  label = attrLabel(key),
+): ProductAttribute[] {
+  const next = attributes.filter((row) => row.key !== key);
+  const clean = value?.trim() ?? "";
+  if (!clean) return next;
+  return [...next, { key, label, value: clean.slice(0, 120) }];
+}
+
+/** Build attributes from legacy typed columns (backfill + transitional writes). */
+export function attributesFromLegacy(input: {
+  colours?: { primary?: string; secondary?: string[]; hex?: string[] } | null;
+  pattern?: string | null;
+  material?: string | null;
+  fit?: string | null;
+  formality?: string | null;
+  season?: string[] | null;
+  size?: string | null;
+  productType?: string | null;
+  subcategory?: string | null;
+  occasion?: string | null;
+  attributes?: ProductAttribute[] | null;
+}): ProductAttribute[] {
+  let attrs = [...(input.attributes ?? [])];
+  const set = (key: string, value: string | undefined) => {
+    attrs = upsertAttribute(attrs, key, value);
+  };
+  set(ATTR.color, input.colours?.primary);
+  set(ATTR.colorSecondary, input.colours?.secondary?.filter(Boolean).join(", "));
+  set(ATTR.colorHex, input.colours?.hex?.[0]);
+  set(ATTR.pattern, input.pattern ?? undefined);
+  set(ATTR.fabric, input.material ?? undefined);
+  set(ATTR.fit, input.fit ?? undefined);
+  set(ATTR.formality, input.formality ?? undefined);
+  set(ATTR.season, input.season?.length ? input.season.join(", ") : undefined);
+  set(ATTR.size, input.size ?? undefined);
+  set(ATTR.productType, input.productType ?? undefined);
+  set(ATTR.subcategory, input.subcategory ?? undefined);
+  set(ATTR.occasion, input.occasion ?? undefined);
+  return attrs.slice(0, MAX_PRODUCT_ATTRIBUTES);
+}
+
+/** Derive legacy colour/pattern fields from attributes for matchers + older UI. */
+export function legacyFromAttributes(attributes: ProductAttribute[] | undefined): {
+  colours: { primary: string; secondary: string[]; hex: string[] };
+  pattern?: string;
+  material?: string;
+  fit?: string;
+  formality?: string;
+  season?: string[];
+  size?: string;
+  productType?: string;
+  subcategory?: string;
+  occasion?: string;
+} {
+  const color = attributeValue(attributes, ATTR.color) ?? "";
+  const secondary = (attributeValue(attributes, ATTR.colorSecondary) ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const hexRaw = attributeValue(attributes, ATTR.colorHex);
+  const hex = hexRaw && /^#[0-9a-fA-F]{6}$/.test(hexRaw) ? [hexRaw.toLowerCase()] : [];
+  const seasonRaw = attributeValue(attributes, ATTR.season);
+  return {
+    colours: { primary: color, secondary, hex },
+    pattern: attributeValue(attributes, ATTR.pattern),
+    material: attributeValue(attributes, ATTR.fabric),
+    fit: attributeValue(attributes, ATTR.fit),
+    formality: attributeValue(attributes, ATTR.formality),
+    season: seasonRaw
+      ? seasonRaw.split(",").map((part) => part.trim()).filter(Boolean)
+      : undefined,
+    size: attributeValue(attributes, ATTR.size),
+    productType: attributeValue(attributes, ATTR.productType),
+    subcategory: attributeValue(attributes, ATTR.subcategory),
+    occasion: attributeValue(attributes, ATTR.occasion),
+  };
+}
 
 export const vProductDraft = v.object({
   category: vProductCategory,

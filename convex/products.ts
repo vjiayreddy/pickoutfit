@@ -11,7 +11,7 @@ import {
   shopTheLook,
 } from "./model/catalog";
 import { toStorefrontView } from "./model/vendors";
-import { vProductCategory, vProductView, vRailProductView } from "./shared/products";
+import { vLiveOfferBanner, vProductCategory, vProductView, vRailProductView } from "./shared/products";
 import { vStorefrontView, vendorSellable } from "./shared/vendors";
 
 /**
@@ -46,11 +46,15 @@ export const get = query({
   },
 });
 
-/** A store's public page: profile plus everything it has live. */
+/** A store's public page: profile, live products (sale-priced), and offer banner. */
 export const storefront = query({
   args: { slug: v.string() },
   returns: v.union(
-    v.object({ vendor: vStorefrontView, products: v.array(vProductView) }),
+    v.object({
+      vendor: vStorefrontView,
+      products: v.array(vProductView),
+      liveOffer: v.union(vLiveOfferBanner, v.null()),
+    }),
     v.null(),
   ),
   handler: async (ctx, { slug }) => {
@@ -60,9 +64,11 @@ export const storefront = query({
       .withIndex("by_slug", (q) => q.eq("slug", slug))
       .unique();
     if (!vendor || !vendorSellable(vendor)) return null;
+    const { products, banner } = await listStorefront(ctx, vendor);
     return {
       vendor: await toStorefrontView(ctx, vendor),
-      products: await listStorefront(ctx, vendor),
+      products,
+      liveOffer: banner,
     };
   },
 });

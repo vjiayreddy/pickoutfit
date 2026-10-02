@@ -13,6 +13,7 @@ import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_LABELS, type ProductCategory } fro
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppHeaderTitle } from "@/components/layout/app-header";
 import { ShopProductCard } from "@/components/shop/ShopProductCard";
+import { StoreOfferBanner } from "@/components/shop/StoreOfferBanner";
 import { Button } from "@/components/ui/button";
 import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
@@ -58,7 +59,7 @@ export function Storefront({ slug }: { slug: string }) {
     );
   }
 
-  const { vendor, products } = data;
+  const { vendor, products, liveOffer } = data;
   const categories = PRODUCT_CATEGORIES.filter((c) => products.some((p) => p.category === c));
   const shown = category === "all" ? products : products.filter((p) => p.category === category);
   const looks = groupLooks(products);
@@ -83,6 +84,7 @@ export function Storefront({ slug }: { slug: string }) {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-8">
       <AppHeaderTitle title={vendor.name} />
+      {liveOffer ? <StoreOfferBanner offer={liveOffer} /> : null}
       <header className="space-y-4">
         <div className="relative aspect-[3/1] bg-soft-cloud sm:aspect-[4/1]">
           {vendor.bannerUrl ? (

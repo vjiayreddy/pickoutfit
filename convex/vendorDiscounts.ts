@@ -1,13 +1,16 @@
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
+import { scheduleOfferExpiry } from "./discountsExpire";
 import { assertVendorWritable, requireVendor } from "./lib/auth";
 import { appError } from "./lib/errors";
 import {
   vDiscountKind,
   vDiscountScope,
   vDiscountView,
+  vOfferKind,
   vProductCategory,
+  type OfferKind,
 } from "./shared/products";
 import { MAX_VENDOR_DISCOUNTS } from "./shared/vendors";
 
@@ -17,9 +20,14 @@ const vDiscountFields = {
   kind: vDiscountKind,
   value: v.number(),
   scope: vDiscountScope,
+  offerKind: v.optional(vOfferKind),
+  badge: v.optional(v.string()),
+  priority: v.optional(v.number()),
   categories: v.optional(v.array(vProductCategory)),
   collectionId: v.optional(v.id("collections")),
   productIds: v.optional(v.array(v.id("products"))),
+  attributeKey: v.optional(v.string()),
+  attributeValues: v.optional(v.array(v.string())),
   minOrderInr: v.optional(v.number()),
   maxUses: v.optional(v.number()),
   startsAt: v.number(),
@@ -33,9 +41,14 @@ type DiscountInput = {
   kind: Doc<"discounts">["kind"];
   value: number;
   scope: Doc<"discounts">["scope"];
+  offerKind?: OfferKind;
+  badge?: string;
+  priority?: number;
   categories?: Doc<"discounts">["categories"];
   collectionId?: Doc<"discounts">["collectionId"];
   productIds?: Doc<"discounts">["productIds"];
+  attributeKey?: string;
+  attributeValues?: string[];
   minOrderInr?: number;
   maxUses?: number;
   startsAt: number;
@@ -66,6 +79,13 @@ async function cleanDiscount(ctx: MutationCtx, vendor: Doc<"vendors">, input: Di
   if (input.scope === "products" && !input.productIds?.length) {
     throw appError("INVALID_INPUT", "Pick at least one product.");
   }
+  if (input.scope === "attribute") {
+    const key = input.attributeKey?.trim().toLowerCase().replace(/\s+/g, "_");
+    const values = (input.attributeValues ?? []).map((value) => value.trim()).filter(Boolean);
+    if (!key || values.length === 0) {
+      throw appError("INVALID_INPUT", "Attribute offers need a key and at least one value.");
+    }
+  }
   if (input.scope === "collection") {
     const collection = input.collectionId ? await ctx.db.get(input.collectionId) : null;
     if (!collection || collection.vendorId !== vendor._id) {
@@ -88,15 +108,32 @@ async function cleanDiscount(ctx: MutationCtx, vendor: Doc<"vendors">, input: Di
       .first();
     if (clash && clash._id !== selfId) throw appError("CONFLICT", "That code is already in use.");
   }
+  const badge = input.badge?.trim().slice(0, 40) || undefined;
+  const attributeKey =
+    input.scope === "attribute"
+      ? input.attributeKey?.trim().toLowerCase().replace(/\s+/g, "_").slice(0, 40)
+      : undefined;
+  const attributeValues =
+    input.scope === "attribute"
+      ? (input.attributeValues ?? [])
+          .map((value) => value.trim().slice(0, 80))
+          .filter(Boolean)
+          .slice(0, 40)
+      : undefined;
   return {
     name,
     code,
     kind: input.kind,
     value: Math.round(input.value * 100) / 100,
     scope: input.scope,
+    offerKind: input.offerKind ?? "standard",
+    badge,
+    priority: Number.isFinite(input.priority) ? Math.round(input.priority!) : 0,
     categories: input.scope === "category" ? input.categories : undefined,
     collectionId: input.scope === "collection" ? input.collectionId : undefined,
     productIds: input.scope === "products" ? input.productIds?.slice(0, 200) : undefined,
+    attributeKey,
+    attributeValues,
     minOrderInr: input.minOrderInr && input.minOrderInr > 0 ? Math.round(input.minOrderInr) : undefined,
     maxUses: input.maxUses && input.maxUses > 0 ? Math.round(input.maxUses) : undefined,
     startsAt: input.startsAt,
@@ -113,9 +150,14 @@ function toView(discount: Doc<"discounts">) {
     kind: discount.kind,
     value: discount.value,
     scope: discount.scope,
+    offerKind: discount.offerKind ?? ("standard" as const),
+    badge: discount.badge ?? null,
+    priority: discount.priority ?? 0,
     categories: discount.categories ?? [],
     collectionId: discount.collectionId ?? null,
     productIds: discount.productIds ?? [],
+    attributeKey: discount.attributeKey ?? null,
+    attributeValues: discount.attributeValues ?? [],
     minOrderInr: discount.minOrderInr ?? null,
     maxUses: discount.maxUses ?? null,
     usedCount: discount.usedCount,
@@ -161,7 +203,15 @@ export const create = mutation({
     }
     const clean = await cleanDiscount(ctx, vendor, input);
     const now = Date.now();
-    return ctx.db.insert("discounts", { vendorId: vendor._id, ...clean, usedCount: 0, createdAt: now, updatedAt: now });
+    const discountId = await ctx.db.insert("discounts", {
+      vendorId: vendor._id,
+      ...clean,
+      usedCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await scheduleOfferExpiry(ctx, discountId, clean.endsAt);
+    return discountId;
   },
 });
 
@@ -174,6 +224,7 @@ export const update = mutation({
     const discount = await requireOwn(ctx, vendor, discountId);
     const clean = await cleanDiscount(ctx, vendor, input, discount._id);
     await ctx.db.patch(discount._id, { ...clean, updatedAt: Date.now() });
+    await scheduleOfferExpiry(ctx, discountId, clean.endsAt);
     return null;
   },
 });

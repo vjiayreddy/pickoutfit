@@ -7,7 +7,13 @@ import { useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_LABELS, type ProductCategory } from "@convex/shared/products";
+import {
+  OFFER_KINDS,
+  PRODUCT_CATEGORIES,
+  PRODUCT_CATEGORY_LABELS,
+  type OfferKind,
+  type ProductCategory,
+} from "@convex/shared/products";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -28,10 +34,14 @@ type Form = {
   code: string;
   kind: "percent" | "flat";
   value: string;
-  scope: "all" | "category" | "collection" | "products";
+  scope: "all" | "category" | "collection" | "products" | "attribute";
+  offerKind: OfferKind;
+  badge: string;
   categories: ProductCategory[];
   collectionId: string;
   productIds: Id<"products">[];
+  attributeKey: string;
+  attributeValues: string;
   minOrderInr: string;
   maxUses: string;
   startsAt: string;
@@ -52,9 +62,13 @@ function emptyForm(): Form {
     kind: "percent",
     value: "10",
     scope: "all",
+    offerKind: "standard",
+    badge: "",
     categories: [],
     collectionId: "",
     productIds: [],
+    attributeKey: "",
+    attributeValues: "",
     minOrderInr: "",
     maxUses: "",
     startsAt: toLocalInput(Date.now()),
@@ -70,9 +84,13 @@ function fromView(discount: DiscountView): Form {
     kind: discount.kind,
     value: String(discount.value),
     scope: discount.scope,
+    offerKind: discount.offerKind,
+    badge: discount.badge ?? "",
     categories: discount.categories,
     collectionId: discount.collectionId ?? "",
     productIds: discount.productIds,
+    attributeKey: discount.attributeKey ?? "",
+    attributeValues: discount.attributeValues.join(", "),
     minOrderInr: discount.minOrderInr ? String(discount.minOrderInr) : "",
     maxUses: discount.maxUses ? String(discount.maxUses) : "",
     startsAt: toLocalInput(discount.startsAt),
@@ -353,12 +371,19 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
         kind: form.kind,
         value: Number(form.value),
         scope: form.scope,
+        offerKind: form.offerKind,
+        badge: form.badge.trim() || undefined,
         categories: form.scope === "category" ? form.categories : undefined,
         collectionId:
           form.scope === "collection" && form.collectionId
             ? (form.collectionId as Id<"collections">)
             : undefined,
         productIds: form.scope === "products" ? form.productIds : undefined,
+        attributeKey: form.scope === "attribute" ? form.attributeKey.trim() : undefined,
+        attributeValues:
+          form.scope === "attribute"
+            ? form.attributeValues.split(",").map((part) => part.trim()).filter(Boolean)
+            : undefined,
         minOrderInr: form.minOrderInr ? Number(form.minOrderInr) : undefined,
         maxUses: form.maxUses ? Number(form.maxUses) : undefined,
         startsAt: new Date(form.startsAt).getTime(),
@@ -426,10 +451,33 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
               </span>
             </Field>
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Offer type">
+              <select
+                value={form.offerKind}
+                onChange={(e) => set("offerKind", e.target.value as OfferKind)}
+                className="h-12 w-full rounded-full bg-soft-cloud px-4 text-sm"
+              >
+                {OFFER_KINDS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {kind.charAt(0).toUpperCase() + kind.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Badge" hint="Shown on product cards when live.">
+              <Input
+                maxLength={40}
+                value={form.badge}
+                onChange={(e) => set("badge", e.target.value)}
+                placeholder="Diwali Sale"
+              />
+            </Field>
+          </div>
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">Applies to</legend>
             <div className="flex flex-wrap gap-2">
-              {(["all", "category", "collection", "products"] as const).map((scope) => (
+              {(["all", "category", "collection", "products", "attribute"] as const).map((scope) => (
                 <button
                   key={scope}
                   type="button"
@@ -447,6 +495,7 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
                       category: "Categories",
                       collection: "A collection",
                       products: "Chosen products",
+                      attribute: "Attribute",
                     }[scope]
                   }
                 </button>
@@ -523,6 +572,26 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
                 <li className="p-2 text-sm text-mute">No products yet.</li>
               ) : null}
             </ul>
+          ) : null}
+          {form.scope === "attribute" ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Attribute key" hint="e.g. occasion, sale">
+                <Input
+                  required
+                  value={form.attributeKey}
+                  onChange={(e) => set("attributeKey", e.target.value)}
+                  placeholder="occasion"
+                />
+              </Field>
+              <Field label="Values" hint="Comma-separated">
+                <Input
+                  required
+                  value={form.attributeValues}
+                  onChange={(e) => set("attributeValues", e.target.value)}
+                  placeholder="festive, wedding"
+                />
+              </Field>
+            </div>
           ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Starts">

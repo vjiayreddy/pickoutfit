@@ -17,6 +17,7 @@ export type ShopCardProduct = {
   totalStock: number;
   imageUrl: string | null;
   variants: Array<{ active: boolean }>;
+  offer?: { badge: string | null; kind: "percent" | "flat"; value: number } | null;
 };
 
 export function ShopProductCard({
@@ -44,6 +45,13 @@ export function ShopProductCard({
             <span className="absolute top-2 left-2 rounded-full bg-canvas px-2.5 py-1 text-[11px] font-medium text-mute">
               Sold out
             </span>
+          ) : product.offer ? (
+            <span className="absolute top-2 left-2 rounded-full bg-canvas px-2.5 py-1 text-[11px] font-medium text-sale">
+              {product.offer.badge?.trim() ||
+                (product.offer.kind === "percent"
+                  ? `${Math.round(product.offer.value)}% off`
+                  : `₹${Math.round(product.offer.value)} off`)}
+            </span>
           ) : null}
         </div>
         <p className="truncate text-sm font-medium">{product.name}</p>
@@ -53,7 +61,7 @@ export function ShopProductCard({
           <p className="truncate text-xs text-mute">{product.subcategory}</p>
         )}
         <p className="text-sm">
-          {formatInr(product.priceInr)}
+          <span className={product.offer ? "text-sale" : undefined}>{formatInr(product.priceInr)}</span>
           {product.compareAtPriceInr && product.compareAtPriceInr > product.priceInr ? (
             <span className="ml-2 text-mute line-through">{formatInr(product.compareAtPriceInr)}</span>
           ) : null}

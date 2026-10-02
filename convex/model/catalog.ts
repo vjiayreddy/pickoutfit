@@ -11,6 +11,13 @@ import {
   type MatchItem,
 } from "../shared/wardrobeMatch";
 import { listForUser } from "./items";
+import {
+  applyOffersToViews,
+  loadLiveAutoOffers,
+  pickOfferForProduct,
+  withOfferPricing,
+  type LiveOfferBanner,
+} from "./offers";
 import { toProductView, toProductViews, vendorFor, type ProductView, type VendorCache } from "./products";
 
 const CATALOG_PAGE = 48;
@@ -59,7 +66,24 @@ export async function listCatalog(
   for (const product of products.slice(0, opts.limit ?? CATALOG_PAGE)) {
     views.push(await toProductView(ctx, product, cache));
   }
-  return views;
+  return applyOffersByVendor(ctx, views);
+}
+
+/** Group by vendor so each store's live auto offers apply once. */
+async function applyOffersByVendor(ctx: QueryCtx, views: ProductView[]): Promise<ProductView[]> {
+  if (views.length === 0) return views;
+  const byVendor = new Map<Id<"vendors">, ProductView[]>();
+  for (const view of views) {
+    const list = byVendor.get(view.vendorId) ?? [];
+    list.push(view);
+    byVendor.set(view.vendorId, list);
+  }
+  const priced = new Map<Id<"products">, ProductView>();
+  for (const [vendorId, group] of byVendor) {
+    const { products } = await applyOffersToViews(ctx, vendorId, group);
+    for (const product of products) priced.set(product.id, product);
+  }
+  return views.map((view) => priced.get(view.id) ?? { ...view, offer: null });
 }
 
 /** Catalog for the wardrobe rail: tagged against owned pieces and reordered for buy intent. */
@@ -146,15 +170,34 @@ export async function listShopCatalog(
     .slice(0, limit);
 }
 
-/** Everything a store has live, for its storefront page. */
-export async function listStorefront(ctx: QueryCtx, vendor: Doc<"vendors">): Promise<ProductView[]> {
-  if (!vendorSellable(vendor)) return [];
+/** Everything a store has live, for its storefront page — with live auto-offer pricing. */
+export async function listStorefront(
+  ctx: QueryCtx,
+  vendor: Doc<"vendors">,
+): Promise<{ products: ProductView[]; banner: LiveOfferBanner | null }> {
+  if (!vendorSellable(vendor)) return { products: [], banner: null };
   const products = await ctx.db
     .query("products")
     .withIndex("by_vendorId_and_status", (q) => q.eq("vendorId", vendor._id).eq("status", "active"))
     .order("desc")
     .take(STOREFRONT_PAGE);
-  return toProductViews(ctx, products);
+  const views = await toProductViews(ctx, products);
+  return applyOffersToViews(ctx, vendor._id, views);
+}
+
+async function withVendorOffer(
+  ctx: QueryCtx,
+  vendor: Doc<"vendors">,
+  view: ProductView,
+): Promise<ProductView> {
+  const offers = await loadLiveAutoOffers(ctx, vendor._id);
+  const offer = await pickOfferForProduct(
+    ctx,
+    { _id: view.id, category: view.category, attributes: view.attributes },
+    offers,
+    view.priceInr,
+  );
+  return withOfferPricing(view, offer);
 }
 
 export async function getPublicProduct(
@@ -172,7 +215,8 @@ export async function getPublicProduct(
     .withIndex("by_vendorId_and_slug", (q) => q.eq("vendorId", vendor._id).eq("slug", productSlug))
     .unique();
   if (!product || product.status !== "active") return null;
-  return toProductView(ctx, product, new Map([[vendor._id, vendor]]));
+  const view = await toProductView(ctx, product, new Map([[vendor._id, vendor]]));
+  return withVendorOffer(ctx, vendor, view);
 }
 
 export async function getPublicProductById(ctx: QueryCtx, productId: Id<"products">): Promise<ProductView> {
@@ -181,7 +225,8 @@ export async function getPublicProductById(ctx: QueryCtx, productId: Id<"product
   if (!product || product.status !== "active" || !vendor || !vendorSellable(vendor)) {
     throw appError("NOT_FOUND", "That product is not available.");
   }
-  return toProductView(ctx, product, new Map([[vendor._id, vendor]]));
+  const view = await toProductView(ctx, product, new Map([[vendor._id, vendor]]));
+  return withVendorOffer(ctx, vendor, view);
 }
 
 /** Other live products cut from the same look photo. */
@@ -189,13 +234,15 @@ export async function shopTheLook(
   ctx: QueryCtx,
   product: Doc<"products">,
 ): Promise<ProductView[]> {
-  if (!product.sourceUploadId) return [];
+  if (!product.sourceUploadId || !product.vendorId) return [];
   const siblings = await ctx.db
     .query("products")
     .withIndex("by_sourceUploadId", (q) => q.eq("sourceUploadId", product.sourceUploadId))
     .take(24);
-  return toProductViews(
+  const views = await toProductViews(
     ctx,
     siblings.filter((sibling) => sibling._id !== product._id && sibling.status === "active"),
   );
+  const { products } = await applyOffersToViews(ctx, product.vendorId, views);
+  return products;
 }

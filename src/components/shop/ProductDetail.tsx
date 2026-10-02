@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { Package } from "lucide-react";
+import { Package, Plus } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { PRODUCT_CATEGORY_LABELS } from "@convex/shared/products";
+import { ATTR, PRODUCT_CATEGORY_LABELS } from "@convex/shared/products";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppHeaderTitle } from "@/components/layout/app-header";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,13 @@ import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
 import { formatInr } from "@/lib/format";
 import { routes } from "@/lib/routes";
+
+const HIDDEN_ATTR_KEYS = new Set<string>([
+  ATTR.colorHex,
+  ATTR.colorSecondary,
+  ATTR.productType,
+  ATTR.subcategory,
+]);
 
 function variantLabel(variant: {
   size: string | null;
@@ -42,6 +49,10 @@ export function ProductDetail({
     setVariantId(null);
   }, [vendorSlug, productSlug]);
 
+  useEffect(() => {
+    setImageIndex(0);
+  }, [variantId]);
+
   if (data === undefined) {
     return <div className="h-64 animate-pulse bg-soft-cloud" />;
   }
@@ -62,14 +73,24 @@ export function ProductDetail({
   const selectedVariant =
     activeVariants.find((variant) => variant.id === variantId) ??
     (multiVariant ? null : (activeVariants[0] ?? null));
+  const variantImages = selectedVariant
+    ? product.images.filter((image) => image.variantId === selectedVariant.id)
+    : [];
+  const galleryImages = variantImages.length > 0 ? variantImages : product.images.filter((image) => !image.variantId);
   const imageUrls = [
-    ...product.images.map((image) => image.url).filter((url): url is string => Boolean(url)),
+    ...(galleryImages.length > 0 ? galleryImages : product.images)
+      .map((image) => image.url)
+      .filter((url): url is string => Boolean(url)),
   ];
   if (imageUrls.length === 0 && product.imageUrl) imageUrls.push(product.imageUrl);
   const activeImageUrl = imageUrls[imageIndex] ?? imageUrls[0] ?? null;
   const priceInr = selectedVariant?.priceInr ?? product.priceInr;
   const soldOut =
     product.totalStock === 0 || (selectedVariant !== null && selectedVariant.stock === 0);
+  const displayAttributes = product.attributes.filter(
+    (row) => row.value && !HIDDEN_ATTR_KEYS.has(row.key),
+  );
+  const infoSections = [...product.infoSections].sort((a, b) => a.position - b.position);
 
   async function addToBag() {
     if (pending || soldOut) return;
@@ -139,18 +160,45 @@ export function ProductDetail({
               {product.vendorName}
             </Link>
             <p className="text-lg font-medium">
-              {formatInr(priceInr)}
+              <span className={product.offer ? "text-sale" : undefined}>{formatInr(priceInr)}</span>
               {product.compareAtPriceInr && product.compareAtPriceInr > priceInr ? (
                 <span className="ml-2 text-base font-normal text-mute line-through">
                   {formatInr(product.compareAtPriceInr)}
                 </span>
               ) : null}
             </p>
+            {product.offer ? (
+              <p className="text-sm font-medium text-sale">
+                {product.offer.badge?.trim() ||
+                  (product.offer.kind === "percent"
+                    ? `${Math.round(product.offer.value)}% off`
+                    : `₹${Math.round(product.offer.value)} off`)}
+                {product.offer.endsAt
+                  ? ` · ends ${new Date(product.offer.endsAt).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}`
+                  : ""}
+              </p>
+            ) : null}
             {product.subcategory ? <p className="text-sm text-mute">{product.subcategory}</p> : null}
           </div>
 
           {product.description ? (
             <p className="max-w-prose text-sm leading-relaxed text-mute">{product.description}</p>
+          ) : null}
+
+          {displayAttributes.length > 0 ? (
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
+              {displayAttributes.map((row) => (
+                <div key={row.key}>
+                  <dt className="text-mute">{row.label}</dt>
+                  <dd className="font-medium">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
           ) : null}
 
           {multiVariant ? (
@@ -190,6 +238,33 @@ export function ProductDetail({
           </button>
         </div>
       </div>
+
+      {infoSections.length > 0 ? (
+        <section className="border-t border-hairline" aria-label="Product information">
+          {infoSections.map((section) => (
+            <details key={section.id} className="group border-b border-hairline">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-6 text-base font-medium tracking-tight [&::-webkit-details-marker]:hidden">
+                <span>{section.title}</span>
+                <Plus className="size-4 shrink-0 transition group-open:rotate-45" aria-hidden />
+              </summary>
+              <div className="pb-6 text-sm leading-relaxed text-mute">
+                {section.kind === "rich_text" ? (
+                  <p className="whitespace-pre-wrap">{section.body}</p>
+                ) : (
+                  <dl className="space-y-3">
+                    {(section.rows ?? []).map((row) => (
+                      <div key={`${section.id}-${row.label}`}>
+                        <dt className="font-medium text-ink">{row.label}</dt>
+                        <dd className="mt-1 whitespace-pre-wrap">{row.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </div>
+            </details>
+          ))}
+        </section>
+      ) : null}
 
       {look.length > 0 ? (
         <section className="space-y-4" aria-label="Shop the look">
