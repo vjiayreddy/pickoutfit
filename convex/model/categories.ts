@@ -4,7 +4,7 @@ import { appError } from "../lib/errors";
 import {
   categorySlug,
   joinCategoryPath,
-  MAX_CATEGORIES,
+  MAX_CATEGORIES_PER_VENDOR,
   MAX_CATEGORY_DEPTH,
   SEED_CATEGORY_TREE,
   type SeedCategoryNode,
@@ -23,21 +23,31 @@ export type CategoryTreeNode = {
   children: CategoryTreeNode[];
 };
 
-async function listAllCategories(ctx: Ctx): Promise<Doc<"categories">[]> {
-  return ctx.db.query("categories").withIndex("by_path").take(MAX_CATEGORIES);
+async function listVendorCategories(
+  ctx: Ctx,
+  vendorId: Id<"vendors">,
+): Promise<Doc<"categories">[]> {
+  return ctx.db
+    .query("categories")
+    .withIndex("by_vendorId", (q) => q.eq("vendorId", vendorId))
+    .take(MAX_CATEGORIES_PER_VENDOR);
 }
 
 export async function listChildren(
   ctx: Ctx,
+  vendorId: Id<"vendors">,
   parentId: Id<"categories"> | undefined,
   opts: { activeOnly?: boolean } = {},
 ): Promise<Doc<"categories">[]> {
+  // Roots omit `parentId`; optional-index eq(undefined) is unreliable across clients.
   const rows = parentId
     ? await ctx.db
         .query("categories")
-        .withIndex("by_parentId", (q) => q.eq("parentId", parentId))
-        .take(MAX_CATEGORIES)
-    : (await listAllCategories(ctx)).filter((row) => row.parentId === undefined);
+        .withIndex("by_vendorId_and_parentId", (q) =>
+          q.eq("vendorId", vendorId).eq("parentId", parentId),
+        )
+        .take(MAX_CATEGORIES_PER_VENDOR)
+    : (await listVendorCategories(ctx, vendorId)).filter((row) => row.parentId === undefined);
   const filtered = opts.activeOnly ? rows.filter((row) => row.isActive) : rows;
   return filtered.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
 }
@@ -52,9 +62,10 @@ export type CategoryListRow = Doc<"categories"> & {
 /** Flat list ordered by path for management tables. */
 export async function listCategories(
   ctx: Ctx,
+  vendorId: Id<"vendors">,
   opts: { activeOnly?: boolean } = {},
 ): Promise<CategoryListRow[]> {
-  const rows = await listAllCategories(ctx);
+  const rows = await listVendorCategories(ctx, vendorId);
   const filtered = opts.activeOnly ? rows.filter((row) => row.isActive) : rows;
   const byId = new Map(filtered.map((row) => [row._id, row]));
   const childCounts = new Map<Id<"categories">, number>();
@@ -78,9 +89,10 @@ export async function listCategories(
 
 export async function getTree(
   ctx: Ctx,
+  vendorId: Id<"vendors">,
   opts: { activeOnly?: boolean } = {},
 ): Promise<CategoryTreeNode[]> {
-  const rows = await listAllCategories(ctx);
+  const rows = await listVendorCategories(ctx, vendorId);
   const filtered = opts.activeOnly ? rows.filter((row) => row.isActive) : rows;
   const byParent = new Map<string | undefined, Doc<"categories">[]>();
   for (const row of filtered) {
@@ -109,6 +121,7 @@ export async function getTree(
 
 async function assertUniqueSlug(
   ctx: Ctx,
+  vendorId: Id<"vendors">,
   parentId: Id<"categories"> | undefined,
   slug: string,
   excludeId?: Id<"categories">,
@@ -116,9 +129,11 @@ async function assertUniqueSlug(
   const siblings = parentId
     ? await ctx.db
         .query("categories")
-        .withIndex("by_parentId_and_slug", (q) => q.eq("parentId", parentId).eq("slug", slug))
+        .withIndex("by_vendorId_and_parentId_and_slug", (q) =>
+          q.eq("vendorId", vendorId).eq("parentId", parentId).eq("slug", slug),
+        )
         .take(2)
-    : (await listChildren(ctx, undefined)).filter((row) => row.slug === slug);
+    : (await listChildren(ctx, vendorId, undefined)).filter((row) => row.slug === slug);
   if (siblings.some((row) => row._id !== excludeId)) {
     throw appError("CONFLICT", "A category with that slug already exists under this parent.");
   }
@@ -141,13 +156,14 @@ async function depthOf(ctx: Ctx, categoryId: Id<"categories"> | undefined): Prom
 
 async function collectDescendantIds(
   ctx: Ctx,
+  vendorId: Id<"vendors">,
   rootId: Id<"categories">,
 ): Promise<Id<"categories">[]> {
   const out: Id<"categories">[] = [];
   const queue: Id<"categories">[] = [rootId];
   while (queue.length > 0) {
     const id = queue.shift()!;
-    const children = await listChildren(ctx, id);
+    const children = await listChildren(ctx, vendorId, id);
     for (const child of children) {
       out.push(child._id);
       queue.push(child._id);
@@ -156,8 +172,21 @@ async function collectDescendantIds(
   return out;
 }
 
+async function assertOwnedCategory(
+  ctx: Ctx,
+  vendorId: Id<"vendors">,
+  categoryId: Id<"categories">,
+): Promise<Doc<"categories">> {
+  const row = await ctx.db.get(categoryId);
+  if (!row || row.vendorId !== vendorId) {
+    throw appError("NOT_FOUND", "Category not found.");
+  }
+  return row;
+}
+
 export async function createCategory(
   ctx: MutationCtx,
+  vendorId: Id<"vendors">,
   args: {
     name: string;
     slug?: string;
@@ -176,8 +205,7 @@ export async function createCategory(
 
   let parentPath: string | undefined;
   if (args.parentId) {
-    const parent = await ctx.db.get(args.parentId);
-    if (!parent) throw appError("NOT_FOUND", "Parent category not found.");
+    const parent = await assertOwnedCategory(ctx, vendorId, args.parentId);
     parentPath = parent.path;
     const depth = await depthOf(ctx, args.parentId);
     if (depth >= MAX_CATEGORY_DEPTH) {
@@ -185,18 +213,22 @@ export async function createCategory(
     }
   }
 
-  await assertUniqueSlug(ctx, args.parentId, slug);
+  await assertUniqueSlug(ctx, vendorId, args.parentId, slug);
 
-  const existing = await listAllCategories(ctx);
-  if (existing.length >= MAX_CATEGORIES) {
-    throw appError("RATE_LIMITED", `At most ${MAX_CATEGORIES} categories are allowed.`);
+  const existing = await listVendorCategories(ctx, vendorId);
+  if (existing.length >= MAX_CATEGORIES_PER_VENDOR) {
+    throw appError(
+      "RATE_LIMITED",
+      `At most ${MAX_CATEGORIES_PER_VENDOR} categories are allowed per store.`,
+    );
   }
 
-  const siblings = await listChildren(ctx, args.parentId);
+  const siblings = await listChildren(ctx, vendorId, args.parentId);
   const sortOrder = args.sortOrder ?? siblings.length;
   const now = Date.now();
   const path = joinCategoryPath(parentPath, slug);
   const id = await ctx.db.insert("categories", {
+    vendorId,
     name,
     slug,
     ...(args.parentId ? { parentId: args.parentId } : {}),
@@ -208,10 +240,9 @@ export async function createCategory(
     updatedAt: now,
   });
 
-  // Indexes are not unique constraints — reject a racing duplicate path.
   const samePath = await ctx.db
     .query("categories")
-    .withIndex("by_path", (q) => q.eq("path", path))
+    .withIndex("by_vendorId_and_path", (q) => q.eq("vendorId", vendorId).eq("path", path))
     .take(2);
   if (samePath.length > 1) {
     await ctx.db.delete(id);
@@ -223,6 +254,7 @@ export async function createCategory(
 
 export async function updateCategory(
   ctx: MutationCtx,
+  vendorId: Id<"vendors">,
   args: {
     categoryId: Id<"categories">;
     name?: string;
@@ -234,8 +266,7 @@ export async function updateCategory(
     isActive?: boolean;
   },
 ): Promise<void> {
-  const row = await ctx.db.get(args.categoryId);
-  if (!row) throw appError("NOT_FOUND", "Category not found.");
+  const row = await assertOwnedCategory(ctx, vendorId, args.categoryId);
 
   const name = args.name !== undefined ? args.name.trim() : row.name;
   if (name.length < 1 || name.length > 80) {
@@ -253,14 +284,13 @@ export async function updateCategory(
 
   let parentPath: string | undefined;
   if (nextParentId) {
-    const parent = await ctx.db.get(nextParentId);
-    if (!parent) throw appError("NOT_FOUND", "Parent category not found.");
+    const parent = await assertOwnedCategory(ctx, vendorId, nextParentId);
     if (parent.path === row.path || parent.path.startsWith(`${row.path}/`)) {
       throw appError("INVALID_INPUT", "Cannot move a category under its own descendant.");
     }
     parentPath = parent.path;
     const parentDepth = await depthOf(ctx, nextParentId);
-    const subtreeDepth = await subtreeDepthFrom(ctx, args.categoryId);
+    const subtreeDepth = await subtreeDepthFrom(ctx, vendorId, args.categoryId);
     if (parentDepth + subtreeDepth > MAX_CATEGORY_DEPTH) {
       throw appError(
         "INVALID_INPUT",
@@ -270,7 +300,7 @@ export async function updateCategory(
   }
 
   if (slug !== row.slug || nextParentId !== row.parentId) {
-    await assertUniqueSlug(ctx, nextParentId, slug, args.categoryId);
+    await assertUniqueSlug(ctx, vendorId, nextParentId, slug, args.categoryId);
   }
 
   const nextPath = joinCategoryPath(parentPath, slug);
@@ -301,7 +331,7 @@ export async function updateCategory(
   });
 
   if (nextPath !== row.path) {
-    const descendantIds = await collectDescendantIds(ctx, args.categoryId);
+    const descendantIds = await collectDescendantIds(ctx, vendorId, args.categoryId);
     for (const id of descendantIds) {
       const child = await ctx.db.get(id);
       if (!child) continue;
@@ -311,11 +341,15 @@ export async function updateCategory(
   }
 }
 
-async function subtreeDepthFrom(ctx: Ctx, rootId: Id<"categories">): Promise<number> {
+async function subtreeDepthFrom(
+  ctx: Ctx,
+  vendorId: Id<"vendors">,
+  rootId: Id<"categories">,
+): Promise<number> {
   let max = 1;
   const walk = async (id: Id<"categories">, depth: number) => {
     max = Math.max(max, depth);
-    const children = await listChildren(ctx, id);
+    const children = await listChildren(ctx, vendorId, id);
     for (const child of children) await walk(child._id, depth + 1);
   };
   await walk(rootId, 1);
@@ -324,12 +358,12 @@ async function subtreeDepthFrom(ctx: Ctx, rootId: Id<"categories">): Promise<num
 
 export async function removeCategory(
   ctx: MutationCtx,
+  vendorId: Id<"vendors">,
   categoryId: Id<"categories">,
 ): Promise<void> {
-  const row = await ctx.db.get(categoryId);
-  if (!row) throw appError("NOT_FOUND", "Category not found.");
+  const row = await assertOwnedCategory(ctx, vendorId, categoryId);
 
-  const children = await listChildren(ctx, categoryId);
+  const children = await listChildren(ctx, vendorId, categoryId);
   if (children.length > 0) {
     throw appError("CONFLICT", "Remove or reassign child categories first.");
   }
@@ -348,6 +382,7 @@ export async function removeCategory(
 
 async function insertSeedNode(
   ctx: MutationCtx,
+  vendorId: Id<"vendors">,
   node: SeedCategoryNode,
   parentId: Id<"categories"> | undefined,
   parentPath: string | undefined,
@@ -356,11 +391,11 @@ async function insertSeedNode(
   const existing = parentId
     ? await ctx.db
         .query("categories")
-        .withIndex("by_parentId_and_slug", (q) =>
-          q.eq("parentId", parentId).eq("slug", node.slug),
+        .withIndex("by_vendorId_and_parentId_and_slug", (q) =>
+          q.eq("vendorId", vendorId).eq("parentId", parentId).eq("slug", node.slug),
         )
         .unique()
-    : (await listChildren(ctx, undefined)).find((row) => row.slug === node.slug);
+    : (await listChildren(ctx, vendorId, undefined)).find((row) => row.slug === node.slug);
 
   let id: Id<"categories">;
   let path: string;
@@ -371,6 +406,7 @@ async function insertSeedNode(
     const now = Date.now();
     path = joinCategoryPath(parentPath, node.slug);
     id = await ctx.db.insert("categories", {
+      vendorId,
       name: node.name,
       slug: node.slug,
       ...(parentId ? { parentId } : {}),
@@ -384,16 +420,19 @@ async function insertSeedNode(
 
   let created = existing ? 0 : 1;
   for (const [index, child] of (node.children ?? []).entries()) {
-    created += await insertSeedNode(ctx, child, id, path, index);
+    created += await insertSeedNode(ctx, vendorId, child, id, path, index);
   }
   return created;
 }
 
-/** Idempotent seed of the default Clothes → Men tree. Returns how many new rows were inserted. */
-export async function seedCategories(ctx: MutationCtx): Promise<{ created: number }> {
+/** Idempotent seed of Men / Women / Kids for one store. */
+export async function seedCategories(
+  ctx: MutationCtx,
+  vendorId: Id<"vendors">,
+): Promise<{ created: number }> {
   let created = 0;
   for (const [index, node] of SEED_CATEGORY_TREE.entries()) {
-    created += await insertSeedNode(ctx, node, undefined, undefined, index);
+    created += await insertSeedNode(ctx, vendorId, node, undefined, undefined, index);
   }
   return { created };
 }

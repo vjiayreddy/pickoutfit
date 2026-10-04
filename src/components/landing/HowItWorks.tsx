@@ -7,7 +7,7 @@ const OUTFIT = "/images/try-on/outfit-reference.webp";
 const PIECES = [
   { src: "/images/try-on/shirt.webp", label: "Shirt" },
   { src: "/images/try-on/trousers.webp", label: "Trousers" },
-  { src: "/images/try-on/shoes.webp", label: "Shoes" },
+  { src: "/images/try-on/shoes.webp", label: "Footwear" },
 ] as const;
 
 const STEPS = [

@@ -246,3 +246,96 @@ export async function shopTheLook(
   const { products } = await applyOffersToViews(ctx, product.vendorId, views);
   return products;
 }
+
+export type MarketplaceLook = {
+  uploadId: Id<"uploads">;
+  imageUrl: string;
+  vendorName: string;
+  vendorSlug: string;
+  vendorLogoUrl: string | null;
+  totalInr: number;
+  createdAt: number;
+  products: Array<{
+    id: Id<"products">;
+    name: string;
+    slug: string;
+    imageUrl: string | null;
+    priceInr: number;
+  }>;
+};
+
+const MARKETPLACE_LOOK_LIMIT = 48;
+
+/**
+ * Cross-store "Shop the look" cards: active products that share a look photo
+ * (2+ pieces) from sellable vendors.
+ */
+export async function listMarketplaceLooks(ctx: QueryCtx): Promise<MarketplaceLook[]> {
+  const vendors = await ctx.db
+    .query("vendors")
+    .withIndex("by_status", (q) => q.eq("status", "active"))
+    .take(48);
+  const looks: MarketplaceLook[] = [];
+
+  for (const vendor of vendors) {
+    if (!vendorSellable(vendor)) continue;
+    const products = await ctx.db
+      .query("products")
+      .withIndex("by_vendorId_and_status", (q) => q.eq("vendorId", vendor._id).eq("status", "active"))
+      .order("desc")
+      .take(STOREFRONT_PAGE);
+
+    const byUpload = new Map<
+      Id<"uploads">,
+      { products: Doc<"products">[]; referenceStorageId?: Id<"_storage">; createdAt: number }
+    >();
+    for (const product of products) {
+      if (!product.sourceUploadId) continue;
+      const bucket = byUpload.get(product.sourceUploadId) ?? {
+        products: [],
+        createdAt: product.createdAt,
+      };
+      bucket.products.push(product);
+      if (product.referenceStorageId) bucket.referenceStorageId = product.referenceStorageId;
+      bucket.createdAt = Math.max(bucket.createdAt, product.createdAt);
+      byUpload.set(product.sourceUploadId, bucket);
+    }
+
+    const logoUrl = vendor.logoStorageId ? await ctx.storage.getUrl(vendor.logoStorageId) : null;
+    const views = await toProductViews(ctx, products);
+    const { products: priced } = await applyOffersToViews(ctx, vendor._id, views);
+    const priceById = new Map(priced.map((row) => [row.id, row]));
+
+    for (const [uploadId, bucket] of byUpload) {
+      if (bucket.products.length < 2 || !bucket.referenceStorageId) continue;
+      const imageUrl = await ctx.storage.getUrl(bucket.referenceStorageId);
+      if (!imageUrl) continue;
+      const lookProducts = bucket.products
+        .map((doc) => priceById.get(doc._id))
+        .filter((row): row is ProductView => Boolean(row))
+        .map((row) => ({
+          id: row.id,
+          name: row.name,
+          slug: row.slug,
+          imageUrl: row.imageUrl,
+          priceInr: row.priceInr,
+        }));
+      if (lookProducts.length < 2) continue;
+      looks.push({
+        uploadId,
+        imageUrl,
+        vendorName: vendor.name,
+        vendorSlug: vendor.slug,
+        vendorLogoUrl: logoUrl,
+        totalInr: lookProducts.reduce((sum, row) => sum + row.priceInr, 0),
+        createdAt: bucket.createdAt,
+        products: lookProducts,
+      });
+      if (looks.length >= MARKETPLACE_LOOK_LIMIT) {
+        return looks.sort((a, b) => b.createdAt - a.createdAt);
+      }
+    }
+  }
+
+  return looks.sort((a, b) => b.createdAt - a.createdAt);
+}

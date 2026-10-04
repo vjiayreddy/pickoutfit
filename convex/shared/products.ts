@@ -175,7 +175,7 @@ export const PRODUCT_TYPE_LABELS: Record<string, string> = {
   trouser: "Trouser",
   jeans: "Jeans",
   shorts: "Shorts",
-  shoes: "Shoes",
+  shoes: "Footwear",
   bag: "Bag",
   belt: "Belt",
   hat: "Hat",

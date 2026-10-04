@@ -20,8 +20,8 @@ describe("categories authz", () => {
     });
 
     const id = await asUser(t, owner).mutation(api.categories.create, {
-      name: "Kids",
-      slug: "kids",
+      name: "Seasonal",
+      slug: "seasonal",
     });
     expect(id).toBeTruthy();
 
@@ -30,20 +30,33 @@ describe("categories authz", () => {
     ).rejects.toThrow(/manager/i);
   });
 
-  test("admins can create and remove unused categories", async () => {
-    const t = harness();
-    const admin = await seedUser(t, { role: "admin" });
+  test("categories are scoped per store", async () => {
+    const { t, owner, vendorId } = await activeVendor();
+    const rival = await seedUser(t, { email: "rival@example.com" });
+    const rivalVendorId = await asUser(t, rival).mutation(api.vendors.register, {
+      ...VENDOR_PROFILE,
+      name: "Rival Co",
+    });
+    await t.run((ctx) => ctx.db.patch(rivalVendorId, { status: "active" }));
 
-    const id = await asUser(t, admin).mutation(api.categories.create, {
+    const ownerTree = await asUser(t, owner).query(api.categories.tree, {});
+    const rivalTree = await asUser(t, rival).query(api.categories.tree, {});
+    expect(ownerTree.some((node) => node.slug === "men")).toBe(true);
+    expect(rivalTree.some((node) => node.slug === "men")).toBe(true);
+    expect(ownerTree[0]?._id).not.toBe(rivalTree[0]?._id);
+
+    const seasonal = await asUser(t, owner).mutation(api.categories.create, {
       name: "Seasonal",
       slug: "seasonal",
     });
-    const row = await asUser(t, admin).query(api.categories.get, { categoryId: id });
-    expect(row?.name).toBe("Seasonal");
-    expect(row?.path).toBe("seasonal");
+    const rivalList = await asUser(t, rival).query(api.categories.list, { activeOnly: false });
+    expect(rivalList.some((row) => row._id === seasonal)).toBe(false);
 
-    await asUser(t, admin).mutation(api.categories.remove, { categoryId: id });
-    expect(await asUser(t, admin).query(api.categories.get, { categoryId: id })).toBeNull();
+    const publicRoots = await t.query(api.categories.listChildrenOf, {
+      vendorId,
+      activeOnly: true,
+    });
+    expect(publicRoots.some((row) => row.slug === "men")).toBe(true);
   });
 
   test("suspended vendors cannot create or ensureSeeded", async () => {
@@ -58,9 +71,8 @@ describe("categories authz", () => {
   });
 
   test("anonymous callers cannot read inactive categories", async () => {
-    const t = harness();
-    const admin = await seedUser(t, { role: "admin" });
-    const id = await asUser(t, admin).mutation(api.categories.create, {
+    const { t, owner, vendorId } = await activeVendor();
+    const id = await asUser(t, owner).mutation(api.categories.create, {
       name: "Hidden Root",
       slug: "hidden-root",
       isActive: false,
@@ -68,61 +80,63 @@ describe("categories authz", () => {
 
     expect(await t.query(api.categories.get, { categoryId: id })).toBeNull();
     const publicChildren = await t.query(api.categories.listChildrenOf, {
+      vendorId,
       activeOnly: false,
     });
     expect(publicChildren.some((row) => row._id === id)).toBe(false);
 
-    const asAdmin = await asUser(t, admin).query(api.categories.get, { categoryId: id });
-    expect(asAdmin?.name).toBe("Hidden Root");
+    const asOwner = await asUser(t, owner).query(api.categories.get, { categoryId: id });
+    expect(asOwner?.name).toBe("Hidden Root");
   });
 });
 
 describe("categories model", () => {
   test("rejects nesting a category under its descendant", async () => {
-    const t = harness();
-    const admin = await seedUser(t, { role: "admin" });
-    const clothes = await asUser(t, admin).mutation(api.categories.create, {
-      name: "Clothes",
-      slug: "clothes",
+    const { t, owner } = await activeVendor();
+    const men = await asUser(t, owner).mutation(api.categories.create, {
+      name: "Custom Men",
+      slug: "custom-men",
     });
-    const men = await asUser(t, admin).mutation(api.categories.create, {
-      name: "Men",
-      slug: "men",
-      parentId: clothes,
+    const tops = await asUser(t, owner).mutation(api.categories.create, {
+      name: "Custom Tops",
+      slug: "custom-tops",
+      parentId: men,
     });
 
     await expect(
-      asUser(t, admin).mutation(api.categories.update, {
-        categoryId: clothes,
-        parentId: men,
+      asUser(t, owner).mutation(api.categories.update, {
+        categoryId: men,
+        parentId: tops,
       }),
     ).rejects.toThrow(/descendant/i);
   });
 
   test("rejects removing a category that still has children", async () => {
-    const t = harness();
-    const admin = await seedUser(t, { role: "admin" });
-    const parent = await asUser(t, admin).mutation(api.categories.create, {
-      name: "Clothes",
-      slug: "clothes",
+    const { t, owner } = await activeVendor();
+    const parent = await asUser(t, owner).mutation(api.categories.create, {
+      name: "Capsule",
+      slug: "capsule",
     });
-    await asUser(t, admin).mutation(api.categories.create, {
-      name: "Men",
-      slug: "men",
+    await asUser(t, owner).mutation(api.categories.create, {
+      name: "Drop A",
+      slug: "drop-a",
       parentId: parent,
     });
 
     await expect(
-      asUser(t, admin).mutation(api.categories.remove, { categoryId: parent }),
+      asUser(t, owner).mutation(api.categories.remove, { categoryId: parent }),
     ).rejects.toThrow(/child/i);
   });
 
-  test("ensureSeeded is idempotent for active vendors", async () => {
+  test("register seeds Men/Women/Kids; ensureSeeded is idempotent", async () => {
     const { t, owner } = await activeVendor();
-    const first = await asUser(t, owner).mutation(api.categories.ensureSeeded, {});
-    expect(first.created).toBeGreaterThan(0);
-    const second = await asUser(t, owner).mutation(api.categories.ensureSeeded, {});
-    expect(second.created).toBe(0);
+    const tree = await asUser(t, owner).query(api.categories.tree, {});
+    expect(tree.map((node) => node.slug).sort()).toEqual(["kids", "men", "women"]);
+    const men = tree.find((node) => node.slug === "men");
+    expect(men?.children.some((child) => child.slug === "topwear")).toBe(true);
+
+    const again = await asUser(t, owner).mutation(api.categories.ensureSeeded, {});
+    expect(again.created).toBe(0);
   });
 
   test("stores and clears a category image", async () => {

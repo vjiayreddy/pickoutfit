@@ -531,11 +531,14 @@ export async function requireVendorProduct(
 
 async function resolveCategoryId(
   ctx: Ctx,
+  vendorId: Id<"vendors">,
   categoryId: Id<"categories"> | undefined,
 ): Promise<Id<"categories"> | undefined> {
   if (!categoryId) return undefined;
   const category = await ctx.db.get(categoryId);
-  if (!category) throw appError("NOT_FOUND", "That category doesn't exist.");
+  if (!category || category.vendorId !== vendorId) {
+    throw appError("NOT_FOUND", "That category doesn't exist.");
+  }
   if (!category.isActive) throw appError("INVALID_INPUT", "That category is not active.");
   return categoryId;
 }
@@ -547,9 +550,9 @@ export async function createProduct(
   extra: { source?: Doc<"products">["source"]; status?: ProductStatus } = {},
 ): Promise<Id<"products">> {
   const clean = cleanProductInput(input);
-  const categoryId = await resolveCategoryId(ctx, clean.categoryId);
+  const categoryId = await resolveCategoryId(ctx, vendor._id, clean.categoryId);
   const variantTypeIds = clean.variantTypeIds?.length
-    ? await requireActiveVariantTypes(ctx, clean.variantTypeIds)
+    ? await requireActiveVariantTypes(ctx, vendor._id, clean.variantTypeIds)
     : [];
   const plan = VENDOR_PLANS[vendor.plan];
   if (vendor.productCount >= plan.maxProducts) {
@@ -615,12 +618,12 @@ export async function updateProduct(
   const clean = cleanProductInput(input);
   const categoryId =
     clean.categoryId !== undefined
-      ? await resolveCategoryId(ctx, clean.categoryId)
+      ? await resolveCategoryId(ctx, vendor._id, clean.categoryId)
       : product.categoryId;
   const variantTypeIds =
     clean.variantTypeIds !== undefined
       ? clean.variantTypeIds.length > 0
-        ? await requireActiveVariantTypes(ctx, clean.variantTypeIds)
+        ? await requireActiveVariantTypes(ctx, vendor._id, clean.variantTypeIds)
         : []
       : (product.variantTypeIds ?? []);
   const sku = product.sku ?? (await allocateSku(ctx, vendor, clean.category));
@@ -735,7 +738,12 @@ export async function syncVariants(
     let size = variant.size;
     let colour = variant.colour;
     if (optionIds?.length) {
-      const resolved = await resolveOptionIds(ctx, optionIds, typeIds.length > 0 ? typeIds : undefined);
+      const resolved = await resolveOptionIds(
+        ctx,
+        optionIds,
+        typeIds.length > 0 ? typeIds : undefined,
+        vendor._id,
+      );
       optionIds = resolved.optionIds;
       const legacy = legacyFieldsFromOptions(resolved.options, resolved.types);
       size = legacy.size ?? size;

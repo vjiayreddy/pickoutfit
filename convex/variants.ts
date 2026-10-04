@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { assertVendorWritable, getAppUser, requireVendor } from "./lib/auth";
+import { assertVendorWritable, getVendorContext, requireVendor } from "./lib/auth";
 import {
   createVariantOption,
   createVariantType,
@@ -13,17 +13,14 @@ import {
 } from "./model/variants";
 import { vVariantOptionDoc, vVariantTypeDoc, vVariantTypeView } from "./shared/variants";
 
-/** Platform catalog editors: admins, or vendor managers/owners on a writable store. */
-async function requireVariantManager(ctx: Parameters<typeof getAppUser>[0]): Promise<void> {
-  const user = await getAppUser(ctx);
-  if (user?.role === "admin") return;
+/** Store managers/owners edit only their own Size/Colour (and custom) types. */
+async function requireVariantManager(ctx: Parameters<typeof requireVendor>[0]) {
   const { vendor } = await requireVendor(ctx, { minRole: "manager" });
   assertVendorWritable(vendor);
+  return vendor;
 }
 
-async function canManageVariants(ctx: Parameters<typeof getAppUser>[0]): Promise<boolean> {
-  const user = await getAppUser(ctx);
-  if (user?.role === "admin") return true;
+async function canManageOwnVariants(ctx: Parameters<typeof requireVendor>[0]): Promise<boolean> {
   try {
     await requireVendor(ctx, { minRole: "manager" });
     return true;
@@ -66,16 +63,20 @@ function toCatalogView(
   }));
 }
 
-/** Full catalog of types + options for vendor product editors and shop selectors. */
+/** Types + options for the signed-in store's product editor. */
 export const catalog = query({
   args: { activeOnly: v.optional(v.boolean()) },
   returns: v.array(vVariantTypeView),
   handler: async (ctx, { activeOnly }) => {
+    const context = await getVendorContext(ctx);
+    if (!context) return [];
     const wantInactive = activeOnly === false;
-    if (wantInactive && !(await canManageVariants(ctx))) {
-      return toCatalogView(await loadVariantCatalog(ctx, { activeOnly: true }));
+    if (wantInactive && !(await canManageOwnVariants(ctx))) {
+      return toCatalogView(await loadVariantCatalog(ctx, context.vendor._id, { activeOnly: true }));
     }
-    return toCatalogView(await loadVariantCatalog(ctx, { activeOnly: activeOnly ?? true }));
+    return toCatalogView(
+      await loadVariantCatalog(ctx, context.vendor._id, { activeOnly: activeOnly ?? true }),
+    );
   },
 });
 
@@ -83,13 +84,15 @@ export const listTypes = query({
   args: { activeOnly: v.optional(v.boolean()) },
   returns: v.array(vVariantTypeDoc),
   handler: async (ctx, { activeOnly }) => {
+    const context = await getVendorContext(ctx);
+    if (!context) return [];
     if (activeOnly === false) {
-      if (!(await canManageVariants(ctx))) {
-        return listVariantTypes(ctx, { activeOnly: true });
+      if (!(await canManageOwnVariants(ctx))) {
+        return listVariantTypes(ctx, context.vendor._id, { activeOnly: true });
       }
-      return listVariantTypes(ctx, { activeOnly: false });
+      return listVariantTypes(ctx, context.vendor._id, { activeOnly: false });
     }
-    return listVariantTypes(ctx, { activeOnly: true });
+    return listVariantTypes(ctx, context.vendor._id, { activeOnly: true });
   },
 });
 
@@ -100,8 +103,14 @@ export const listOptions = query({
   },
   returns: v.array(vVariantOptionDoc),
   handler: async (ctx, { variantTypeId, activeOnly }) => {
+    const type = await ctx.db.get(variantTypeId);
+    if (!type?.vendorId) return [];
+    const context = await getVendorContext(ctx);
+    if (!context || context.vendor._id !== type.vendorId) {
+      return listOptionsForType(ctx, variantTypeId, { activeOnly: true });
+    }
     if (activeOnly === false) {
-      if (!(await canManageVariants(ctx))) {
+      if (!(await canManageOwnVariants(ctx))) {
         return listOptionsForType(ctx, variantTypeId, { activeOnly: true });
       }
       return listOptionsForType(ctx, variantTypeId, { activeOnly: false });
@@ -118,8 +127,8 @@ export const createType = mutation({
   },
   returns: v.id("variantTypes"),
   handler: async (ctx, args) => {
-    await requireVariantManager(ctx);
-    return createVariantType(ctx, args);
+    const vendor = await requireVariantManager(ctx);
+    return createVariantType(ctx, vendor._id, args);
   },
 });
 
@@ -132,8 +141,8 @@ export const updateType = mutation({
   },
   returns: v.null(),
   handler: async (ctx, { variantTypeId, ...patch }) => {
-    await requireVariantManager(ctx);
-    await updateVariantType(ctx, variantTypeId, patch);
+    const vendor = await requireVariantManager(ctx);
+    await updateVariantType(ctx, vendor._id, variantTypeId, patch);
     return null;
   },
 });
@@ -147,8 +156,8 @@ export const createOption = mutation({
   },
   returns: v.id("variantOptions"),
   handler: async (ctx, args) => {
-    await requireVariantManager(ctx);
-    return createVariantOption(ctx, args);
+    const vendor = await requireVariantManager(ctx);
+    return createVariantOption(ctx, vendor._id, args);
   },
 });
 
@@ -161,18 +170,18 @@ export const updateOption = mutation({
   },
   returns: v.null(),
   handler: async (ctx, { variantOptionId, ...patch }) => {
-    await requireVariantManager(ctx);
-    await updateVariantOption(ctx, variantOptionId, patch);
+    const vendor = await requireVariantManager(ctx);
+    await updateVariantOption(ctx, vendor._id, variantOptionId, patch);
     return null;
   },
 });
 
-/** Idempotent Size + Colour seed. Admin, or any vendor (so desks can bootstrap once). */
+/** Idempotent Size + Colour seed for the signed-in store. */
 export const seedDefaults = mutation({
   args: {},
   returns: v.object({ types: v.number(), options: v.number() }),
   handler: async (ctx) => {
-    await requireVariantManager(ctx);
-    return seedVariantTypes(ctx);
+    const vendor = await requireVariantManager(ctx);
+    return seedVariantTypes(ctx, vendor._id);
   },
 });

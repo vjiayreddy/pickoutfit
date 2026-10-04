@@ -13,7 +13,9 @@ import {
   type vVendorView,
   type vStorefrontView,
 } from "../shared/vendors";
+import { seedCategories } from "./categories";
 import { bumpSystemCounter } from "./stats";
+import { seedVariantTypes } from "./variants";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -150,6 +152,8 @@ export async function createVendor(
     createdAt: now,
   });
   if (owner.role === "user") await ctx.db.patch(owner._id, { role: "vendor" });
+  await seedCategories(ctx, vendorId);
+  await seedVariantTypes(ctx, vendorId);
   return vendorId;
 }
 

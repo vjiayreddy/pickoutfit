@@ -11,11 +11,11 @@ export const CATEGORIES = [
 export type Category = (typeof CATEGORIES)[number];
 
 export const CATEGORY_LABELS: Record<Category, string> = {
-  top: "Tops",
-  bottom: "Bottoms",
+  top: "Topwear",
+  bottom: "Bottomwear",
   outerwear: "Outerwear",
   dress: "Dresses",
-  shoes: "Shoes",
+  shoes: "Footwear",
   accessory: "Accessories",
   bag: "Bags",
   headwear: "Headwear",
@@ -45,10 +45,10 @@ export type Slot = (typeof SLOTS)[number];
 
 export const SLOT_LABELS: Record<Slot, string> = {
   outerwear: "Outerwear",
-  top: "Top",
-  bottom: "Bottom",
+  top: "Topwear",
+  bottom: "Bottomwear",
   dress: "Dress",
-  shoes: "Shoes",
+  shoes: "Footwear",
   accessories: "Accessories",
 };
 

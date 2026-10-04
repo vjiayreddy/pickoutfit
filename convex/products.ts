@@ -6,13 +6,21 @@ import {
   getPublicProduct,
   getPublicProductById,
   listCatalogForWardrobe,
+  listMarketplaceLooks as loadMarketplaceLooks,
   listShopCatalog,
   listStorefront,
   shopTheLook,
 } from "./model/catalog";
 import { toStorefrontView } from "./model/vendors";
-import { vLiveOfferBanner, vProductCategory, vProductView, vRailProductView } from "./shared/products";
+import {
+  vLiveOfferBanner,
+  vProductCategory,
+  vProductView,
+  vRailProductView,
+} from "./shared/products";
 import { vStorefrontView, vendorSellable } from "./shared/vendors";
+
+const MARKETPLACE_STORE_LIMIT = 48;
 
 /**
  * Active catalog rows for the signed-in user's presentation, tagged against their wardrobe
@@ -27,13 +35,57 @@ export const listForCategory = query({
   },
 });
 
-/** Cross-vendor shop browse for the signed-in shopper's presentation. */
+/** @deprecated Prefer marketplace looks/stores; kept for older clients. */
 export const listShop = query({
   args: { category: v.optional(vProductCategory) },
   returns: v.array(vProductView),
   handler: async (ctx, { category }) => {
     const user = await requireUser(ctx);
     return listShopCatalog(ctx, user.prefs.presentation, { category });
+  },
+});
+
+const vMarketplaceLookProduct = v.object({
+  id: v.id("products"),
+  name: v.string(),
+  slug: v.string(),
+  imageUrl: v.union(v.string(), v.null()),
+  priceInr: v.number(),
+});
+
+const vMarketplaceLook = v.object({
+  uploadId: v.id("uploads"),
+  imageUrl: v.string(),
+  vendorName: v.string(),
+  vendorSlug: v.string(),
+  vendorLogoUrl: v.union(v.string(), v.null()),
+  totalInr: v.number(),
+  createdAt: v.number(),
+  products: v.array(vMarketplaceLookProduct),
+});
+
+/** Open stores for the marketplace home (not a product dump). */
+export const listMarketplaceStores = query({
+  args: {},
+  returns: v.array(vStorefrontView),
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const rows = await ctx.db
+      .query("vendors")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .take(MARKETPLACE_STORE_LIMIT);
+    const sellable = rows.filter((row) => vendorSellable(row));
+    return Promise.all(sellable.map((row) => toStorefrontView(ctx, row)));
+  },
+});
+
+/** Cross-store look photos (2+ live pieces) for marketplace discovery. */
+export const listMarketplaceLooks = query({
+  args: {},
+  returns: v.array(vMarketplaceLook),
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    return loadMarketplaceLooks(ctx);
   },
 });
 

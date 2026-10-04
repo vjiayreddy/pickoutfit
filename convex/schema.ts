@@ -476,10 +476,12 @@ export default defineSchema({
     .index("by_styleRef", ["styleRefId"]),
 
   /**
-   * Nested catalog taxonomy (Clothes → Men → Shirt → Formal).
-   * Roots omit `parentId`. `path` is the slug breadcrumb for branch queries.
+   * Per-store nested taxonomy (Men → Topwear → Shirts → Formal).
+   * Roots omit `parentId`. `path` is the slug breadcrumb within the store.
+   * `vendorId` is optional only for legacy rows; new writes always set it.
    */
   categories: defineTable({
+    vendorId: v.optional(v.id("vendors")),
     name: v.string(),
     slug: v.string(),
     parentId: v.optional(v.id("categories")),
@@ -491,16 +493,18 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_parentId", ["parentId"])
-    .index("by_slug", ["slug"])
-    .index("by_parentId_and_slug", ["parentId", "slug"])
-    .index("by_path", ["path"]),
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_parentId", ["vendorId", "parentId"])
+    .index("by_vendorId_and_parentId_and_slug", ["vendorId", "parentId", "slug"])
+    .index("by_vendorId_and_path", ["vendorId", "path"])
+    .index("by_parentId", ["parentId"]),
 
   /**
-   * Option dimensions (Payload `variantTypes`): Size, Colour, etc.
-   * Platform-level; products opt in via `variantTypeIds`.
+   * Per-store option dimensions (Size, Colour, etc.).
+   * Products opt in via `variantTypeIds`. `vendorId` optional for legacy rows.
    */
   variantTypes: defineTable({
+    vendorId: v.optional(v.id("vendors")),
     label: v.string(),
     slug: v.string(),
     sortOrder: v.number(),
@@ -508,8 +512,9 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_slug", ["slug"])
-    .index("by_sortOrder", ["sortOrder"]),
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_slug", ["vendorId", "slug"])
+    .index("by_vendorId_and_sortOrder", ["vendorId", "sortOrder"]),
 
   /**
    * Values on a dimension (Payload `variantOptions`): S/M/L, Black/Navy, etc.
@@ -704,7 +709,7 @@ export default defineSchema({
     /** Expire cron: active offers whose endsAt has passed. */
     .index("by_active_and_endsAt", ["active", "endsAt"]),
 
-  /** Vendor-defined groupings. Categories stay a platform taxonomy. */
+  /** Vendor-defined groupings shown on marketplace and storefront. */
   collections: defineTable({
     vendorId: v.id("vendors"),
     name: v.string(),

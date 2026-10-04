@@ -30,17 +30,14 @@ async function seededCatalog(t: ReturnType<typeof harness>, actor: Awaited<Retur
 }
 
 describe("variants.seedDefaults", () => {
-  test("vendor manager can seed Size + Colour; second call is idempotent", async () => {
+  test("register seeds Size + Colour; seedDefaults is idempotent", async () => {
     const { t, owner } = await activeVendor();
-    const first = await asUser(t, owner).mutation(api.variants.seedDefaults, {});
-    expect(first).toEqual({ types: EXPECTED_TYPES, options: EXPECTED_OPTIONS });
+    const catalog = await asUser(t, owner).query(api.variants.catalog, {});
+    expect(catalog.map((row) => row.slug).sort()).toEqual(["colour", "size"]);
+    expect(catalog.reduce((n, row) => n + row.options.length, 0)).toBe(EXPECTED_OPTIONS);
 
     const again = await asUser(t, owner).mutation(api.variants.seedDefaults, {});
     expect(again).toEqual({ types: EXPECTED_TYPES, options: EXPECTED_OPTIONS });
-
-    const catalog = await t.query(api.variants.catalog, {});
-    expect(catalog.map((row) => row.slug).sort()).toEqual(["colour", "size"]);
-    expect(catalog.reduce((n, row) => n + row.options.length, 0)).toBe(EXPECTED_OPTIONS);
   });
 
   test("anonymous callers cannot seed", async () => {
@@ -55,12 +52,11 @@ describe("variants.seedDefaults", () => {
   });
 });
 
-describe("variants catalog + admin CRUD", () => {
-  test("active catalog is readable without auth", async () => {
+describe("variants catalog + CRUD", () => {
+  test("catalog is empty without a store membership", async () => {
     const { t, owner } = await activeVendor();
     await asUser(t, owner).mutation(api.variants.seedDefaults, {});
-    const catalog = await t.query(api.variants.catalog, {});
-    expect(catalog.length).toBe(EXPECTED_TYPES);
+    expect(await t.query(api.variants.catalog, {})).toEqual([]);
   });
 
   test("vendor owner can create a type and option; plain users cannot", async () => {
@@ -88,20 +84,29 @@ describe("variants catalog + admin CRUD", () => {
       variantOptionId: optionId,
       isActive: false,
     });
-    const activeOnly = await t.query(api.variants.catalog, {});
+    const activeOnly = await asUser(t, owner).query(api.variants.catalog, {});
     expect(activeOnly.find((row) => row.id === typeId)?.options.some((o) => o.id === optionId)).toBe(
       false,
     );
   });
 
-  test("admin can still create types", async () => {
-    const t = harness();
-    const admin = await seedUser(t, { role: "admin", email: "admin@example.com" });
-    const typeId = await asUser(t, admin).mutation(api.variants.createType, {
+  test("variant types are isolated between stores", async () => {
+    const { t, owner } = await activeVendor();
+    const rival = await seedUser(t, { email: "rival@example.com" });
+    const rivalVendorId = await asUser(t, rival).mutation(api.vendors.register, {
+      ...VENDOR_PROFILE,
+      name: "Rival Co",
+    });
+    await t.run((ctx) => ctx.db.patch(rivalVendorId, { status: "active" }));
+
+    const typeId = await asUser(t, owner).mutation(api.variants.createType, {
       label: "Material",
       slug: "material",
     });
-    expect(typeId).toBeTruthy();
+    const ownerCatalog = await asUser(t, owner).query(api.variants.catalog, {});
+    const rivalCatalog = await asUser(t, rival).query(api.variants.catalog, {});
+    expect(ownerCatalog.some((row) => row.id === typeId)).toBe(true);
+    expect(rivalCatalog.some((row) => row.id === typeId)).toBe(false);
   });
 });
 
@@ -158,7 +163,6 @@ describe("vendorProducts with optionIds", () => {
       }),
     ).rejects.toThrow(/not enabled/i);
 
-    // colour-only enable still rejects size option
     await expect(
       asUser(t, owner).mutation(api.vendorProducts.create, {
         ...PRODUCT_INPUT,

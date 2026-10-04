@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 
-/** Caps for platform variant taxonomy (Payload-style types → options). */
+/** Caps for per-store variant taxonomy (Payload-style types → options). */
 export const MAX_VARIANT_TYPES = 40;
 export const MAX_OPTIONS_PER_TYPE = 80;
 
@@ -93,6 +93,7 @@ export function variantOptionValue(value: string): string {
 export const vVariantTypeDoc = v.object({
   _id: v.id("variantTypes"),
   _creationTime: v.number(),
+  vendorId: v.optional(v.id("vendors")),
   label: v.string(),
   slug: v.string(),
   sortOrder: v.number(),
