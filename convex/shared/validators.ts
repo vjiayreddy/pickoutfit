@@ -21,6 +21,7 @@ import {
   ITEM_STATUSES,
   PRESENTATIONS,
   SEASONS,
+  SLOTS,
 } from "./wardrobe";
 
 type LiteralUnion<T extends readonly string[]> = VUnion<
@@ -51,6 +52,7 @@ export const vSeason = literals(SEASONS);
 export const vFormality = literals(FORMALITY);
 export const vFit = literals(FITS);
 export const vPresentation = literals(PRESENTATIONS);
+export const vSlot = literals(SLOTS);
 export const vItemStatus = literals(ITEM_STATUSES);
 
 export const vPlanId = literals(PLAN_IDS);

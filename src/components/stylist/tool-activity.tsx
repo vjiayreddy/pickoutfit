@@ -7,6 +7,8 @@ import { cn } from "@/lib/cn";
 import {
   activityGroupState,
   activityRetry,
+  dedupeActivityTools,
+  MAX_ACTIVITY_TOOLS_DISPLAYED,
   summarizeActivity,
   type ActivityState,
   type ActivityTool,
@@ -29,9 +31,13 @@ type ToolActivityProps = {
 };
 
 export function ToolActivity({ tools, active, disabled, onRetry }: ToolActivityProps) {
-  const rows = summarizeActivity(tools, active);
+  const unique = dedupeActivityTools(tools);
+  const displayTools =
+    unique.length > MAX_ACTIVITY_TOOLS_DISPLAYED ? unique.slice(-MAX_ACTIVITY_TOOLS_DISPLAYED) : unique;
+  const hidden = Math.max(0, unique.length - displayTools.length);
+  const rows = summarizeActivity(unique, active);
   const running = rows.find((row) => row.state === "running");
-  const failures = tools.filter((tool) => tool.state === "output-error").length;
+  const failures = unique.filter((tool) => tool.state === "output-error").length;
   const failed = failures > 0;
   const state = activityGroupState(rows.map((row) => row.state));
   const label =
@@ -49,8 +55,14 @@ export function ToolActivity({ tools, active, disabled, onRetry }: ToolActivityP
                   ? "Actions cancelled"
                   : "Some actions cancelled"
                 : "Checks complete"));
-  const retry = activityRetry(tools);
-  const finishedCount = tools.filter((tool) => tool.state === "output-available" && !tool.partial).length;
+  const retry = activityRetry(unique);
+  const finishedCount = unique.filter((tool) => tool.state === "output-available" && !tool.partial).length;
+  const totalLabel =
+    unique.length > MAX_ACTIVITY_TOOLS_DISPLAYED
+      ? `${Math.min(finishedCount, MAX_ACTIVITY_TOOLS_DISPLAYED)}/${MAX_ACTIVITY_TOOLS_DISPLAYED}+`
+      : state === "running"
+        ? `${finishedCount}/${unique.length}`
+        : `${unique.length} steps`;
 
   return (
     <div className="min-w-0 border-l-2 border-ink/15 bg-soft-cloud/30 text-xs">
@@ -59,9 +71,9 @@ export function ToolActivity({ tools, active, disabled, onRetry }: ToolActivityP
           <ActivityIcon state={state} />
           <span className="min-w-0 flex-1 leading-relaxed" aria-live="polite" aria-atomic="true">
             <span className={cn("font-medium", failed && "text-sale")}>{label}</span>
-            {tools.length > 1 ? (
+            {unique.length > 1 ? (
               <span className="ml-2 text-[11px] whitespace-nowrap text-mute">
-                {state === "running" ? `${finishedCount}/${tools.length}` : `${tools.length} steps`}
+                {totalLabel}
                 {failed ? ` · ${failures} failed` : ""}
               </span>
             ) : null}
@@ -91,6 +103,11 @@ export function ToolActivity({ tools, active, disabled, onRetry }: ToolActivityP
               </div>
             </li>
           ))}
+          {hidden > 0 ? (
+            <li className="text-[11px] text-mute">
+              +{hidden} earlier steps hidden. If this keeps growing, start a new chat.
+            </li>
+          ) : null}
         </ul>
       </details>
       {retry ? (

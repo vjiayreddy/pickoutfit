@@ -27,6 +27,7 @@ import {
 } from "../shared/products";
 import { MAX_PRODUCT_VARIANTS, VENDOR_PLANS, slugify, vendorSellable } from "../shared/vendors";
 import type { Fit, Formality, Presentation, Season } from "../shared/wardrobe";
+import { syncProductEmbeddingSchedule } from "./productEmbeddings";
 import { bumpSystemCounter } from "./stats";
 import { pricedUnitInr } from "./offers";
 import {
@@ -79,6 +80,8 @@ export type ProductInput = {
   /** Photos in display order. Existing rows are matched by storageId. */
   imageIds: Id<"_storage">[];
   variants: VariantInput[];
+  /** When true, stylist may recommend this product once it is active. */
+  aiRecommend?: boolean;
 };
 
 const MAX_PRICE_INR = 10_000_000;
@@ -235,6 +238,7 @@ export function cleanProductInput(input: ProductInput): ProductInput & {
     colours: derived.colours.primary || colours.primary ? derived.colours : colours,
     ageGroup: input.ageGroup,
     occasion: (derived.occasion as Occasion | undefined) ?? input.occasion,
+    aiRecommend: Boolean(input.aiRecommend),
   };
 }
 
@@ -441,6 +445,7 @@ export async function toProductView(
     variantTypeIds: product.variantTypeIds ?? [],
     totalStock: variants.filter((variant) => variant.active).reduce((sum, variant) => sum + variant.stock, 0),
     active: status === "active",
+    aiRecommend: Boolean(product.aiRecommend),
     imageUrl: images[0]?.url ?? null,
     images,
     variants,
@@ -584,6 +589,7 @@ export async function createProduct(
     hasVariants: hasRealVariants(clean.variants),
     ...(variantTypeIds.length > 0 ? { variantTypeIds } : {}),
     active: extra.status === "active",
+    ...(clean.aiRecommend ? { aiRecommend: true } : {}),
     searchText: buildProductSearchText(clean),
     soldCount: 0,
     viewCount: 0,
@@ -595,6 +601,7 @@ export async function createProduct(
   await syncImages(ctx, product, vendor, clean.imageIds);
   await syncVariants(ctx, product, vendor, clean.variants, undefined, variantTypeIds);
   await ctx.db.patch(vendor._id, { productCount: vendor.productCount + 1, updatedAt: now });
+  await syncProductEmbeddingSchedule(ctx, productId);
   return productId;
 }
 
@@ -648,6 +655,7 @@ export async function updateProduct(
     hasVariants: hasRealVariants(clean.variants),
     variantTypeIds: variantTypeIds.length > 0 ? variantTypeIds : undefined,
     searchText: buildProductSearchText(clean),
+    aiRecommend: clean.aiRecommend ? true : undefined,
     // Legacy fields are superseded by productImages rows.
     imageIds: undefined,
     storageId: undefined,
@@ -655,6 +663,7 @@ export async function updateProduct(
   });
   await syncImages(ctx, product, vendor, clean.imageIds);
   await syncVariants(ctx, product, vendor, clean.variants, undefined, variantTypeIds);
+  await syncProductEmbeddingSchedule(ctx, product._id);
 }
 
 function hasRealVariants(variants: VariantInput[]): boolean {
@@ -807,6 +816,7 @@ export async function publishProduct(ctx: MutationCtx, vendor: Doc<"vendors">, p
     publishedAt: product.publishedAt ?? now,
     updatedAt: now,
   });
+  await syncProductEmbeddingSchedule(ctx, product._id);
 }
 
 export async function archiveProduct(ctx: MutationCtx, vendor: Doc<"vendors">, productId: Id<"products">) {
@@ -817,11 +827,13 @@ export async function archiveProduct(ctx: MutationCtx, vendor: Doc<"vendors">, p
     productCount: Math.max(0, vendor.productCount - 1),
     updatedAt: Date.now(),
   });
+  await syncProductEmbeddingSchedule(ctx, productId);
 }
 
 export async function unpublishProduct(ctx: MutationCtx, vendor: Doc<"vendors">, productId: Id<"products">) {
   const product = await requireVendorProduct(ctx, vendor, productId);
   await ctx.db.patch(product._id, { status: "draft", active: false, updatedAt: Date.now() });
+  await syncProductEmbeddingSchedule(ctx, productId);
 }
 
 export async function adjustStock(

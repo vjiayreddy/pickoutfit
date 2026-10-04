@@ -45,6 +45,7 @@ import {
   vReservation,
   vSeason,
   vServiceId,
+  vSlot,
   vStyleOrigin,
   vStyleRefServiceId,
   vStyleRefStatus,
@@ -368,6 +369,32 @@ export default defineSchema({
     .index("by_thread", ["threadId"])
     .index("by_user", ["userId"]),
 
+  /**
+   * Shop looks the stylist proposed from AI-recommended vendor products.
+   * Separate from wardrobe `outfits` so slots hold product ids and priced lines.
+   */
+  shopLooks: defineTable({
+    userId: v.id("users"),
+    threadId: v.id("threads"),
+    name: v.string(),
+    brief: v.string(),
+    reasoning: v.string(),
+    occasion: v.optional(v.string()),
+    lines: v.array(
+      v.object({
+        slot: vSlot,
+        productId: v.id("products"),
+        variantId: v.optional(v.id("productVariants")),
+        priceInr: v.number(),
+        name: v.string(),
+      }),
+    ),
+    totalInr: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_thread", ["threadId"])
+    .index("by_user", ["userId"]),
+
   systemCounters: defineTable({
     dayKey: v.string(),
     key: v.union(
@@ -553,6 +580,8 @@ export default defineSchema({
     sourceBbox: v.optional(v.array(v.number())),
     cutoutStorageId: v.optional(v.id("_storage")),
     searchText: v.optional(v.string()),
+    /** When true, stylist may recommend this product from productEmbeddings. */
+    aiRecommend: v.optional(v.boolean()),
     soldCount: v.optional(v.number()),
     viewCount: v.optional(v.number()),
     publishedAt: v.optional(v.number()),
@@ -571,6 +600,19 @@ export default defineSchema({
     .searchIndex("search_text", {
       searchField: "searchText",
       filterFields: ["status", "category", "vendorId"],
+    }),
+
+  /** Style embeddings for AI-recommended catalog products (separate from wardrobe itemEmbeddings). */
+  productEmbeddings: defineTable({
+    productId: v.id("products"),
+    vendorId: v.id("vendors"),
+    embedding: v.array(v.float64()),
+  })
+    .index("by_product", ["productId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: EMBEDDING_DIMENSIONS,
+      filterFields: ["vendorId"],
     }),
 
   /** Every photo on a product, in display order. Cutouts come from extraction. */

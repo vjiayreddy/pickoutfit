@@ -9,6 +9,7 @@ import {
   toCartView,
   type VendorCache,
 } from "./model/products";
+import { addShopLookToCart } from "./model/shopLooks";
 import { vCartView } from "./shared/products";
 
 export const current = query({
@@ -72,5 +73,25 @@ export const setQuantity = mutation({
     const user = await requireUser(ctx);
     await setCartQuantity(ctx, user._id, lineId, quantity);
     return null;
+  },
+});
+
+/** Adds every in-stock line from a stylist shop look; auto-picks the first stocked variant. */
+export const addLook = mutation({
+  args: { shopLookId: v.id("shopLooks") },
+  returns: v.object({
+    added: v.number(),
+    skipped: v.array(
+      v.object({
+        productId: v.id("products"),
+        name: v.string(),
+        reason: v.string(),
+      }),
+    ),
+    totalInr: v.number(),
+  }),
+  handler: async (ctx, { shopLookId }) => {
+    const user = await requireUser(ctx);
+    return addShopLookToCart(ctx, user, shopLookId);
   },
 });

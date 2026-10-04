@@ -8,6 +8,7 @@ import { QuestionCard } from "@/components/stylist/question-card";
 import { RenderFollowup } from "@/components/stylist/render-followup";
 import { RenderJobCard } from "@/components/stylist/render-job-card";
 import { projectRenderFollowups, readRenderJobId, type TranscriptPart } from "@/components/stylist/render-transcript";
+import { ShopLookCards } from "@/components/stylist/shop-look-cards";
 import { ToolActivity } from "@/components/stylist/tool-activity";
 import { groupActivityParts, isActiveActivityMessage } from "@/components/stylist/tool-activity-state";
 import { Button } from "@/components/ui/button";
@@ -240,6 +241,11 @@ function ToolPart({
     return <ProposalCards threadId={threadId} outfitIds={outfitIds} problems={problems} />;
   }
 
+  if (part.toolName === "compose_shop_looks") {
+    const { shopLookIds, problems } = readShopComposeOutput(part.output);
+    return <ShopLookCards threadId={threadId} shopLookIds={shopLookIds} problems={problems} />;
+  }
+
   if (part.toolName === "start_renders") {
     const jobId = readRenderJobId(part.output);
     return jobId ? <RenderJobCard jobId={jobId} /> : null;
@@ -266,4 +272,24 @@ function readComposeOutput(output: unknown): {
     }
   }
   return { outfitIds, problems };
+}
+
+type ShopComposeResult = { shopLookId: string | null; name: string; problems: string[] };
+
+function readShopComposeOutput(output: unknown): {
+  shopLookIds: Id<"shopLooks">[];
+  problems: { name: string; problems: string[] }[];
+} {
+  const results = (output as { results?: unknown } | null)?.results;
+  if (!Array.isArray(results)) return { shopLookIds: [], problems: [] };
+
+  const shopLookIds: Id<"shopLooks">[] = [];
+  const problems: { name: string; problems: string[] }[] = [];
+  for (const entry of results as ShopComposeResult[]) {
+    if (typeof entry?.shopLookId === "string") shopLookIds.push(entry.shopLookId as Id<"shopLooks">);
+    else if (Array.isArray(entry?.problems) && entry.problems.length > 0) {
+      problems.push({ name: entry.name ?? "That shop look", problems: entry.problems });
+    }
+  }
+  return { shopLookIds, problems };
 }

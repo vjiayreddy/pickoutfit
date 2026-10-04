@@ -97,6 +97,8 @@ type Draft = {
   /** Payload-style dimensions enabled on this product. */
   variantTypeIds: Id<"variantTypes">[];
   variants: VariantRow[];
+  /** Feeds the stylist shop suggestions when the product is live. */
+  aiRecommend: boolean;
 };
 
 function newInfoSection(title = ""): InfoRow {
@@ -150,6 +152,7 @@ const EMPTY: Draft = {
   compareAtPriceInr: "",
   variantTypeIds: [],
   variants: [newVariant()],
+  aiRecommend: false,
 };
 
 type ProductView = NonNullable<FunctionReturnType<typeof api.vendorProducts.get>>;
@@ -231,6 +234,7 @@ function draftFrom(product: ProductView): Draft {
     priceInr: String(product.priceInr),
     compareAtPriceInr: product.compareAtPriceInr ? String(product.compareAtPriceInr) : "",
     variantTypeIds: product.variantTypeIds,
+    aiRecommend: product.aiRecommend,
     variants: product.variants.length
       ? product.variants.map((variant) => ({
           key: variant.id,
@@ -543,6 +547,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       priceInr: Math.round(price),
       compareAtPriceInr: compareAt && compareAt > 0 ? Math.round(compareAt) : undefined,
       variantTypeIds: draft.variantTypeIds.length > 0 ? draft.variantTypeIds : undefined,
+      aiRecommend: draft.aiRecommend,
       imageIds: slots.flatMap((slot) => (slot.storageId ? [slot.storageId] : [])),
       variants: draft.variants.map((row) => ({
         id: row.id,
@@ -1221,6 +1226,22 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 />
               </Field>
             </div>
+            <label className="flex cursor-pointer items-start gap-3 rounded-none border border-hairline px-4 py-3">
+              <input
+                type="checkbox"
+                className="mt-1 size-4 accent-ink"
+                checked={draft.aiRecommend}
+                disabled={locked}
+                onChange={(e) => setDraft((current) => ({ ...current, aiRecommend: e.target.checked }))}
+              />
+              <span className="min-w-0 space-y-0.5">
+                <span className="block text-sm font-medium text-ink">Recommend by AI</span>
+                <span className="block text-xs text-mute">
+                  When this product is live, the stylist can suggest it in shop looks. Embeddings update on save
+                  and publish.
+                </span>
+              </span>
+            </label>
           </section>
 
           <section className="space-y-4 border-t border-hairline pt-8">

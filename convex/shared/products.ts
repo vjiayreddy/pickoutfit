@@ -448,6 +448,8 @@ export const vProductView = v.object({
   totalStock: v.number(),
   /** `status === "active"`; kept so older UI keeps working. */
   active: v.boolean(),
+  /** When true, the stylist may recommend this product. */
+  aiRecommend: v.boolean(),
   imageUrl: v.union(v.string(), v.null()),
   images: v.array(vProductImageView),
   variants: v.array(vVariantView),

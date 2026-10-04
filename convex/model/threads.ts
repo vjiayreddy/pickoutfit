@@ -150,6 +150,11 @@ export async function removeThread(
 ): Promise<void> {
   const proposals = await listProposals(ctx, thread._id);
   for (const proposal of proposals) await ctx.db.delete(proposal._id);
+  const shopLooks = await ctx.db
+    .query("shopLooks")
+    .withIndex("by_thread", (q) => q.eq("threadId", thread._id))
+    .take(100);
+  for (const look of shopLooks) await ctx.db.delete(look._id);
   await ctx.db.delete(thread._id);
 }
 

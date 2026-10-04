@@ -54,6 +54,7 @@ const vProductFields = {
   variantTypeIds: v.optional(v.array(v.id("variantTypes"))),
   imageIds: v.array(v.id("_storage")),
   variants: v.array(vVariantInput),
+  aiRecommend: v.optional(v.boolean()),
 };
 
 export const list = query({

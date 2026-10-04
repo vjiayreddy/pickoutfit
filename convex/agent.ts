@@ -17,6 +17,7 @@ import {
   toItemSummary,
   validateSlots,
 } from "./model/outfits";
+import { composeOneShopLook, vShopLookLine } from "./model/shopLooks";
 import { startRenderJob } from "./model/renders";
 import {
   addProposal,
@@ -27,7 +28,7 @@ import {
 } from "./model/threads";
 import { bumpUsageCounter } from "./model/users";
 import { LIMITS, renderCreditCost } from "./shared/credits";
-import { vCategory, vFormality, vOutfitSlots, vPrefs, vRenderQuality, vSeason } from "./shared/validators";
+import { vCategory, vFormality, vOutfitSlots, vPrefs, vRenderQuality, vSeason, vSlot } from "./shared/validators";
 import { CATEGORIES, CATEGORY_LABELS, FORMALITY, SEASONS, type Category, type Season } from "./shared/wardrobe";
 import { vBalance } from "./users";
 import { vItemSummary, vServiceProfileView, type ItemSummary } from "./views";
@@ -414,6 +415,66 @@ export const saveOutfit = mutation({
     }
     await markOutfitSaved(ctx, outfit);
     return null;
+  },
+});
+
+/**
+ * Validates AI-recommended product picks and stores them as shopLooks on the thread.
+ * Separate from wardrobe composeOutfits — lines hold product ids and live prices.
+ */
+export const composeShopLooks = mutation({
+  args: {
+    ...vService,
+    threadId: v.id("threads"),
+    brief: v.string(),
+    looks: v.array(
+      v.object({
+        name: v.string(),
+        reasoning: v.string(),
+        occasion: v.optional(v.string()),
+        lines: v.array(
+          v.object({
+            slot: vSlot,
+            productId: v.id("products"),
+          }),
+        ),
+      }),
+    ),
+  },
+  returns: v.array(
+    v.object({
+      shopLookId: v.union(v.id("shopLooks"), v.null()),
+      name: v.string(),
+      lines: v.array(vShopLookLine),
+      problems: v.array(v.string()),
+      totalInr: v.number(),
+    }),
+  ),
+  handler: async (ctx, { serviceKey, authId, threadId, brief, looks }) => {
+    const user = await requireServiceUser(ctx, { serviceKey, authId });
+    const thread = await ctx.db.get(threadId);
+    if (!thread || thread.userId !== user._id) {
+      return looks.map((look) => ({
+        shopLookId: null,
+        name: look.name,
+        lines: [],
+        problems: ["that conversation doesn't exist"],
+        totalInr: 0,
+      }));
+    }
+    const results = [];
+    for (const look of looks.slice(0, 3)) {
+      results.push(
+        await composeOneShopLook(ctx, user, thread, {
+          name: look.name,
+          brief,
+          reasoning: look.reasoning,
+          occasion: look.occasion,
+          lines: look.lines,
+        }),
+      );
+    }
+    return results;
   },
 });
 
