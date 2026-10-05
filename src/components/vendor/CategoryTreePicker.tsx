@@ -8,10 +8,10 @@ import type { Id } from "@convex/_generated/dataModel";
 import {
   findCategoryAncestry,
   legacyProductCategoryFromPath,
+  productTypeFromCategoryPath,
   type CategoryTreeNode,
 } from "@convex/shared/categories";
 import type { ProductCategory } from "@convex/shared/products";
-import { isProductType } from "@convex/shared/products";
 import { cn } from "@/lib/cn";
 
 type Tree = FunctionReturnType<typeof api.categories.tree>;
@@ -22,6 +22,7 @@ export type CategoryPick = {
   name: string;
   slug: string;
   legacyCategory: ProductCategory;
+  /** Auto-derived PRODUCT_TYPES value from the path (leaf→root). */
   productTypeHint: string | null;
 };
 
@@ -32,10 +33,6 @@ type Props = {
 
 function asTree(nodes: Tree): CategoryTreeNode[] {
   return nodes as CategoryTreeNode[];
-}
-
-function productTypeHint(slug: string, legacy: ProductCategory): string | null {
-  return isProductType(legacy, slug) ? slug : null;
 }
 
 export function CategoryTreePicker({ value, onChange }: Props) {
@@ -87,7 +84,7 @@ export function CategoryTreePicker({ value, onChange }: Props) {
       name: node.name,
       slug: node.slug,
       legacyCategory: legacy,
-      productTypeHint: productTypeHint(node.slug, legacy),
+      productTypeHint: productTypeFromCategoryPath(node.path, legacy),
     });
   }
 

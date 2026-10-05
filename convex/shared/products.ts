@@ -423,6 +423,7 @@ export const vProductView = v.object({
   presentation: vPresentation,
   name: v.string(),
   sku: v.union(v.string(), v.null()),
+  brandId: v.union(v.id("brands"), v.null()),
   brand: v.union(v.string(), v.null()),
   subcategory: v.string(),
   productType: v.union(v.string(), v.null()),

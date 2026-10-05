@@ -4,6 +4,8 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { ArrowLeft, ImagePlus, Plus, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useForm, useFormState, useWatch } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
@@ -14,29 +16,67 @@ import {
   AGE_GROUP_LABELS,
   ATTR,
   attrLabel,
-  isProductType,
   MAX_INFO_SECTIONS,
   MAX_PRODUCT_IMAGES,
   OCCASIONS,
   OCCASION_LABELS,
   productTypeLabel,
-  productTypesFor,
   type AgeGroup,
   type InfoSectionKind,
   type Occasion,
-  type ProductCategory,
 } from "@convex/shared/products";
 import type { Presentation } from "@convex/shared/wardrobe";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { CategoryTreePicker } from "@/components/vendor/CategoryTreePicker";
+import { BrandPicker } from "@/components/vendor/BrandPicker";
 import { useVendor } from "@/components/vendor/VendorDesk";
 import { useUpload } from "@/hooks/use-upload";
 import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
 import { formatInr } from "@/lib/format";
+import {
+  aiRecommendReadiness,
+  firstFormError,
+  productFormSchema,
+  type ProductFormValues,
+} from "@/lib/product-form-schema";
 import { routes } from "@/lib/routes";
 
 const AUDIENCE: { value: Presentation; label: string }[] = [
@@ -49,57 +89,11 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 type Slot = { key: string; storageId?: Id<"_storage">; previewUrl: string; uploading: boolean };
 
-type VariantRow = {
-  key: string;
-  id?: Id<"productVariants">;
-  optionIds: Id<"variantOptions">[];
-  size: string;
-  colourName: string;
-  colourHex: string;
-  priceInr: string;
-  stock: string;
-  active: boolean;
-};
-
-type AttrRow = { key: string; keyInput: string; label: string; value: string };
-type InfoRow = {
-  id: string;
-  title: string;
-  kind: InfoSectionKind;
-  body: string;
-  rows: { label: string; value: string }[];
-};
+type VariantRow = ProductFormValues["variants"][number];
+type InfoRow = ProductFormValues["infoSections"][number];
+type Draft = ProductFormValues;
 
 const KNOWN_ATTR_KEYS = new Set<string>(Object.values(ATTR));
-
-type Draft = {
-  name: string;
-  brand: string;
-  productType: string;
-  subcategory: string;
-  description: string;
-  category: ProductCategory;
-  categoryId: Id<"categories"> | null;
-  presentation: Presentation;
-  colourPrimary: string;
-  colourSecondary: string;
-  colourHex: string;
-  pattern: string;
-  material: string;
-  size: string;
-  ageGroup: AgeGroup | "";
-  occasion: Occasion | "";
-  /** Extra vendor-defined attributes beyond the known fashion fields. */
-  customAttributes: AttrRow[];
-  infoSections: InfoRow[];
-  priceInr: string;
-  compareAtPriceInr: string;
-  /** Payload-style dimensions enabled on this product. */
-  variantTypeIds: Id<"variantTypes">[];
-  variants: VariantRow[];
-  /** Feeds the stylist shop suggestions when the product is live. */
-  aiRecommend: boolean;
-};
 
 function newInfoSection(title = ""): InfoRow {
   return {
@@ -126,6 +120,7 @@ function newVariant(): VariantRow {
 
 const EMPTY: Draft = {
   name: "",
+  brandId: null,
   brand: "",
   productType: "",
   subcategory: "",
@@ -160,7 +155,7 @@ type VariantCatalog = FunctionReturnType<typeof api.variants.catalog>;
 type CatalogType = VariantCatalog[number];
 type CatalogOption = CatalogType["options"][number];
 
-function optionById(catalog: VariantCatalog, optionId: Id<"variantOptions">): CatalogOption | undefined {
+function optionById(catalog: VariantCatalog, optionId: string): CatalogOption | undefined {
   for (const type of catalog) {
     const match = type.options.find((option) => option.id === optionId);
     if (match) return match;
@@ -171,7 +166,7 @@ function optionById(catalog: VariantCatalog, optionId: Id<"variantOptions">): Ca
 /** Keep free-text size/colour in sync with selected catalog options. */
 function labelsFromOptions(
   catalog: VariantCatalog,
-  optionIds: Id<"variantOptions">[],
+  optionIds: string[],
 ): Pick<VariantRow, "size" | "colourName" | "colourHex"> {
   let size = "";
   let colourName = "";
@@ -214,6 +209,7 @@ function draftFrom(product: ProductView): Draft {
       : EMPTY.infoSections.map((section) => ({ ...section, id: crypto.randomUUID() }));
   return {
     name: product.name,
+    brandId: product.brandId,
     brand: product.brand ?? "",
     productType: product.productType ?? "",
     subcategory: product.subcategory,
@@ -272,7 +268,15 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
   const describe = useAction(api.ai.openai.describeProduct);
   const { upload } = useUpload("vendor");
 
-  const [draft, setDraft] = useState<Draft>(() => (product ? draftFrom(product) : EMPTY));
+  const form = useForm<ProductFormValues>({
+    resolver: zodResolver(productFormSchema),
+    defaultValues: product ? draftFrom(product) : EMPTY,
+    mode: "onSubmit",
+    reValidateMode: "onChange",
+  });
+  const draft = (useWatch({ control: form.control }) ?? form.getValues()) as ProductFormValues;
+  const { errors, isSubmitted } = useFormState({ control: form.control });
+
   const [slots, setSlots] = useState<Slot[]>(() =>
     (product?.images ?? []).map((image) => ({
       key: image.storageId,
@@ -292,8 +296,17 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
   const defaultedTypes = useRef(Boolean(product));
   const locked = me.vendor.status === "suspended" || me.vendor.status === "closed";
 
-  const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
-    setDraft((current) => ({ ...current, [key]: value }));
+  const set = <K extends keyof ProductFormValues>(key: K, value: ProductFormValues[K]) => {
+    form.setValue(key, value as never, { shouldDirty: true, shouldValidate: isSubmitted });
+  };
+
+  const setDraft = (updater: ProductFormValues | ((current: ProductFormValues) => ProductFormValues)) => {
+    const current = form.getValues();
+    const next = typeof updater === "function" ? updater(current) : updater;
+    (Object.keys(next) as (keyof ProductFormValues)[]).forEach((key) => {
+      form.setValue(key, next[key] as never, { shouldDirty: true, shouldValidate: isSubmitted });
+    });
+  };
 
   // Bootstrap Size + Colour once so the desk has options to pick.
   useEffect(() => {
@@ -309,11 +322,40 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       .finally(() => setSeedingCatalog(false));
   }, [catalog, locked, seedVariantDefaults]);
 
+  // Drop stale/orphan type + option ids that are not in this store's catalog.
+  useEffect(() => {
+    if (!catalog?.length) return;
+    const allowedTypes = new Set(catalog.map((type) => type.id as string));
+    const allowedOptions = new Set(
+      catalog.flatMap((type) => type.options.map((option) => option.id as string)),
+    );
+    setDraft((current) => {
+      const variantTypeIds = current.variantTypeIds.filter((id) => allowedTypes.has(id));
+      let variantsChanged = false;
+      const variants = current.variants.map((row) => {
+        const optionIds = row.optionIds.filter((id) => allowedOptions.has(id));
+        if (optionIds.length === row.optionIds.length) return row;
+        variantsChanged = true;
+        return {
+          ...row,
+          optionIds,
+          ...labelsFromOptions(catalog, optionIds),
+        };
+      });
+      if (variantTypeIds.length === current.variantTypeIds.length && !variantsChanged) {
+        return current;
+      }
+      return { ...current, variantTypeIds, variants };
+    });
+  }, [catalog]);
+
   // New products default to Size + Colour once the catalog loads.
   useEffect(() => {
     if (product || !catalog?.length || defaultedTypes.current) return;
     defaultedTypes.current = true;
-    const defaults = catalog.filter((type) => type.slug === "size" || type.slug === "colour").map((type) => type.id);
+    const defaults = catalog
+      .filter((type) => type.slug === "size" || type.slug === "colour")
+      .map((type) => type.id as string);
     if (defaults.length > 0) {
       setDraft((current) =>
         current.variantTypeIds.length > 0 ? current : { ...current, variantTypeIds: defaults },
@@ -326,13 +368,14 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     return catalog.filter((type) => draft.variantTypeIds.includes(type.id));
   }, [catalog, draft.variantTypeIds]);
 
-  function toggleVariantType(typeId: Id<"variantTypes">) {
-    const on = draft.variantTypeIds.includes(typeId);
-    const nextIds = on ? draft.variantTypeIds.filter((id) => id !== typeId) : [...draft.variantTypeIds, typeId];
-    const removedOptionIds = new Set<Id<"variantOptions">>();
-    if (on && catalog) {
-      const type = catalog.find((row) => row.id === typeId);
-      for (const option of type?.options ?? []) removedOptionIds.add(option.id);
+  function setVariantTypeIds(nextIds: string[]) {
+    const removed = draft.variantTypeIds.filter((id) => !nextIds.includes(id));
+    const removedOptionIds = new Set<string>();
+    if (removed.length > 0 && catalog) {
+      for (const typeId of removed) {
+        const type = catalog.find((row) => row.id === typeId);
+        for (const option of type?.options ?? []) removedOptionIds.add(option.id);
+      }
     }
     setDraft((current) => ({
       ...current,
@@ -355,14 +398,18 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       ...current,
       variants: current.variants.map((row) => {
         if (row.key !== rowKey) return row;
-        const withoutType = row.optionIds.filter((id) => {
+        // Keep only options that still exist in the live catalog (drop legacy orphans).
+        const known = row.optionIds.filter((id) => Boolean(optionById(catalog, id)));
+        const withoutType = known.filter((id) => {
           const option = optionById(catalog, id);
           return option?.variantTypeId !== type.id;
         });
-        const optionIds = optionId
-          ? [...withoutType, optionId as Id<"variantOptions">]
-          : withoutType;
-        return { ...row, optionIds, ...labelsFromOptions(catalog, optionIds) };
+        const optionIds = optionId ? [...withoutType, optionId] : withoutType;
+        return {
+          ...row,
+          optionIds,
+          ...labelsFromOptions(catalog, optionIds),
+        };
       }),
     }));
   }
@@ -400,6 +447,34 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
 
   const chosen = slots.find((slot) => slot.key === selectedKey) ?? slots[0] ?? null;
   const uploading = slots.some((slot) => slot.uploading);
+  const hasEmbedImage = slots.some((slot) => Boolean(slot.storageId) && !slot.uploading);
+  const aiReady = useMemo(
+    () =>
+      aiRecommendReadiness({
+        name: draft.name,
+        description: draft.description,
+        colourPrimary: draft.colourPrimary,
+        material: draft.material,
+        pattern: draft.pattern,
+        priceInr: draft.priceInr,
+        hasImage: hasEmbedImage,
+      }),
+    [
+      draft.name,
+      draft.description,
+      draft.colourPrimary,
+      draft.material,
+      draft.pattern,
+      draft.priceInr,
+      hasEmbedImage,
+    ],
+  );
+
+  // Drop the flag if the listing no longer has enough style signal to embed.
+  useEffect(() => {
+    if (!draft.aiRecommend || aiReady.ready) return;
+    form.setValue("aiRecommend", false, { shouldDirty: true });
+  }, [aiReady.ready, draft.aiRecommend, form]);
 
   async function addFiles(list: FileList | null) {
     if (!list) return;
@@ -465,6 +540,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       setDraft((current) => ({
         ...current,
         name: result.name,
+        brandId: null,
         brand: result.brand ?? "",
         subcategory: result.subcategory,
         productType: result.productType ?? "",
@@ -486,13 +562,14 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     }
   }
 
-  function buildArgs() {
-    const price = Number(draft.priceInr);
-    if (!Number.isFinite(price) || price < 0) throw new Error("Enter a price.");
-    const compareAt = draft.compareAtPriceInr ? Number(draft.compareAtPriceInr) : undefined;
-    const hex = draft.colourHex.trim();
-    const subcategory = draft.productType ? productTypeLabel(draft.productType) : draft.subcategory.trim();
-    const customAttributes = draft.customAttributes
+  function buildArgs(values: ProductFormValues) {
+    const price = Number(values.priceInr);
+    const compareAt = values.compareAtPriceInr ? Number(values.compareAtPriceInr) : undefined;
+    const hex = values.colourHex.trim();
+    const subcategory = values.productType
+      ? productTypeLabel(values.productType)
+      : values.subcategory.trim();
+    const customAttributes = values.customAttributes
       .map((row) => {
         const key = row.keyInput.trim().toLowerCase().replace(/\s+/g, "_");
         const value = row.value.trim();
@@ -500,7 +577,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
         return { key, label: row.label.trim() || attrLabel(key), value };
       })
       .filter((row): row is { key: string; label: string; value: string } => row !== null);
-    const infoSections = draft.infoSections
+    const infoSections = values.infoSections
       .map((section, position) => {
         const title = section.title.trim();
         if (!title) return null;
@@ -524,38 +601,51 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       })
       .filter((section): section is NonNullable<typeof section> => section !== null);
     return {
-      category: draft.category,
-      categoryId: draft.categoryId ?? undefined,
-      presentation: draft.presentation,
-      name: draft.name.trim(),
-      brand: draft.brand.trim() || undefined,
-      description: draft.description.trim(),
+      category: values.category,
+      categoryId: (values.categoryId as Id<"categories"> | null) ?? undefined,
+      presentation: values.presentation,
+      name: values.name.trim(),
+      brandId: (values.brandId as Id<"brands"> | null) ?? undefined,
+      brand: values.brandId ? undefined : values.brand.trim() || undefined,
+      description: values.description.trim(),
       attributes: customAttributes,
       infoSections: infoSections.length > 0 ? infoSections : undefined,
-      subcategory: subcategory || draft.category,
-      productType: draft.productType || undefined,
+      subcategory: subcategory || values.category,
+      productType: values.productType || undefined,
       colours: {
-        primary: draft.colourPrimary.trim(),
-        secondary: draft.colourSecondary.split(",").map((part) => part.trim()).filter(Boolean),
+        primary: values.colourPrimary.trim(),
+        secondary: values.colourSecondary
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean),
         hex: /^#[0-9a-fA-F]{6}$/.test(hex) ? [hex.toLowerCase()] : [],
       },
-      pattern: draft.pattern.trim() || undefined,
-      material: draft.material.trim() || undefined,
-      size: draft.size.trim() || undefined,
-      ageGroup: draft.ageGroup || undefined,
-      occasion: draft.occasion || undefined,
+      pattern: values.pattern.trim() || undefined,
+      material: values.material.trim() || undefined,
+      size: values.size.trim() || undefined,
+      ageGroup: values.ageGroup || undefined,
+      occasion: values.occasion || undefined,
       priceInr: Math.round(price),
       compareAtPriceInr: compareAt && compareAt > 0 ? Math.round(compareAt) : undefined,
-      variantTypeIds: draft.variantTypeIds.length > 0 ? draft.variantTypeIds : undefined,
-      aiRecommend: draft.aiRecommend,
+      variantTypeIds:
+        values.variantTypeIds.length > 0
+          ? (values.variantTypeIds as Id<"variantTypes">[])
+          : undefined,
+      aiRecommend: values.aiRecommend,
       imageIds: slots.flatMap((slot) => (slot.storageId ? [slot.storageId] : [])),
-      variants: draft.variants.map((row) => ({
-        id: row.id,
-        optionIds: row.optionIds.length > 0 ? row.optionIds : undefined,
+      variants: values.variants.map((row) => ({
+        id: row.id as Id<"productVariants"> | undefined,
+        optionIds:
+          row.optionIds.length > 0 ? (row.optionIds as Id<"variantOptions">[]) : undefined,
         size: row.size.trim() || undefined,
         colour:
           row.colourName.trim() || /^#[0-9a-fA-F]{6}$/.test(row.colourHex)
-            ? { name: row.colourName.trim() || draft.colourPrimary.trim(), hex: /^#[0-9a-fA-F]{6}$/.test(row.colourHex) ? row.colourHex.toLowerCase() : hex || "#111111" }
+            ? {
+                name: row.colourName.trim() || values.colourPrimary.trim(),
+                hex: /^#[0-9a-fA-F]{6}$/.test(row.colourHex)
+                  ? row.colourHex.toLowerCase()
+                  : hex || "#111111",
+              }
             : undefined,
         priceInr: row.priceInr ? Math.round(Number(row.priceInr)) : undefined,
         stock: Math.max(0, Math.round(Number(row.stock) || 0)),
@@ -566,25 +656,36 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
 
   async function save(): Promise<Id<"products"> | null> {
     if (saving || uploading) return null;
-    setSaving(true);
     setError(null);
-    try {
-      const args = buildArgs();
-      if (productId) {
-        await update({ productId, ...args });
-        toast.success("Saved.");
-        return productId;
-      }
-      const id = await create(args);
-      toast.success("Draft saved.");
-      router.replace(routes.vendorProduct(id));
-      return id;
-    } catch (caught) {
-      setError(reportError(caught).message);
-      return null;
-    } finally {
-      setSaving(false);
-    }
+    let savedId: Id<"products"> | null = null;
+    await form.handleSubmit(
+      async (values) => {
+        setSaving(true);
+        try {
+          const args = buildArgs(values);
+          if (productId) {
+            await update({ productId, ...args });
+            toast.success("Saved.");
+            savedId = productId;
+            return;
+          }
+          const id = await create(args);
+          toast.success("Draft saved.");
+          router.replace(routes.vendorProduct(id));
+          savedId = id;
+        } catch (caught) {
+          setError(reportError(caught).message);
+        } finally {
+          setSaving(false);
+        }
+      },
+      (formErrors) => {
+        const message = firstFormError(formErrors) ?? "Fix the highlighted fields.";
+        setError(message);
+        toast.error(message);
+      },
+    )();
+    return savedId;
   }
 
   async function saveAndPublish() {
@@ -598,7 +699,6 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     }
   }
 
-  const knownTypes = productTypesFor(draft.category);
   const coverKey = slots[0]?.key;
   const status = product?.status;
   const statusText =
@@ -609,7 +709,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="sticky top-0 z-20 shrink-0 border-b border-hairline bg-canvas px-4 py-3">
+      <div className="sticky top-0 z-20 shrink-0 border-b border-border bg-background px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-3">
           <Button href={routes.vendorProducts} variant="ghost" size="icon-sm" aria-label="Back to products">
             <ArrowLeft className="size-4" />
@@ -617,24 +717,19 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="truncate text-lg font-medium tracking-tight capitalize">{displayName}</h2>
-              <span
-                className={cn(
-                  "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
-                  status === "active" && "bg-soft-cloud text-success",
-                  status === "draft" && "bg-soft-cloud text-mute",
-                  status === "archived" && "bg-canvas text-mute ring-1 ring-inset ring-hairline",
-                  !status && "bg-soft-cloud text-mute",
-                )}
+              <Badge
+                variant={status === "active" ? "secondary" : "outline"}
+                className={cn(status === "active" && "text-success")}
               >
                 {statusText}
-              </span>
+              </Badge>
             </div>
-            <p className="truncate text-xs text-mute">
+            <p className="truncate text-xs text-muted-foreground">
               {product?.sku ? `SKU ${product.sku}` : "SKU assigned on save"}
               {" · "}
               {draft.variants.length} variant{draft.variants.length === 1 ? "" : "s"}
               {" · "}
-              <span className={totalStock === 0 ? "text-sale" : undefined}>{totalStock} in stock</span>
+              <span className={totalStock === 0 ? "text-destructive" : undefined}>{totalStock} in stock</span>
               {draft.priceInr ? ` · ${formatInr(Number(draft.priceInr) || 0)}` : ""}
             </p>
           </div>
@@ -685,9 +780,13 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
             ) : null}
           </div>
         </div>
-        {error ? <p className="mt-2 text-sm text-sale">{error}</p> : null}
+        {error ? (
+          <Alert variant="destructive" className="mt-2 rounded-none">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
         {me.vendor.status !== "active" ? (
-          <p className="mt-2 text-xs text-mute">Publishing unlocks once the store is approved.</p>
+          <p className="mt-2 text-xs text-muted-foreground">Publishing unlocks once the store is approved.</p>
         ) : null}
       </div>
 
@@ -711,7 +810,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
               >
                 <ImagePlus className="size-6" aria-hidden />
                 <p className="text-sm font-medium">Add cover photo</p>
-                <p className="text-xs text-mute">First image is the shop cover</p>
+                <p className="text-xs text-muted-foreground">First image is the shop cover</p>
               </button>
             )}
             {chosen?.uploading ? (
@@ -797,80 +896,72 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
           </div>
         </aside>
 
-        <div className="min-w-0 space-y-8">
-          <section className="space-y-4">
-            <SectionHead title="Basics" hint="What shoppers see first on the product page." />
-            <Field label="Name">
+        <div className="min-w-0">
+          <Accordion
+            multiple
+            defaultValue={["basics", "classification", "attributes", "info", "pricing", "variants"]}
+            className="w-full"
+          >
+          <AccordionItem value="basics" className="border-border">
+            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
+              <SectionHead title="Basics" hint="What shoppers see first on the product page." />
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pb-6">
+            <EditorField label="Name" error={errors.name?.message}>
               <Input
-                required
                 maxLength={80}
                 value={draft.name}
+                aria-invalid={Boolean(errors.name)}
                 onChange={(e) => set("name", e.target.value)}
                 placeholder="Khaki slim trousers"
               />
-            </Field>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Brand">
-                <Input
-                  maxLength={80}
-                  value={draft.brand}
-                  onChange={(e) => set("brand", e.target.value)}
-                  placeholder="Optional"
-                />
-              </Field>
-              <Field label="Type">
-                <select
-                  value={draft.productType}
-                  onChange={(e) => set("productType", e.target.value)}
-                  className="h-12 w-full rounded-full bg-soft-cloud px-4 text-sm outline-none focus:bg-canvas focus:ring-2 focus:ring-ink"
-                >
-                  <option value="">Choose a type</option>
-                  {draft.productType && !knownTypes.includes(draft.productType) ? (
-                    <option value={draft.productType}>{productTypeLabel(draft.productType)}</option>
-                  ) : null}
-                  {knownTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {productTypeLabel(type)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-            <Field label="Description" hint={`${draft.description.length}/400`}>
+            </EditorField>
+            <EditorField label="Brand" error={errors.brand?.message}>
+              <BrandPicker
+                brandId={draft.brandId as Id<"brands"> | null}
+                brandName={draft.brand}
+                disabled={saving || filling}
+                onChange={({ brandId, brandName }) =>
+                  setDraft((prev) => ({ ...prev, brandId, brand: brandName }))
+                }
+              />
+            </EditorField>
+            <EditorField
+              label="Description"
+              hint={`${draft.description.length}/400`}
+              error={errors.description?.message}
+            >
               <Textarea
                 rows={4}
                 maxLength={400}
                 value={draft.description}
+                aria-invalid={Boolean(errors.description)}
                 onChange={(e) => set("description", e.target.value)}
                 placeholder="Fit, fabric, and how to wear it."
               />
-            </Field>
-          </section>
+            </EditorField>
+            </AccordionContent>
+          </AccordionItem>
 
-          <section className="space-y-4 border-t border-hairline pt-8">
-            <SectionHead title="Classification" hint="Category tree and who this piece is for." />
+          <AccordionItem value="classification" className="border-border">
+            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
+              <SectionHead title="Classification" hint="Category tree and who this piece is for." />
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pb-6">
             <CategoryTreePicker
-              value={draft.categoryId}
+              value={draft.categoryId as Id<"categories"> | null}
               onChange={(pick) => {
                 if (!pick) {
-                  setDraft((prev) => ({ ...prev, categoryId: null }));
+                  setDraft((prev) => ({ ...prev, categoryId: null, productType: "" }));
                   return;
                 }
-                setDraft((prev) => {
-                  const nextType =
-                    pick.productTypeHint && isProductType(pick.legacyCategory, pick.productTypeHint)
-                      ? pick.productTypeHint
-                      : isProductType(pick.legacyCategory, prev.productType)
-                        ? prev.productType
-                        : "";
-                  return {
-                    ...prev,
-                    categoryId: pick.categoryId,
-                    category: pick.legacyCategory,
-                    productType: nextType,
-                    subcategory: pick.name,
-                  };
-                });
+                setDraft((prev) => ({
+                  ...prev,
+                  categoryId: pick.categoryId,
+                  category: pick.legacyCategory,
+                  productType: pick.productTypeHint ?? "",
+                  subcategory: pick.name,
+                }));
               }}
             />
             <ChoiceGroup
@@ -895,67 +986,81 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 clearable
               />
             </div>
-          </section>
+            </AccordionContent>
+          </AccordionItem>
 
-          <section className="space-y-4 border-t border-hairline pt-8">
-            <SectionHead title="Attributes" hint="Helps search and outfit matching." />
+          <AccordionItem value="attributes" className="border-border">
+            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
+              <SectionHead title="Attributes" hint="Helps search and outfit matching." />
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pb-6">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Primary colour">
+              <EditorField label="Primary colour" error={errors.colourPrimary?.message}>
                 <Input
                   maxLength={40}
                   value={draft.colourPrimary}
+                  aria-invalid={Boolean(errors.colourPrimary)}
                   onChange={(e) => set("colourPrimary", e.target.value)}
                   placeholder="Khaki"
                 />
-              </Field>
-              <Field label="Colour hex">
+              </EditorField>
+              <EditorField label="Colour hex" error={errors.colourHex?.message}>
                 <span className="flex gap-2">
                   <input
                     type="color"
                     aria-label="Pick a colour"
                     value={/^#[0-9a-fA-F]{6}$/.test(draft.colourHex) ? draft.colourHex : "#111111"}
                     onChange={(e) => set("colourHex", e.target.value)}
-                    className="h-12 w-14 shrink-0 rounded-full bg-soft-cloud"
+                    className="h-10 w-10 shrink-0 rounded-full border border-transparent bg-muted"
                   />
                   <Input
                     value={draft.colourHex}
+                    aria-invalid={Boolean(errors.colourHex)}
                     onChange={(e) => set("colourHex", e.target.value)}
                     placeholder="#c4a574"
                     maxLength={7}
                   />
                 </span>
-              </Field>
-              <Field label="Other colours">
+              </EditorField>
+              <EditorField label="Other colours" error={errors.colourSecondary?.message}>
                 <Input
                   value={draft.colourSecondary}
+                  aria-invalid={Boolean(errors.colourSecondary)}
                   onChange={(e) => set("colourSecondary", e.target.value)}
                   placeholder="navy, white"
                 />
-              </Field>
-              <Field label="Pattern">
+              </EditorField>
+              <EditorField label="Pattern" error={errors.pattern?.message}>
                 <Input
                   maxLength={40}
                   value={draft.pattern}
+                  aria-invalid={Boolean(errors.pattern)}
                   onChange={(e) => set("pattern", e.target.value)}
                   placeholder="solid, stripe, check"
                 />
-              </Field>
-              <Field label="Material">
+              </EditorField>
+              <EditorField label="Material" error={errors.material?.message}>
                 <Input
                   maxLength={60}
                   value={draft.material}
+                  aria-invalid={Boolean(errors.material)}
                   onChange={(e) => set("material", e.target.value)}
                   placeholder="Cotton twill"
                 />
-              </Field>
-              <Field label="One-size note" hint="Only if this piece has no size variants.">
+              </EditorField>
+              <EditorField
+                label="One-size note"
+                hint="Only if this piece has no size variants."
+                error={errors.size?.message}
+              >
                 <Input
                   maxLength={24}
                   value={draft.size}
+                  aria-invalid={Boolean(errors.size)}
                   onChange={(e) => set("size", e.target.value)}
                   placeholder="One size"
                 />
-              </Field>
+              </EditorField>
             </div>
             <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between gap-3">
@@ -979,44 +1084,58 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 </Button>
               </div>
               {draft.customAttributes.length === 0 ? (
-                <p className="text-xs text-mute">Optional. Add neckline, SPF, frame shape, or any trait.</p>
+                <p className="text-xs text-muted-foreground">Optional. Add neckline, SPF, frame shape, or any trait.</p>
               ) : (
                 <ul className="space-y-3">
                   {draft.customAttributes.map((row, index) => (
                     <li key={`attr-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                      <Input
-                        value={row.keyInput}
-                        onChange={(e) => {
-                          const keyInput = e.target.value;
-                          set(
-                            "customAttributes",
-                            draft.customAttributes.map((item, i) =>
-                              i === index
-                                ? {
-                                    ...item,
-                                    keyInput,
-                                    label: item.label || attrLabel(keyInput.trim().toLowerCase().replace(/\s+/g, "_")),
-                                  }
-                                : item,
-                            ),
-                          );
-                        }}
-                        placeholder="Key (e.g. neckline)"
-                        maxLength={40}
-                      />
-                      <Input
-                        value={row.value}
-                        onChange={(e) =>
-                          set(
-                            "customAttributes",
-                            draft.customAttributes.map((item, i) =>
-                              i === index ? { ...item, value: e.target.value } : item,
-                            ),
-                          )
-                        }
-                        placeholder="Value"
-                        maxLength={120}
-                      />
+                      <div className="space-y-1">
+                        <Input
+                          value={row.keyInput}
+                          aria-invalid={Boolean(errors.customAttributes?.[index]?.keyInput)}
+                          onChange={(e) => {
+                            const keyInput = e.target.value;
+                            set(
+                              "customAttributes",
+                              draft.customAttributes.map((item, i) =>
+                                i === index
+                                  ? {
+                                      ...item,
+                                      keyInput,
+                                      label:
+                                        item.label ||
+                                        attrLabel(keyInput.trim().toLowerCase().replace(/\s+/g, "_")),
+                                    }
+                                  : item,
+                              ),
+                            );
+                          }}
+                          placeholder="Key (e.g. neckline)"
+                          maxLength={40}
+                        />
+                        {errors.customAttributes?.[index]?.keyInput?.message ? (
+                          <FieldError>{errors.customAttributes[index].keyInput.message}</FieldError>
+                        ) : null}
+                      </div>
+                      <div className="space-y-1">
+                        <Input
+                          value={row.value}
+                          aria-invalid={Boolean(errors.customAttributes?.[index]?.value)}
+                          onChange={(e) =>
+                            set(
+                              "customAttributes",
+                              draft.customAttributes.map((item, i) =>
+                                i === index ? { ...item, value: e.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="Value"
+                          maxLength={120}
+                        />
+                        {errors.customAttributes?.[index]?.value?.message ? (
+                          <FieldError>{errors.customAttributes[index].value.message}</FieldError>
+                        ) : null}
+                      </div>
                       <Button
                         type="button"
                         variant="ghost"
@@ -1036,14 +1155,18 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 </ul>
               )}
             </div>
-          </section>
+            </AccordionContent>
+          </AccordionItem>
 
-          <section className="space-y-4 border-t border-hairline pt-8">
-            <div className="flex items-start justify-between gap-3">
+          <AccordionItem value="info" className="border-border">
+            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
               <SectionHead
                 title="Product information"
                 hint="Accordion sections on the product page. Add, rename, or remove freely."
               />
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pb-6">
+            <div className="flex justify-end">
               <Button
                 type="button"
                 variant="secondary"
@@ -1055,9 +1178,9 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 Section
               </Button>
             </div>
-            <ul className="space-y-6">
+            <ul className="space-y-4">
               {draft.infoSections.map((section, index) => (
-                <li key={section.id} className="space-y-3 border border-hairline p-4">
+                <li key={section.id} className="space-y-3 border border-border p-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <Input
                       value={section.title}
@@ -1073,24 +1196,27 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                       maxLength={80}
                       className="min-w-0 flex-1"
                     />
-                    <select
+                    <Select
                       value={section.kind}
-                      onChange={(e) =>
+                      onValueChange={(next) => {
+                        if (!next) return;
                         set(
                           "infoSections",
                           draft.infoSections.map((item, i) =>
-                            i === index
-                              ? { ...item, kind: e.target.value as InfoSectionKind }
-                              : item,
+                            i === index ? { ...item, kind: next as InfoSectionKind } : item,
                           ),
-                        )
-                      }
-                      className="h-12 rounded-full bg-soft-cloud px-4 text-sm outline-none focus:bg-canvas focus:ring-2 focus:ring-ink"
+                        );
+                      }}
                     >
-                      <option value="rich_text">Text</option>
-                      <option value="key_value">Key / value</option>
-                      <option value="faq">FAQ</option>
-                    </select>
+                      <SelectTrigger className="h-10 min-w-32 rounded-full border-transparent bg-muted px-4 shadow-none">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-none">
+                        <SelectItem value="rich_text">Text</SelectItem>
+                        <SelectItem value="key_value">Key / value</SelectItem>
+                        <SelectItem value="faq">FAQ</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Button
                       type="button"
                       variant="ghost"
@@ -1200,57 +1326,74 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 </li>
               ))}
             </ul>
-          </section>
+            </AccordionContent>
+          </AccordionItem>
 
-          <section className="space-y-4 border-t border-hairline pt-8">
-            <SectionHead title="Pricing" hint="Base price for the product. Variants can override." />
+          <AccordionItem value="pricing" className="border-border">
+            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
+              <SectionHead title="Pricing" hint="Base price for the product. Variants can override." />
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pb-6">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Price (INR)">
+              <EditorField label="Price (INR)" error={errors.priceInr?.message}>
                 <Input
                   type="number"
-                  required
                   min={0}
                   step={1}
                   value={draft.priceInr}
+                  aria-invalid={Boolean(errors.priceInr)}
                   onChange={(e) => set("priceInr", e.target.value)}
                   placeholder="2499"
                 />
-              </Field>
-              <Field label="Compare-at (INR)" hint="Shown struck through when higher than price.">
+              </EditorField>
+              <EditorField
+                label="Compare-at (INR)"
+                hint="Shown struck through when higher than price."
+                error={errors.compareAtPriceInr?.message}
+              >
                 <Input
                   type="number"
                   min={0}
                   step={1}
                   value={draft.compareAtPriceInr}
+                  aria-invalid={Boolean(errors.compareAtPriceInr)}
                   onChange={(e) => set("compareAtPriceInr", e.target.value)}
                 />
-              </Field>
+              </EditorField>
             </div>
-            <label className="flex cursor-pointer items-start gap-3 rounded-none border border-hairline px-4 py-3">
-              <input
-                type="checkbox"
-                className="mt-1 size-4 accent-ink"
+            <label
+              className={cn(
+                "flex items-start gap-3 border border-border px-4 py-3",
+                aiReady.ready && !locked ? "cursor-pointer" : "cursor-not-allowed opacity-60",
+              )}
+            >
+              <Checkbox
                 checked={draft.aiRecommend}
-                disabled={locked}
-                onChange={(e) => setDraft((current) => ({ ...current, aiRecommend: e.target.checked }))}
+                disabled={locked || !aiReady.ready}
+                onCheckedChange={(checked) => set("aiRecommend", checked === true)}
+                className="mt-1"
               />
               <span className="min-w-0 space-y-0.5">
-                <span className="block text-sm font-medium text-ink">Recommend by AI</span>
-                <span className="block text-xs text-mute">
-                  When this product is live, the stylist can suggest it in shop looks. Embeddings update on save
-                  and publish.
+                <span className="block text-sm font-medium">Recommend by AI</span>
+                <span className="block text-xs text-muted-foreground">
+                  {aiReady.ready
+                    ? "When this product is live, the stylist can suggest it in shop looks. Embeddings update on save and publish."
+                    : `Add ${formatMissingList(aiReady.missing)} so the stylist has enough to embed.`}
                 </span>
               </span>
             </label>
-          </section>
+            </AccordionContent>
+          </AccordionItem>
 
-          <section className="space-y-4 border-t border-hairline pt-8">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+          <AccordionItem value="variants" className="border-border">
+            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
               <SectionHead
                 title="Variants & stock"
                 hint="Enable Size / Colour, then set stock per SKU. Manage the option lists in Variants."
               />
-              <div className="flex flex-wrap gap-2">
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pb-6">
+            <div className="flex flex-wrap justify-end gap-2">
                 <Button href={routes.vendorVariants} variant="ghost" size="sm">
                   Manage options
                 </Button>
@@ -1274,179 +1417,202 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                   Add row
                 </Button>
               </div>
-            </div>
 
             <div className="space-y-2">
               <p className="text-sm font-medium">Option dimensions</p>
               {catalog === undefined || seedingCatalog ? (
-                <p className="text-sm text-mute">Loading size and colour options…</p>
+                <p className="text-sm text-muted-foreground">Loading size and colour options…</p>
               ) : catalog.length === 0 ? (
-                <p className="text-sm text-mute">No variant catalog yet. Refresh after seeding completes.</p>
+                <p className="text-sm text-muted-foreground">No variant catalog yet. Refresh after seeding completes.</p>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {catalog.map((type) => {
-                    const selected = draft.variantTypeIds.includes(type.id);
-                    return (
-                      <button
-                        key={type.id}
-                        type="button"
-                        disabled={locked}
-                        aria-pressed={selected}
-                        onClick={() => toggleVariantType(type.id)}
-                        className={cn(
-                          "inline-flex h-10 items-center rounded-full px-4 text-sm font-medium transition active:scale-95 active:opacity-50 disabled:opacity-40",
-                          selected ? "bg-ink text-canvas" : "bg-canvas text-ink ring-1 ring-inset ring-hairline",
-                        )}
-                      >
-                        {type.label}
-                        <span className={cn("ml-1.5", selected ? "text-canvas/70" : "text-mute")}>
-                          {type.options.length}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <ToggleGroup
+                  multiple
+                  value={draft.variantTypeIds}
+                  onValueChange={(next) => setVariantTypeIds(next)}
+                  disabled={locked}
+                  spacing={2}
+                  className="flex flex-wrap"
+                >
+                  {catalog.map((type) => (
+                    <ToggleGroupItem
+                      key={type.id}
+                      value={type.id}
+                      size="sm"
+                      className="h-8 rounded-full px-3 aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+                    >
+                      {type.label}
+                      <span className="ml-1.5 opacity-70">{type.options.length}</span>
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
               )}
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[40rem] text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-mute">
+            <div className="overflow-hidden border border-border">
+              <Table className="min-w-[40rem]">
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
                     {enabledTypes.length > 0 ? (
                       enabledTypes.map((type) => (
-                        <th key={type.id} className="py-2 pr-2 font-medium">
+                        <TableHead key={type.id} className="h-9 text-xs text-muted-foreground">
                           {type.label}
-                        </th>
+                        </TableHead>
                       ))
                     ) : (
                       <>
-                        <th className="py-2 pr-2 font-medium">Size</th>
-                        <th className="py-2 pr-2 font-medium">Colour</th>
-                        <th className="py-2 pr-2 font-medium">Hex</th>
+                        <TableHead className="h-9 text-xs text-muted-foreground">Size</TableHead>
+                        <TableHead className="h-9 text-xs text-muted-foreground">Colour</TableHead>
+                        <TableHead className="h-9 w-28 text-xs text-muted-foreground">Hex</TableHead>
                       </>
                     )}
-                    <th className="py-2 pr-2 font-medium">Price</th>
-                    <th className="py-2 pr-2 font-medium">Stock</th>
-                    <th className="py-2 pr-2 font-medium">Active</th>
-                    <th className="py-2 font-medium" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hairline">
+                    <TableHead className="h-9 w-28 text-xs text-muted-foreground">Price</TableHead>
+                    <TableHead className="h-9 w-24 text-xs text-muted-foreground">Stock</TableHead>
+                    <TableHead className="h-9 w-16 text-center text-xs text-muted-foreground">Active</TableHead>
+                    <TableHead className="h-9 w-12" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {draft.variants.map((row, index) => {
+                    const rowErrors = errors.variants?.[index];
                     const patch = (changes: Partial<VariantRow>) =>
                       set(
                         "variants",
                         draft.variants.map((item) => (item.key === row.key ? { ...item, ...changes } : item)),
                       );
                     return (
-                      <tr key={row.key}>
+                      <TableRow key={row.key} className="hover:bg-transparent">
                         {enabledTypes.length > 0 ? (
                           enabledTypes.map((type) => {
-                            const selected =
-                              row.optionIds.find((id) => optionById(catalog ?? [], id)?.variantTypeId === type.id) ??
-                              "";
+                            const selectedId =
+                              row.optionIds.find(
+                                (id) => optionById(catalog ?? [], id)?.variantTypeId === type.id,
+                              ) ?? "";
+                            const selected = selectedId
+                              ? type.options.find((option) => option.id === selectedId)
+                              : undefined;
+                            const swatch =
+                              type.slug === "colour" && selected
+                                ? COLOUR_HEX[selected.value]
+                                : undefined;
                             return (
-                              <td key={type.id} className="py-2 pr-2">
-                                <select
-                                  value={selected}
+                              <TableCell key={type.id} className="py-1.5">
+                                <VariantOptionPicker
+                                  type={type}
+                                  value={selected ?? null}
                                   disabled={locked}
-                                  aria-label={`${type.label} for option ${index + 1}`}
-                                  onChange={(e) => setRowOption(row.key, type, e.target.value)}
-                                  className="h-10 w-full min-w-[6.5rem] rounded-full bg-soft-cloud px-3 text-sm outline-none focus:bg-canvas focus:ring-2 focus:ring-ink disabled:opacity-40"
-                                >
-                                  <option value="">Choose…</option>
-                                  {type.options.map((option) => (
-                                    <option key={option.id} value={option.id}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
+                                  swatch={swatch}
+                                  ariaLabel={`${type.label} for option ${index + 1}`}
+                                  onChange={(optionId) => setRowOption(row.key, type, optionId)}
+                                />
+                              </TableCell>
                             );
                           })
                         ) : (
                           <>
-                            <td className="py-2 pr-2">
+                            <TableCell className="py-1.5">
                               <Input
-                                className="h-10"
+                                className="h-8 rounded-md px-3"
                                 placeholder="M"
                                 value={row.size}
+                                aria-invalid={Boolean(rowErrors?.size)}
                                 onChange={(e) => patch({ size: e.target.value })}
                               />
-                            </td>
-                            <td className="py-2 pr-2">
+                            </TableCell>
+                            <TableCell className="py-1.5">
                               <Input
-                                className="h-10"
+                                className="h-8 rounded-md px-3"
                                 placeholder="Oat"
                                 value={row.colourName}
+                                aria-invalid={Boolean(rowErrors?.colourName)}
                                 onChange={(e) => patch({ colourName: e.target.value })}
                               />
-                            </td>
-                            <td className="py-2 pr-2">
-                              <Input
-                                className="h-10"
-                                placeholder="#d8cbb4"
-                                maxLength={7}
-                                value={row.colourHex}
-                                onChange={(e) => patch({ colourHex: e.target.value })}
-                              />
-                            </td>
+                            </TableCell>
+                            <TableCell className="py-1.5">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  aria-hidden
+                                  className="size-5 shrink-0 rounded-full border border-border"
+                                  style={{
+                                    backgroundColor: /^#[0-9a-fA-F]{6}$/.test(row.colourHex)
+                                      ? row.colourHex
+                                      : "transparent",
+                                  }}
+                                />
+                                <Input
+                                  className="h-8 rounded-md px-3 font-mono text-xs"
+                                  placeholder="#d8cbb4"
+                                  maxLength={7}
+                                  value={row.colourHex}
+                                  aria-invalid={Boolean(rowErrors?.colourHex)}
+                                  onChange={(e) => patch({ colourHex: e.target.value })}
+                                />
+                              </div>
+                            </TableCell>
                           </>
                         )}
-                        <td className="py-2 pr-2">
+                        <TableCell className="py-1.5">
                           <Input
-                            className="h-10"
+                            className="h-8 rounded-md px-3 tabular-nums"
                             type="number"
                             min={0}
                             placeholder={draft.priceInr || "—"}
                             value={row.priceInr}
+                            aria-invalid={Boolean(rowErrors?.priceInr)}
                             onChange={(e) => patch({ priceInr: e.target.value })}
                           />
-                        </td>
-                        <td className="py-2 pr-2">
+                        </TableCell>
+                        <TableCell className="py-1.5">
                           <Input
-                            className="h-10"
+                            className="h-8 rounded-md px-3 tabular-nums"
                             type="number"
                             min={0}
                             value={row.stock}
+                            aria-invalid={Boolean(rowErrors?.stock)}
                             onChange={(e) => patch({ stock: e.target.value })}
                           />
-                        </td>
-                        <td className="py-2 pr-2">
-                          <input
-                            type="checkbox"
-                            checked={row.active}
-                            onChange={(e) => patch({ active: e.target.checked })}
-                            className="size-5 accent-ink"
-                            aria-label={`Option ${index + 1} active`}
-                          />
-                        </td>
-                        <td className="py-2 text-right">
-                          <button
+                        </TableCell>
+                        <TableCell className="py-1.5 text-center">
+                          <div className="flex justify-center">
+                            <Checkbox
+                              checked={row.active}
+                              onCheckedChange={(checked) => patch({ active: checked === true })}
+                              aria-label={`Option ${index + 1} active`}
+                            />
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-1.5 text-right">
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="icon-xs"
                             disabled={draft.variants.length === 1 || locked}
                             onClick={() => set("variants", draft.variants.filter((item) => item.key !== row.key))}
                             aria-label={`Remove option ${index + 1}`}
-                            className="flex size-9 items-center justify-center rounded-full bg-soft-cloud disabled:opacity-40"
                           >
-                            <X className="size-4" aria-hidden />
-                          </button>
-                        </td>
-                      </tr>
+                            <X />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
                     );
                   })}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
 
-            {error ? <p className="text-sm text-sale">{error}</p> : null}
-          </section>
+            {errors.variants?.message || errors.variants?.root?.message ? (
+              <p className="text-sm text-destructive">
+                {errors.variants.message ?? errors.variants.root?.message}
+              </p>
+            ) : null}
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            </AccordionContent>
+          </AccordionItem>
+          </Accordion>
         </div>
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-hairline bg-canvas px-4 py-3">
+      <div className="shrink-0 border-t border-border bg-background px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-mute">
             {uploading ? "Uploading photos…" : saving ? "Saving…" : "Changes save when you press Save."}
@@ -1475,22 +1641,40 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
   );
 }
 
+function formatMissingList(items: string[]): string {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
 function SectionHead({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div className="space-y-0.5">
-      <h3 className="text-sm font-medium tracking-tight text-ink">{title}</h3>
-      {hint ? <p className="text-xs text-mute">{hint}</p> : null}
+    <div className="space-y-0.5 text-left">
+      <h3 className="text-sm font-medium tracking-tight">{title}</h3>
+      {hint ? <p className="text-xs font-normal text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
 
-function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+function EditorField({
+  label,
+  children,
+  hint,
+  error,
+}: {
+  label: string;
+  children: ReactNode;
+  hint?: string;
+  error?: string;
+}) {
   return (
-    <label className="block space-y-1 text-sm font-medium">
-      {label}
+    <Field data-invalid={error ? true : undefined}>
+      <FieldLabel>{label}</FieldLabel>
       {children}
-      {hint ? <span className="block text-xs font-normal text-mute">{hint}</span> : null}
-    </label>
+      {hint ? <FieldDescription>{hint}</FieldDescription> : null}
+      {error ? <FieldError>{error}</FieldError> : null}
+    </Field>
   );
 }
 
@@ -1499,7 +1683,6 @@ function ChoiceGroup({
   value,
   onChange,
   options,
-  clearable,
 }: {
   legend: string;
   value: string;
@@ -1508,27 +1691,97 @@ function ChoiceGroup({
   clearable?: boolean;
 }) {
   return (
-    <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">{legend}</legend>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => {
-          const selected = option.value === value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={selected}
-              onClick={() => onChange(selected && clearable ? "" : option.value)}
-              className={cn(
-                "inline-flex h-10 items-center rounded-full px-4 text-sm font-medium transition active:scale-95 active:opacity-50",
-                selected ? "bg-ink text-canvas" : "bg-canvas text-ink ring-1 ring-inset ring-hairline",
-              )}
-            >
-              {option.label}
-            </button>
-          );
-        })}
+    <Field>
+      <FieldLabel>{legend}</FieldLabel>
+      <ToggleGroup
+        value={value ? [value] : []}
+        onValueChange={(next) => onChange(next[0] ?? "")}
+        spacing={2}
+        className="flex flex-wrap"
+      >
+        {options.map((option) => (
+          <ToggleGroupItem
+            key={option.value}
+            value={option.value}
+            size="sm"
+            className="h-8 rounded-full px-3 aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+          >
+            {option.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </Field>
+  );
+}
+
+/** Searchable size/colour picker for a variant row cell. */
+function VariantOptionPicker({
+  type,
+  value,
+  disabled,
+  swatch,
+  ariaLabel,
+  onChange,
+}: {
+  type: CatalogType;
+  value: CatalogOption | null;
+  disabled?: boolean;
+  swatch?: string;
+  ariaLabel: string;
+  onChange: (optionId: string) => void;
+}) {
+  return (
+    <Combobox
+      items={type.options}
+      value={value}
+      onValueChange={(next) => onChange(next?.id ?? "")}
+      itemToStringLabel={(item) => item.label}
+      isItemEqualToValue={(a, b) => a.id === b.id}
+      disabled={disabled}
+      autoHighlight
+    >
+      <div className="relative flex items-center gap-1.5">
+        {swatch ? (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute left-2.5 z-10 size-3.5 rounded-full border border-border"
+            style={{ backgroundColor: swatch }}
+          />
+        ) : null}
+        <ComboboxInput
+          aria-label={ariaLabel}
+          placeholder="Choose…"
+          showClear={Boolean(value)}
+          className={cn(
+            "h-8! w-full min-w-[7rem] rounded-md! border-transparent! bg-muted shadow-none",
+            "has-[[data-slot=input-group-control]:focus-visible]:border-foreground",
+            "has-[[data-slot=input-group-control]:focus-visible]:bg-background",
+            "has-[[data-slot=input-group-control]:focus-visible]:ring-2",
+            "has-[[data-slot=input-group-control]:focus-visible]:ring-muted",
+            swatch && "[&_[data-slot=input-group-control]]:pl-7",
+          )}
+        />
       </div>
-    </fieldset>
+      <ComboboxContent className="rounded-none">
+        <ComboboxEmpty>No matches.</ComboboxEmpty>
+        <ComboboxList>
+          {(option: CatalogOption) => {
+            const hex = type.slug === "colour" ? COLOUR_HEX[option.value] : undefined;
+            return (
+              <ComboboxItem key={option.id} value={option}>
+                {hex ? (
+                  <span
+                    aria-hidden
+                    className="size-3.5 shrink-0 rounded-full border border-border"
+                    style={{ backgroundColor: hex }}
+                  />
+                ) : null}
+                <span className="truncate">{option.label}</span>
+              </ComboboxItem>
+            );
+          }}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   );
 }

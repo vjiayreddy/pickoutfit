@@ -3,6 +3,7 @@ import { Bebas_Neue, Geist, Geist_Mono } from "next/font/google";
 import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 import { AppToaster } from "@/components/pwa/app-toaster";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { getToken } from "@/lib/auth-server";
 import "./globals.css";
 
@@ -59,9 +60,11 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="flex min-h-full flex-col">
         <ConvexClientProvider initialToken={initialToken}>
-          {children}
-          <AppToaster />
-          <RegisterServiceWorker />
+          <TooltipProvider>
+            {children}
+            <AppToaster />
+            <RegisterServiceWorker />
+          </TooltipProvider>
         </ConvexClientProvider>
       </body>
     </html>

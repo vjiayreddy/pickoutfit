@@ -1,10 +1,13 @@
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/cn"
 
-export function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
+function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
-      className={cn("animate-pulse rounded-md bg-soft-cloud", className)}
+      data-slot="skeleton"
+      className={cn("animate-pulse rounded-none bg-muted", className)}
       {...props}
     />
-  );
+  )
 }
+
+export { Skeleton }

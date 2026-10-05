@@ -1,17 +1,57 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
 
 :root {
+  /* Brand tokens (Nike-inspired commerce system) */
   --ink: #111111;
   --canvas: #ffffff;
   --soft-cloud: #f5f5f5;
   --mute: #707072;
   --hairline: #cacacb;
+  --hairline-soft: #e5e5e5;
   --sale: #d30005;
-  --background: var(--canvas);
-  --foreground: var(--ink);
+  --success: #007d48;
   --app-header-height: calc(3.5rem + env(safe-area-inset-top, 0px));
   --app-tab-height: calc(3rem + env(safe-area-inset-bottom, 0px));
   --app-content-padding: 3rem;
+
+  /* shadcn semantic tokens → brand map */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: var(--canvas);
+  --card-foreground: var(--ink);
+  --popover: var(--canvas);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--canvas);
+  --secondary: var(--soft-cloud);
+  --secondary-foreground: var(--ink);
+  --muted: var(--soft-cloud);
+  --muted-foreground: var(--mute);
+  --accent: var(--soft-cloud);
+  --accent-foreground: var(--ink);
+  --destructive: var(--sale);
+  --border: var(--hairline);
+  --input: var(--hairline-soft);
+  --ring: var(--ink);
+  --chart-1: var(--ink);
+  --chart-2: var(--mute);
+  --chart-3: #4b4b4d;
+  --chart-4: var(--hairline);
+  --chart-5: var(--soft-cloud);
+  /* Flat surfaces (cards); buttons use rounded-full in component CSS */
+  --radius: 0rem;
+  --sidebar: var(--canvas);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: var(--canvas);
+  --sidebar-accent: var(--soft-cloud);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--hairline);
+  --sidebar-ring: var(--ink);
 }
 
 @media (min-width: 1024px) {
@@ -33,11 +73,48 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-display: var(--font-display);
+  --font-heading: var(--font-geist-sans);
+  --color-hairline-soft: var(--hairline-soft);
+  --color-success: var(--success);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
   font-family: var(--font-sans), Helvetica, Arial, sans-serif;
 }
 
@@ -186,5 +263,52 @@ body {
 
   .tryon-waves span:nth-child(3) {
     transform: scale(0.94);
+  }
+}
+
+.dark {
+  /* Light-first brand; dark keeps ink/canvas inverted neutrals only */
+  --background: var(--ink);
+  --foreground: var(--canvas);
+  --card: #1a1a1a;
+  --card-foreground: var(--canvas);
+  --popover: #1a1a1a;
+  --popover-foreground: var(--canvas);
+  --primary: var(--canvas);
+  --primary-foreground: var(--ink);
+  --secondary: #2a2a2a;
+  --secondary-foreground: var(--canvas);
+  --muted: #2a2a2a;
+  --muted-foreground: #9e9ea0;
+  --accent: #2a2a2a;
+  --accent-foreground: var(--canvas);
+  --destructive: var(--sale);
+  --border: rgb(255 255 255 / 12%);
+  --input: rgb(255 255 255 / 15%);
+  --ring: var(--canvas);
+  --chart-1: var(--canvas);
+  --chart-2: #9e9ea0;
+  --chart-3: #707072;
+  --chart-4: #4b4b4d;
+  --chart-5: #2a2a2a;
+  --sidebar: #1a1a1a;
+  --sidebar-foreground: var(--canvas);
+  --sidebar-primary: var(--canvas);
+  --sidebar-primary-foreground: var(--ink);
+  --sidebar-accent: #2a2a2a;
+  --sidebar-accent-foreground: var(--canvas);
+  --sidebar-border: rgb(255 255 255 / 12%);
+  --sidebar-ring: var(--canvas);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
   }
 }

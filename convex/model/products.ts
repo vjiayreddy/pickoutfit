@@ -30,6 +30,7 @@ import type { Fit, Formality, Presentation, Season } from "../shared/wardrobe";
 import { syncProductEmbeddingSchedule } from "./productEmbeddings";
 import { bumpSystemCounter } from "./stats";
 import { pricedUnitInr } from "./offers";
+import { resolveProductBrand } from "./brands";
 import {
   legacyFieldsFromOptions,
   optionRefsFor,
@@ -55,6 +56,9 @@ export type ProductInput = {
   categoryId?: Id<"categories">;
   presentation: Presentation;
   name: string;
+  /** Canonical brand row. When set, wins over free-text `brand`. */
+  brandId?: Id<"brands">;
+  /** Free-text brand; upserts a brand row when `brandId` is omitted. */
   brand?: string;
   description: string;
   /** Dynamic short traits. When set, wins over legacy typed fields. */
@@ -426,6 +430,7 @@ export async function toProductView(
     presentation: product.presentation,
     name: product.name,
     sku: product.sku ?? null,
+    brandId: product.brandId ?? null,
     brand: product.brand ?? null,
     subcategory: derived.subcategory || product.subcategory || "",
     productType: derived.productType || product.productType || null,
@@ -551,6 +556,10 @@ export async function createProduct(
 ): Promise<Id<"products">> {
   const clean = cleanProductInput(input);
   const categoryId = await resolveCategoryId(ctx, vendor._id, clean.categoryId);
+  const brandFields = await resolveProductBrand(ctx, vendor._id, {
+    brandId: clean.brandId,
+    brand: clean.brand,
+  });
   const variantTypeIds = clean.variantTypeIds?.length
     ? await requireActiveVariantTypes(ctx, vendor._id, clean.variantTypeIds)
     : [];
@@ -561,6 +570,7 @@ export async function createProduct(
   const now = Date.now();
   const sku = await allocateSku(ctx, vendor, clean.category);
   const slug = await uniqueProductSlug(ctx, vendor._id, clean.name, sku);
+  const searchPayload = { ...clean, brand: brandFields.brand };
   const productId = await ctx.db.insert("products", {
     vendorId: vendor._id,
     status: extra.status ?? "draft",
@@ -571,7 +581,8 @@ export async function createProduct(
     presentation: clean.presentation,
     name: clean.name,
     sku,
-    ...(clean.brand ? { brand: clean.brand } : {}),
+    ...(brandFields.brandId ? { brandId: brandFields.brandId } : {}),
+    ...(brandFields.brand ? { brand: brandFields.brand } : {}),
     description: clean.description,
     attributes: clean.attributes,
     ...(clean.infoSections.length > 0 ? { infoSections: clean.infoSections } : {}),
@@ -593,7 +604,7 @@ export async function createProduct(
     ...(variantTypeIds.length > 0 ? { variantTypeIds } : {}),
     active: extra.status === "active",
     ...(clean.aiRecommend ? { aiRecommend: true } : {}),
-    searchText: buildProductSearchText(clean),
+    searchText: buildProductSearchText(searchPayload),
     soldCount: 0,
     viewCount: 0,
     createdAt: now,
@@ -620,6 +631,10 @@ export async function updateProduct(
     clean.categoryId !== undefined
       ? await resolveCategoryId(ctx, vendor._id, clean.categoryId)
       : product.categoryId;
+  const brandFields = await resolveProductBrand(ctx, vendor._id, {
+    brandId: clean.brandId,
+    brand: clean.brand,
+  });
   const variantTypeIds =
     clean.variantTypeIds !== undefined
       ? clean.variantTypeIds.length > 0
@@ -631,6 +646,7 @@ export async function updateProduct(
     product.slug && product.name === clean.name
       ? product.slug
       : await uniqueProductSlug(ctx, vendor._id, clean.name, sku, product._id);
+  const searchPayload = { ...clean, brand: brandFields.brand };
   await ctx.db.patch(product._id, {
     slug,
     category: clean.category,
@@ -638,7 +654,8 @@ export async function updateProduct(
     presentation: clean.presentation,
     name: clean.name,
     sku,
-    brand: clean.brand,
+    brandId: brandFields.brandId,
+    brand: brandFields.brand,
     description: clean.description,
     attributes: clean.attributes,
     infoSections: clean.infoSections.length > 0 ? clean.infoSections : undefined,
@@ -657,7 +674,7 @@ export async function updateProduct(
     compareAtPriceInr: clean.compareAtPriceInr,
     hasVariants: hasRealVariants(clean.variants),
     variantTypeIds: variantTypeIds.length > 0 ? variantTypeIds : undefined,
-    searchText: buildProductSearchText(clean),
+    searchText: buildProductSearchText(searchPayload),
     aiRecommend: clean.aiRecommend ? true : undefined,
     // Legacy fields are superseded by productImages rows.
     imageIds: undefined,

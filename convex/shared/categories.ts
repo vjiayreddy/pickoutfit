@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { isProductType, type ProductCategory } from "./products";
 
 export const MAX_CATEGORY_DEPTH = 8;
 /** Soft cap per store so one vendor cannot blow the table. */
@@ -220,6 +221,65 @@ export function legacyProductCategoryFromPath(
     return "accessories";
   }
   return "clothes";
+}
+
+/**
+ * Seed / common category slugs → PRODUCT_TYPES enums.
+ * Walk leaf→root so Men/Topwear/Shirts/Formal resolves to `shirt`.
+ */
+const CATEGORY_SLUG_TO_PRODUCT_TYPE: Record<string, string> = {
+  shirts: "shirt",
+  shirt: "shirt",
+  "t-shirts": "t-shirt",
+  "t-shirt": "t-shirt",
+  polos: "polo",
+  polo: "polo",
+  "hoodies-sweatshirts": "hoodie",
+  hoodie: "hoodie",
+  "sweaters-knits": "knit",
+  "sweaters-cardigans": "knit",
+  knit: "knit",
+  "tops-blouses": "shirt",
+  tunics: "shirt",
+  jeans: "jeans",
+  trousers: "trouser",
+  trouser: "trouser",
+  shorts: "shorts",
+  skirts: "skirt",
+  skirt: "skirt",
+  jackets: "jacket",
+  jacket: "jacket",
+  coats: "coat",
+  coat: "coat",
+  blazers: "blazer",
+  blazer: "blazer",
+  dresses: "dress",
+  dress: "dress",
+  shoes: "shoes",
+  belts: "belt",
+  belt: "belt",
+  watches: "watch",
+  watch: "watch",
+  bags: "bag",
+  bag: "bag",
+  jewelry: "jewelry",
+  eyewear: "glasses",
+  glasses: "glasses",
+  sunglasses: "sunglasses",
+};
+
+/** Derive a PRODUCT_TYPES value from a category path, or null if none fits. */
+export function productTypeFromCategoryPath(
+  path: string,
+  legacy?: ProductCategory,
+): string | null {
+  const category = legacy ?? legacyProductCategoryFromPath(path);
+  const parts = path.split("/").filter(Boolean);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const mapped = CATEGORY_SLUG_TO_PRODUCT_TYPE[parts[i]!];
+    if (mapped && isProductType(category, mapped)) return mapped;
+  }
+  return null;
 }
 
 /** Ancestor chain from root to the node with `id`, or null if missing. */

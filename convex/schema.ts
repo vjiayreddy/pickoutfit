@@ -532,6 +532,23 @@ export default defineSchema({
     .index("by_variantTypeId_and_value", ["variantTypeId", "value"]),
 
   /**
+   * Per-store fashion brands (Nike, Louis Philippe, …).
+   * Slug is lowercased so "Nike" and "nike" collapse to one row.
+   * Products link via `brandId`; denormalized `products.brand` keeps search/display fast.
+   */
+  brands: defineTable({
+    vendorId: v.id("vendors"),
+    name: v.string(),
+    slug: v.string(),
+    logoStorageId: v.optional(v.id("_storage")),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_slug", ["vendorId", "slug"]),
+
+  /**
    * Marketplace catalog. One row per sellable product, owned by a vendor.
    * Typed fashion columns below remain optional for legacy rows; new writes prefer `attributes`.
    */
@@ -548,6 +565,9 @@ export default defineSchema({
     name: v.string(),
     /** Assigned once at create. Absent on rows saved before SKUs existed. */
     sku: v.optional(v.string()),
+    /** Canonical brand row; prefer this over free-text `brand`. */
+    brandId: v.optional(v.id("brands")),
+    /** Denormalized display name from `brands.name` (kept for search + legacy UI). */
     brand: v.optional(v.string()),
     description: v.optional(v.string()),
     /** Dynamic short traits (color, fit, fabric, custom). */
@@ -595,6 +615,8 @@ export default defineSchema({
   })
     .index("by_category_and_presentation", ["category", "presentation"])
     .index("by_categoryId", ["categoryId"])
+    .index("by_brandId", ["brandId"])
+    .index("by_vendorId_and_brandId", ["vendorId", "brandId"])
     .index("by_createdAt", ["createdAt"])
     .index("by_sku", ["sku"])
     .index("by_vendorId_and_status", ["vendorId", "status"])

@@ -297,7 +297,7 @@ export async function resolveOptionIds(
       if (!loaded || !loaded.isActive) {
         throw appError("NOT_FOUND", "A variant type for this option is missing.");
       }
-      if (vendorId && loaded.vendorId !== vendorId) {
+      if (vendorId && loaded.vendorId && loaded.vendorId !== vendorId) {
         throw appError("FORBIDDEN", "That option belongs to another store.");
       }
       type = loaded;
@@ -357,11 +357,19 @@ export async function requireActiveVariantTypes(
   variantTypeIds: Id<"variantTypes">[],
 ): Promise<Id<"variantTypes">[]> {
   const unique = [...new Set(variantTypeIds)];
+  const valid: Id<"variantTypes">[] = [];
   for (const id of unique) {
     const type = await ctx.db.get(id);
-    if (!type || !type.isActive || type.vendorId !== vendorId) {
-      throw appError("NOT_FOUND", "One of the selected variant types is missing.");
+    // Drop legacy/orphan ids (no vendorId) and types from other stores.
+    if (type && type.isActive && type.vendorId === vendorId) {
+      valid.push(id);
     }
   }
-  return unique;
+  if (unique.length > 0 && valid.length === 0) {
+    throw appError(
+      "NOT_FOUND",
+      "Those option dimensions are outdated. Turn Size/Colour off and on again, then save.",
+    );
+  }
+  return valid;
 }

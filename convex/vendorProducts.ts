@@ -32,6 +32,7 @@ const vProductFields = {
   categoryId: v.optional(v.id("categories")),
   presentation: vPresentation,
   name: v.string(),
+  brandId: v.optional(v.id("brands")),
   brand: v.optional(v.string()),
   description: v.string(),
   attributes: v.optional(v.array(vProductAttribute)),
