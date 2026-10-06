@@ -4,12 +4,15 @@ import { useQuery } from "convex/react";
 import {
   ClipboardList,
   FolderTree,
+  GitBranch,
   Layers,
   LayoutDashboard,
+  ListTree,
   LogOut,
   Package,
   Percent,
   Settings,
+  ShoppingBag,
   Store,
   Tag,
   Tags,
@@ -64,6 +67,7 @@ const NAV_GROUPS = [
       { href: routes.vendor, label: "Overview", icon: LayoutDashboard, exact: true },
       { href: routes.vendorProducts, label: "Products", icon: Package },
       { href: routes.vendorOrders, label: "Orders", icon: ClipboardList },
+      { href: routes.vendorCarts, label: "Carts", icon: ShoppingBag },
     ],
   },
   {
@@ -71,6 +75,8 @@ const NAV_GROUPS = [
     items: [
       { href: routes.vendorCategories, label: "Categories", icon: FolderTree },
       { href: routes.vendorBrands, label: "Brands", icon: Tag },
+      { href: routes.vendorAttributes, label: "Attributes", icon: ListTree },
+      { href: routes.vendorVariantCategories, label: "Variant recipes", icon: GitBranch },
       { href: routes.vendorVariants, label: "Variants", icon: Layers },
       { href: routes.vendorCollections, label: "Collections", icon: Tags },
       { href: routes.vendorDiscounts, label: "Discounts", icon: Percent },
@@ -152,6 +158,8 @@ export function VendorDesk({ children }: { children: ReactNode }) {
   const flushPage =
     pathname.startsWith(routes.vendorCategories) ||
     pathname.startsWith(routes.vendorBrands) ||
+    pathname.startsWith(routes.vendorAttributes) ||
+    pathname.startsWith(routes.vendorVariantCategories) ||
     pathname.startsWith(routes.vendorVariants) ||
     pathname.startsWith(routes.vendorDiscounts) ||
     pathname.startsWith(routes.vendorProducts);

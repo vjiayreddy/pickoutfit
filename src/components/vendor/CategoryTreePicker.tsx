@@ -12,7 +12,14 @@ import {
   type CategoryTreeNode,
 } from "@convex/shared/categories";
 import type { ProductCategory } from "@convex/shared/products";
-import { cn } from "@/lib/cn";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type Tree = FunctionReturnType<typeof api.categories.tree>;
 
@@ -31,8 +38,18 @@ type Props = {
   onChange: (pick: CategoryPick | null) => void;
 };
 
+const LEVEL_LABELS = ["Department", "Category", "Type", "Style"] as const;
+
 function asTree(nodes: Tree): CategoryTreeNode[] {
   return nodes as CategoryTreeNode[];
+}
+
+function levelLabel(index: number): string {
+  return LEVEL_LABELS[index] ?? `Level ${index + 1}`;
+}
+
+function levelPlaceholder(index: number): string {
+  return `Select ${levelLabel(index).toLowerCase()}`;
 }
 
 export function CategoryTreePicker({ value, onChange }: Props) {
@@ -97,40 +114,49 @@ export function CategoryTreePicker({ value, onChange }: Props) {
   }
 
   const breadcrumb = ancestry?.map((node) => node.name).join(" / ");
+  const canGoDeeper = Boolean(value && ancestry && ancestry[ancestry.length - 1]?.children.length);
 
   return (
-    <fieldset className="space-y-3">
-      <legend className="text-sm font-medium">Category</legend>
-      {breadcrumb ? <p className="text-xs text-mute">{breadcrumb}</p> : null}
-      <div className="space-y-3">
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <p className="text-sm font-medium">Category</p>
+        {breadcrumb ? <p className="text-xs text-mute">{breadcrumb}</p> : null}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
         {levels.map((options, levelIndex) => {
-          const selected = selectedIds[levelIndex];
+          const selected = selectedIds[levelIndex] ?? null;
+          const selectedName = options.find((item) => item._id === selected)?.name;
           return (
-            <div key={levelIndex} className="flex flex-wrap gap-2">
-              {options.map((node) => {
-                const on = node._id === selected;
-                return (
-                  <button
-                    key={node._id}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => pickAtLevel(node)}
-                    className={cn(
-                      "inline-flex h-10 items-center rounded-full px-4 text-sm font-medium transition active:scale-95 active:opacity-50",
-                      on ? "bg-ink text-canvas" : "bg-canvas text-ink ring-1 ring-inset ring-hairline",
-                    )}
-                  >
-                    {node.name}
-                  </button>
-                );
-              })}
-            </div>
+            <Field key={levelIndex}>
+              <FieldLabel>{levelLabel(levelIndex)}</FieldLabel>
+              <Select
+                value={selected}
+                onValueChange={(next) => {
+                  if (!next) return;
+                  const node = options.find((item) => item._id === next);
+                  if (node) pickAtLevel(node);
+                }}
+              >
+                <SelectTrigger className="h-10 w-full rounded-full border-transparent bg-muted px-4 shadow-none">
+                  <SelectValue placeholder={levelPlaceholder(levelIndex)}>
+                    {selectedName}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="rounded-none">
+                  {options.map((node) => (
+                    <SelectItem key={node._id} value={node._id}>
+                      {node.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           );
         })}
       </div>
-      {value && ancestry && ancestry[ancestry.length - 1]?.children.length ? (
-        <p className="text-xs text-mute">Pick a more specific type below, or keep this level.</p>
+      {canGoDeeper ? (
+        <FieldDescription>Pick a more specific type below, or keep this level.</FieldDescription>
       ) : null}
-    </fieldset>
+    </div>
   );
 }

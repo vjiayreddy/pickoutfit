@@ -543,6 +543,47 @@ export const vCartView = v.object({
   totalInr: v.number(),
 });
 
+/** One product line inside a vendor's view of a shopper's bag. */
+export const vVendorCartLineView = v.object({
+  id: v.id("cartItems"),
+  productId: v.id("products"),
+  variantId: v.union(v.id("productVariants"), v.null()),
+  variantLabel: v.union(v.string(), v.null()),
+  name: v.string(),
+  quantity: v.number(),
+  priceInr: v.number(),
+  imageUrl: v.union(v.string(), v.null()),
+  available: v.boolean(),
+  addedFrom: v.union(
+    v.literal("similar"),
+    v.literal("outfit"),
+    v.literal("agent"),
+    v.literal("rail"),
+    v.literal("store"),
+    v.null(),
+  ),
+  addedAt: v.number(),
+});
+
+/** Shopper bag scoped to this vendor's products, with contact for outreach. */
+export const vVendorCartShopperView = v.object({
+  userId: v.id("users"),
+  name: v.string(),
+  email: v.union(v.string(), v.null()),
+  /** From a previous order when the shopper has checked out before; null otherwise. */
+  phone: v.union(v.string(), v.null()),
+  cartUpdatedAt: v.number(),
+  itemCount: v.number(),
+  totalInr: v.number(),
+  lines: v.array(vVendorCartLineView),
+});
+
+export const vVendorCartListView = v.object({
+  shoppers: v.array(vVendorCartShopperView),
+  shopperCount: v.number(),
+  lineCount: v.number(),
+});
+
 export const vOrderItemView = v.object({
   id: v.id("orderItems"),
   productId: v.union(v.id("products"), v.null()),

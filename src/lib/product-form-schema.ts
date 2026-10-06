@@ -108,7 +108,11 @@ export const productFormSchema = z
     material: z.string().max(60, "Material must be 60 characters or fewer."),
     size: z.string().max(24, "Size must be 24 characters or fewer."),
     ageGroup: z.union([z.enum(AGE_GROUPS), z.literal("")]),
-    occasion: z.union([z.enum(OCCASIONS), z.literal("")]),
+    occasion: z.union([z.enum(OCCASIONS), z.literal("")]).superRefine((value, ctx) => {
+      if (value === "") {
+        ctx.addIssue({ code: "custom", message: "Pick an occasion." });
+      }
+    }),
     customAttributes: z.array(attrRowSchema),
     infoSections: z.array(infoRowSchema).max(MAX_INFO_SECTIONS),
     priceInr: moneyString("Price", true),

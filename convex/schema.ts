@@ -500,15 +500,17 @@ export default defineSchema({
     .index("by_parentId", ["parentId"]),
 
   /**
-   * Per-store option dimensions (Size, Colour, etc.).
-   * Products opt in via `variantTypeIds`. `vendorId` optional for legacy rows.
+   * Per-store fashion attribute kinds (Colour, Size, Fabric, Fit…).
+   * Shared vocabulary for filters, PDP traits, and variant recipes.
    */
-  variantTypes: defineTable({
-    vendorId: v.optional(v.id("vendors")),
+  attributeTypes: defineTable({
+    vendorId: v.id("vendors"),
     label: v.string(),
+    displayLabel: v.string(),
     slug: v.string(),
-    sortOrder: v.number(),
     isActive: v.boolean(),
+    isEnableFilter: v.boolean(),
+    sortOrder: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -517,7 +519,70 @@ export default defineSchema({
     .index("by_vendorId_and_sortOrder", ["vendorId", "sortOrder"]),
 
   /**
+   * Concrete attribute values under a type (Navy, Cotton, Slim…),
+   * optionally scoped to product categories.
+   */
+  attributes: defineTable({
+    vendorId: v.id("vendors"),
+    attributeTypeId: v.id("attributeTypes"),
+    label: v.string(),
+    value: v.string(),
+    slug: v.string(),
+    categoryIds: v.array(v.id("categories")),
+    mediaStorageId: v.optional(v.id("_storage")),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_attributeTypeId", ["vendorId", "attributeTypeId"])
+    .index("by_attributeTypeId_and_slug", ["attributeTypeId", "slug"])
+    .index("by_attributeTypeId_and_value", ["attributeTypeId", "value"]),
+
+  /**
+   * Admin recipe: attributeType + categories + selected attributes.
+   * Upsert syncs a linked `variantTypes` row and its `variantOptions`.
+   */
+  variantCategories: defineTable({
+    vendorId: v.id("vendors"),
+    title: v.string(),
+    slug: v.string(),
+    attributeTypeId: v.id("attributeTypes"),
+    categoryIds: v.array(v.id("categories")),
+    attributeIds: v.array(v.id("attributes")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_slug", ["vendorId", "slug"])
+    .index("by_vendorId_and_attributeTypeId", ["vendorId", "attributeTypeId"]),
+
+  /**
+   * Per-store option dimensions (Size, Colour, etc.).
+   * Products opt in via `variantTypeIds`. `vendorId` optional for legacy rows.
+   * When created from a `variantCategories` recipe, `variantCategoryId` is set.
+   */
+  variantTypes: defineTable({
+    vendorId: v.optional(v.id("vendors")),
+    label: v.string(),
+    slug: v.string(),
+    sortOrder: v.number(),
+    isActive: v.boolean(),
+    attributeTypeId: v.optional(v.id("attributeTypes")),
+    categoryIds: v.optional(v.array(v.id("categories"))),
+    variantCategoryId: v.optional(v.id("variantCategories")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_slug", ["vendorId", "slug"])
+    .index("by_vendorId_and_sortOrder", ["vendorId", "sortOrder"])
+    .index("by_variantCategoryId", ["variantCategoryId"])
+    .index("by_attributeTypeId", ["attributeTypeId"]),
+
+  /**
    * Values on a dimension (Payload `variantOptions`): S/M/L, Black/Navy, etc.
+   * Recipe-synced options also keep `attributeId` back to the catalog attribute.
    */
   variantOptions: defineTable({
     variantTypeId: v.id("variantTypes"),
@@ -525,11 +590,13 @@ export default defineSchema({
     value: v.string(),
     sortOrder: v.number(),
     isActive: v.boolean(),
+    attributeId: v.optional(v.id("attributes")),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_variantTypeId_and_sortOrder", ["variantTypeId", "sortOrder"])
-    .index("by_variantTypeId_and_value", ["variantTypeId", "value"]),
+    .index("by_variantTypeId_and_value", ["variantTypeId", "value"])
+    .index("by_variantTypeId_and_attributeId", ["variantTypeId", "attributeId"]),
 
   /**
    * Per-store fashion brands (Nike, Louis Philippe, …).
@@ -776,7 +843,8 @@ export default defineSchema({
     .index("by_cartId", ["cartId"])
     .index("by_cartId_and_productId", ["cartId", "productId"])
     .index("by_cartId_and_productId_and_variantId", ["cartId", "productId", "variantId"])
-    .index("by_userId", ["userId"]),
+    .index("by_userId", ["userId"])
+    .index("by_vendorId", ["vendorId"]),
 
   /** Buyer fields are a snapshot so sales history survives account deletion. */
   orders: defineTable({

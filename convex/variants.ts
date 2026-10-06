@@ -29,29 +29,16 @@ async function canManageOwnVariants(ctx: Parameters<typeof requireVendor>[0]): P
   }
 }
 
-function toCatalogView(
-  rows: Awaited<ReturnType<typeof loadVariantCatalog>>,
-): Array<{
-  id: (typeof rows)[number]["_id"];
-  label: string;
-  slug: string;
-  sortOrder: number;
-  isActive: boolean;
-  options: Array<{
-    id: (typeof rows)[number]["options"][number]["_id"];
-    variantTypeId: (typeof rows)[number]["options"][number]["variantTypeId"];
-    label: string;
-    value: string;
-    sortOrder: number;
-    isActive: boolean;
-  }>;
-}> {
+function toCatalogView(rows: Awaited<ReturnType<typeof loadVariantCatalog>>) {
   return rows.map((row) => ({
     id: row._id,
     label: row.label,
     slug: row.slug,
     sortOrder: row.sortOrder,
     isActive: row.isActive,
+    attributeTypeId: row.attributeTypeId ?? null,
+    categoryIds: row.categoryIds ?? [],
+    variantCategoryId: row.variantCategoryId ?? null,
     options: row.options.map((option) => ({
       id: option._id,
       variantTypeId: option.variantTypeId,
@@ -59,6 +46,7 @@ function toCatalogView(
       value: option.value,
       sortOrder: option.sortOrder,
       isActive: option.isActive,
+      attributeId: option.attributeId ?? null,
     })),
   }));
 }

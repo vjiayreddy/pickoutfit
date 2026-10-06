@@ -98,6 +98,9 @@ export const vVariantTypeDoc = v.object({
   slug: v.string(),
   sortOrder: v.number(),
   isActive: v.boolean(),
+  attributeTypeId: v.optional(v.id("attributeTypes")),
+  categoryIds: v.optional(v.array(v.id("categories"))),
+  variantCategoryId: v.optional(v.id("variantCategories")),
   createdAt: v.number(),
   updatedAt: v.number(),
 });
@@ -110,6 +113,7 @@ export const vVariantOptionDoc = v.object({
   value: v.string(),
   sortOrder: v.number(),
   isActive: v.boolean(),
+  attributeId: v.optional(v.id("attributes")),
   createdAt: v.number(),
   updatedAt: v.number(),
 });
@@ -121,6 +125,7 @@ export const vVariantOptionView = v.object({
   value: v.string(),
   sortOrder: v.number(),
   isActive: v.boolean(),
+  attributeId: v.union(v.id("attributes"), v.null()),
 });
 
 export const vVariantTypeView = v.object({
@@ -129,5 +134,8 @@ export const vVariantTypeView = v.object({
   slug: v.string(),
   sortOrder: v.number(),
   isActive: v.boolean(),
+  attributeTypeId: v.union(v.id("attributeTypes"), v.null()),
+  categoryIds: v.array(v.id("categories")),
+  variantCategoryId: v.union(v.id("variantCategories"), v.null()),
   options: v.array(vVariantOptionView),
 });

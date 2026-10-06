@@ -363,6 +363,27 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     }
   }, [catalog, product]);
 
+  /** Prefer recipe-synced types that match this product's category. */
+  const sortedCatalog = useMemo(() => {
+    if (!catalog) return [];
+    const categoryId = draft.categoryId;
+    return [...catalog].sort((a, b) => {
+      const aMatch =
+        categoryId && a.categoryIds.length > 0
+          ? a.categoryIds.includes(categoryId as Id<"categories">)
+          : false;
+      const bMatch =
+        categoryId && b.categoryIds.length > 0
+          ? b.categoryIds.includes(categoryId as Id<"categories">)
+          : false;
+      if (aMatch !== bMatch) return aMatch ? -1 : 1;
+      const aRecipe = Boolean(a.variantCategoryId);
+      const bRecipe = Boolean(b.variantCategoryId);
+      if (aRecipe !== bRecipe) return aRecipe ? -1 : 1;
+      return a.sortOrder - b.sortOrder || a.label.localeCompare(b.label);
+    });
+  }, [catalog, draft.categoryId]);
+
   const enabledTypes = useMemo(() => {
     if (!catalog) return [];
     return catalog.filter((type) => draft.variantTypeIds.includes(type.id));
@@ -964,27 +985,73 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 }));
               }}
             />
-            <ChoiceGroup
-              legend="Audience"
-              value={draft.presentation}
-              onChange={(next) => set("presentation", next as Presentation)}
-              options={AUDIENCE}
-            />
-            <div className="grid gap-6 sm:grid-cols-2">
-              <ChoiceGroup
-                legend="Age"
-                value={draft.ageGroup}
-                onChange={(next) => set("ageGroup", next as AgeGroup | "")}
-                options={AGE_GROUPS.map((item) => ({ value: item, label: AGE_GROUP_LABELS[item] }))}
-                clearable
-              />
-              <ChoiceGroup
-                legend="Occasion"
-                value={draft.occasion}
-                onChange={(next) => set("occasion", next as Occasion | "")}
-                options={OCCASIONS.map((item) => ({ value: item, label: OCCASION_LABELS[item] }))}
-                clearable
-              />
+            <EditorField label="Audience">
+              <Select
+                value={draft.presentation}
+                onValueChange={(next) => {
+                  if (!next) return;
+                  set("presentation", next as Presentation);
+                }}
+              >
+                <SelectTrigger className="h-10 w-full rounded-full border-transparent bg-muted px-4 shadow-none">
+                  <SelectValue placeholder="Select audience">
+                    {AUDIENCE.find((option) => option.value === draft.presentation)?.label}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="rounded-none">
+                  {AUDIENCE.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </EditorField>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <EditorField label="Age">
+                <Select
+                  value={draft.ageGroup || null}
+                  onValueChange={(next) => set("ageGroup", (next as AgeGroup | null) ?? "")}
+                >
+                  <SelectTrigger className="h-10 w-full rounded-full border-transparent bg-muted px-4 shadow-none">
+                    <SelectValue placeholder="Select age">
+                      {draft.ageGroup ? AGE_GROUP_LABELS[draft.ageGroup] : null}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="rounded-none">
+                    {AGE_GROUPS.map((item) => (
+                      <SelectItem key={item} value={item}>
+                        {AGE_GROUP_LABELS[item]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </EditorField>
+              <EditorField label="Occasion" error={errors.occasion?.message}>
+                <Select
+                  value={draft.occasion || null}
+                  onValueChange={(next) => {
+                    if (!next) return;
+                    set("occasion", next as Occasion);
+                  }}
+                >
+                  <SelectTrigger
+                    className="h-10 w-full rounded-full border-transparent bg-muted px-4 shadow-none"
+                    aria-invalid={Boolean(errors.occasion)}
+                  >
+                    <SelectValue placeholder="Select occasion">
+                      {draft.occasion ? OCCASION_LABELS[draft.occasion] : null}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="rounded-none">
+                    {OCCASIONS.map((item) => (
+                      <SelectItem key={item} value={item}>
+                        {OCCASION_LABELS[item]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </EditorField>
             </div>
             </AccordionContent>
           </AccordionItem>
@@ -1389,11 +1456,17 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
             <AccordionTrigger className="rounded-none py-4 hover:no-underline">
               <SectionHead
                 title="Variants & stock"
-                hint="Enable Size / Colour, then set stock per SKU. Manage the option lists in Variants."
+                hint="Enable dimensions (from Variants or Attribute recipes), then set stock per SKU."
               />
             </AccordionTrigger>
             <AccordionContent className="space-y-4 pb-6">
             <div className="flex flex-wrap justify-end gap-2">
+                <Button href={routes.vendorAttributes} variant="ghost" size="sm">
+                  Attributes
+                </Button>
+                <Button href={routes.vendorVariantCategories} variant="ghost" size="sm">
+                  Recipes
+                </Button>
                 <Button href={routes.vendorVariants} variant="ghost" size="sm">
                   Manage options
                 </Button>
@@ -1422,8 +1495,10 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
               <p className="text-sm font-medium">Option dimensions</p>
               {catalog === undefined || seedingCatalog ? (
                 <p className="text-sm text-muted-foreground">Loading size and colour options…</p>
-              ) : catalog.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No variant catalog yet. Refresh after seeding completes.</p>
+              ) : sortedCatalog.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No variant catalog yet. Seed Size/Colour under Variants, or create an Attribute recipe.
+                </p>
               ) : (
                 <ToggleGroup
                   multiple
@@ -1433,7 +1508,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                   spacing={2}
                   className="flex flex-wrap"
                 >
-                  {catalog.map((type) => (
+                  {sortedCatalog.map((type) => (
                     <ToggleGroupItem
                       key={type.id}
                       value={type.id}
@@ -1674,42 +1749,6 @@ function EditorField({
       {children}
       {hint ? <FieldDescription>{hint}</FieldDescription> : null}
       {error ? <FieldError>{error}</FieldError> : null}
-    </Field>
-  );
-}
-
-function ChoiceGroup({
-  legend,
-  value,
-  onChange,
-  options,
-}: {
-  legend: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: readonly { value: string; label: string }[];
-  clearable?: boolean;
-}) {
-  return (
-    <Field>
-      <FieldLabel>{legend}</FieldLabel>
-      <ToggleGroup
-        value={value ? [value] : []}
-        onValueChange={(next) => onChange(next[0] ?? "")}
-        spacing={2}
-        className="flex flex-wrap"
-      >
-        {options.map((option) => (
-          <ToggleGroupItem
-            key={option.value}
-            value={option.value}
-            size="sm"
-            className="h-8 rounded-full px-3 aria-pressed:bg-primary aria-pressed:text-primary-foreground"
-          >
-            {option.label}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
     </Field>
   );
 }
