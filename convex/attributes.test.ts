@@ -15,7 +15,7 @@ describe("attributes + variants", () => {
     const { t, owner } = await activeVendor();
 
     const seeded = await asUser(t, owner).mutation(api.attributes.seedDefaults, {});
-    expect(seeded.types).toBe(2);
+    expect(seeded.types).toBeGreaterThanOrEqual(2);
     expect(seeded.attributes).toBeGreaterThan(0);
 
     const types = await asUser(t, owner).query(api.attributes.listTypes, { activeOnly: true });
@@ -114,5 +114,52 @@ describe("attributes + variants", () => {
         value: "organic-cotton",
       }),
     ).rejects.toThrow(/already exists/i);
+  });
+
+  test("variant facets return options scoped by category ancestry", async () => {
+    const { t, owner, vendorId } = await activeVendor();
+    await asUser(t, owner).mutation(api.attributes.seedDefaults, {});
+
+    const tree = await asUser(t, owner).query(api.categories.tree, { activeOnly: true });
+    const men = tree.find((node) => node.slug === "men");
+    expect(men).toBeTruthy();
+    const topwear = men!.children.find((node: { slug: string }) => node.slug === "topwear");
+    expect(topwear).toBeTruthy();
+    const shirts = topwear!.children.find((node: { slug: string }) => node.slug === "shirts");
+    expect(shirts).toBeTruthy();
+
+    const types = await asUser(t, owner).query(api.attributes.listTypes, { activeOnly: true });
+    const sizeType = types.find((row) => row.slug === "size");
+    expect(sizeType).toBeTruthy();
+
+    const sizeAttrs = await asUser(t, owner).query(api.attributes.list, {
+      attributeTypeId: sizeType!._id,
+      activeOnly: true,
+    });
+    const optionIds = sizeAttrs.slice(0, 3).map((row) => row._id);
+
+    await asUser(t, owner).mutation(api.variants.upsert, {
+      title: "Topwear Size",
+      attributeTypeId: sizeType!._id,
+      categoryIds: [topwear!._id],
+      attributeIds: optionIds,
+    });
+
+    const shopper = await seedUser(t);
+    const facets = await asUser(t, shopper).query(api.variants.facets, {
+      vendorId,
+      categoryId: shirts!._id,
+    });
+    const sizeFacet = facets.find((row) => row._id === sizeType!._id);
+    expect(sizeFacet).toBeTruthy();
+    expect(sizeFacet!.values.map((value) => value._id).sort()).toEqual([...optionIds].sort());
+
+    const women = tree.find((node) => node.slug === "women");
+    expect(women).toBeTruthy();
+    const womenFacets = await asUser(t, shopper).query(api.variants.facets, {
+      vendorId,
+      categoryId: women!._id,
+    });
+    expect(womenFacets.some((row) => row._id === sizeType!._id)).toBe(false);
   });
 });

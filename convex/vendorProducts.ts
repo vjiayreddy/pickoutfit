@@ -15,6 +15,10 @@ import {
   updateProduct,
 } from "./model/products";
 import {
+  groupAttributeIdsByType,
+  productMatchesFilters,
+} from "./shared/productFilters";
+import {
   vAgeGroup,
   vInventoryReason,
   vOccasion,
@@ -66,9 +70,14 @@ const vProductFields = {
 };
 
 export const list = query({
-  args: { status: v.optional(vProductStatus), paginationOpts: paginationOptsValidator },
+  args: {
+    status: v.optional(vProductStatus),
+    categoryPath: v.optional(v.string()),
+    attributeIds: v.optional(v.array(v.id("attributes"))),
+    paginationOpts: paginationOptsValidator,
+  },
   returns: paginationResultValidator(vProductView),
-  handler: async (ctx, { status, paginationOpts }) => {
+  handler: async (ctx, { status, categoryPath, attributeIds, paginationOpts }) => {
     const { vendor } = await requireVendor(ctx);
     const result = status
       ? await ctx.db
@@ -81,7 +90,35 @@ export const list = query({
           .withIndex("by_vendorId_and_status", (q) => q.eq("vendorId", vendor._id))
           .order("desc")
           .paginate(paginationOpts);
-    return { ...result, page: await toProductViews(ctx, result.page) };
+
+    const page = await toProductViews(ctx, result.page);
+    const filterPath = categoryPath?.trim() ?? "";
+    const ids = attributeIds ?? [];
+    if (!filterPath && ids.length === 0) {
+      return { ...result, page };
+    }
+
+    const typeById = new Map<string, string>();
+    for (const id of ids) {
+      const row = await ctx.db.get(id);
+      if (row && row.vendorId === vendor._id) {
+        typeById.set(row._id, row.attributeTypeId);
+      }
+    }
+    const selectedByType = groupAttributeIdsByType(ids, typeById);
+    const filtered = page.filter((product) =>
+      productMatchesFilters(
+        {
+          categoryPath: product.categoryPath,
+          variants: product.variants.map((variant) => ({
+            active: variant.active,
+            attributeIds: variant.attributeIds,
+          })),
+        },
+        { categoryPath: filterPath || null, selectedByType },
+      ),
+    );
+    return { ...result, page: filtered };
   },
 });
 

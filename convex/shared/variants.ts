@@ -28,6 +28,7 @@ export const vVariantCatalogOption = v.object({
   variantCategoryId: v.id("variantCategories"),
   label: v.string(),
   value: v.string(),
+  slug: v.string(),
   sortOrder: v.number(),
   isActive: v.boolean(),
   hex: v.union(v.string(), v.null()),

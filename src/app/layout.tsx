@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Bebas_Neue, Geist, Geist_Mono } from "next/font/google";
+import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 import { AppToaster } from "@/components/pwa/app-toaster";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
@@ -60,11 +61,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="flex min-h-full flex-col">
         <ConvexClientProvider initialToken={initialToken}>
-          <TooltipProvider>
-            {children}
-            <AppToaster />
-            <RegisterServiceWorker />
-          </TooltipProvider>
+          <NuqsAdapter>
+            <TooltipProvider>
+              {children}
+              <AppToaster />
+              <RegisterServiceWorker />
+            </TooltipProvider>
+          </NuqsAdapter>
         </ConvexClientProvider>
       </body>
     </html>

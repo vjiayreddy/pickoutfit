@@ -1,13 +1,13 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { assertVendorWritable, getVendorContext, requireVendor } from "./lib/auth";
+import { assertVendorWritable, getVendorContext, requireUser, requireVendor } from "./lib/auth";
 import {
   listVariantCategories,
   removeVariantCategory,
   upsertVariantCategory,
 } from "./model/variantCategories";
-import { loadVariantCatalog } from "./model/variants";
-import { vVariantCategoryView } from "./shared/attributes";
+import { listVariantFilterFacets, loadVariantCatalog } from "./model/variants";
+import { vAttributeFacetType, vVariantCategoryView } from "./shared/attributes";
 import { vVariantCatalogRow } from "./shared/variants";
 
 /** Store managers/owners edit Variants for their own catalog. */
@@ -46,6 +46,28 @@ export const catalog = query({
     const context = await getVendorContext(ctx);
     if (!context) return [];
     return loadVariantCatalog(ctx, context.vendor._id);
+  },
+});
+
+/**
+ * Public PLP facets from variant categories (SKU axes).
+ * Options merged by attribute type; scoped by optional taxonomy category.
+ */
+export const facets = query({
+  args: {
+    vendorId: v.id("vendors"),
+    categoryId: v.optional(v.id("categories")),
+  },
+  returns: v.array(vAttributeFacetType),
+  handler: async (ctx, { vendorId, categoryId }) => {
+    await requireUser(ctx);
+    const vendor = await ctx.db.get(vendorId);
+    if (!vendor || vendor.status === "closed") return [];
+    if (categoryId) {
+      const category = await ctx.db.get(categoryId);
+      if (!category || category.vendorId !== vendorId) return [];
+    }
+    return listVariantFilterFacets(ctx, vendorId, { categoryId });
   },
 });
 

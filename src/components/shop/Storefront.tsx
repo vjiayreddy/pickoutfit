@@ -4,20 +4,29 @@ import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { Store } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_LABELS, type ProductCategory } from "@convex/shared/products";
+import {
+  groupAttributeIdsByType,
+  productMatchesFilters,
+} from "@convex/shared/productFilters";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppHeaderTitle } from "@/components/layout/app-header";
+import { ProductFilterLayout } from "@/components/shop/ProductFilters";
 import { ShopProductCard } from "@/components/shop/ShopProductCard";
 import { StoreOfferBanner } from "@/components/shop/StoreOfferBanner";
 import { Button } from "@/components/ui/button";
 import { reportError } from "@/lib/client-errors";
-import { cn } from "@/lib/cn";
 import { formatInr } from "@/lib/format";
+import {
+  attributeIdsFromFacetParams,
+  facetParamsFromAttributeIds,
+  parseFacetSearchParams,
+  storeCatalogHref,
+} from "@/lib/product-filters";
 import { routes } from "@/lib/routes";
 
 type StorefrontProduct = NonNullable<FunctionReturnType<typeof api.products.storefront>>["products"][number];
@@ -40,12 +49,83 @@ function groupLooks(products: StorefrontProduct[]): Look[] {
   return [...byUpload.values()].filter((look) => look.products.length > 1);
 }
 
-export function Storefront({ slug }: { slug: string }) {
+export function Storefront({
+  slug,
+  categoryPath = "",
+}: {
+  slug: string;
+  categoryPath?: string;
+}) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const data = useQuery(api.products.storefront, { slug });
   const add = useMutation(api.cart.add);
-  const [category, setCategory] = useState<ProductCategory | "all">("all");
   const [pendingId, setPendingId] = useState<Id<"products"> | null>(null);
+
+  const facetParams = useMemo(
+    () => parseFacetSearchParams(searchParams),
+    [searchParams],
+  );
+  const facets = useQuery(
+    api.variants.facets,
+    data ? { vendorId: data.vendor._id } : "skip",
+  );
+  const attributeIds = useMemo(
+    () => attributeIdsFromFacetParams(facets ?? [], facetParams),
+    [facets, facetParams],
+  );
+
+  const typeById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const type of facets ?? []) {
+      for (const value of type.values) {
+        map.set(value._id, type._id);
+      }
+    }
+    return map;
+  }, [facets]);
+  const selectedByType = useMemo(
+    () => groupAttributeIdsByType(attributeIds, typeById),
+    [attributeIds, typeById],
+  );
+  const hasActiveFilters = Boolean(categoryPath) || attributeIds.length > 0;
+
+  const shown = useMemo(() => {
+    if (!data) return [];
+    return data.products.filter((product) =>
+      productMatchesFilters(
+        {
+          categoryPath: product.categoryPath,
+          variants: product.variants.map((variant) => ({
+            active: variant.active,
+            attributeIds: variant.attributeIds,
+          })),
+        },
+        { categoryPath: categoryPath || null, selectedByType },
+      ),
+    );
+  }, [data, categoryPath, selectedByType]);
+
+  function navigateFilters(next: {
+    categoryPath?: string;
+    attributeIds?: string[];
+    clearFacets?: boolean;
+  }) {
+    if (!data) return;
+    const nextCategory =
+      next.categoryPath !== undefined ? next.categoryPath : categoryPath;
+    const nextIds = next.clearFacets ? [] : (next.attributeIds ?? attributeIds);
+    const nextFacets =
+      nextIds.length > 0 && facets
+        ? facetParamsFromAttributeIds(facets, nextIds)
+        : {};
+    router.push(
+      storeCatalogHref(data.vendor.slug, {
+        categoryPath: nextCategory,
+        facets: nextFacets,
+      }),
+    );
+  }
 
   if (data === undefined) return <div className="h-64 animate-pulse bg-soft-cloud" />;
   if (data === null) {
@@ -60,8 +140,6 @@ export function Storefront({ slug }: { slug: string }) {
   }
 
   const { vendor, products, liveOffer } = data;
-  const categories = PRODUCT_CATEGORIES.filter((c) => products.some((p) => p.category === c));
-  const shown = category === "all" ? products : products.filter((p) => p.category === category);
   const looks = groupLooks(products);
 
   async function addToBag(product: (typeof products)[number]) {
@@ -106,7 +184,7 @@ export function Storefront({ slug }: { slug: string }) {
         </div>
       </header>
 
-      {looks.length > 0 && category === "all" ? (
+      {looks.length > 0 && !hasActiveFilters ? (
         <section className="space-y-3" aria-label="Shop the look">
           <h2 className="text-lg font-medium tracking-tight">Shop the look</h2>
           <ul className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
@@ -141,35 +219,38 @@ export function Storefront({ slug }: { slug: string }) {
         </section>
       ) : null}
 
-      {categories.length > 1 ? (
-        <div className="flex flex-wrap gap-2">
-          {(["all", ...categories] as const).map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setCategory(item)}
-              className={cn("h-10 rounded-full px-4 text-sm font-medium", category === item ? "bg-ink text-canvas" : "bg-canvas ring-1 ring-inset ring-hairline")}
-            >
-              {item === "all" ? "Everything" : PRODUCT_CATEGORY_LABELS[item]}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {shown.length === 0 ? (
-        <EmptyState icon={Store} title="Nothing here yet" description="This store hasn't published any pieces." />
-      ) : (
-        <ul className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
-          {shown.map((product) => (
-            <ShopProductCard
-              key={product.id}
-              product={product}
-              pending={pendingId === product.id}
-              onAdd={() => void addToBag(product)}
-            />
-          ))}
-        </ul>
-      )}
+      <ProductFilterLayout
+        vendorId={vendor._id}
+        categoryPath={categoryPath}
+        attributeIds={attributeIds}
+        onCategoryPathChange={(path) =>
+          navigateFilters({ categoryPath: path, clearFacets: true })
+        }
+        onAttributeIdsChange={(ids) => navigateFilters({ attributeIds: ids })}
+      >
+        {shown.length === 0 ? (
+          <EmptyState
+            icon={Store}
+            title={hasActiveFilters ? "No products match these filters" : "Nothing here yet"}
+            description={
+              hasActiveFilters
+                ? "Try clearing a filter or picking another category."
+                : "This store hasn't published any pieces."
+            }
+          />
+        ) : (
+          <ul className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-3">
+            {shown.map((product) => (
+              <ShopProductCard
+                key={product.id}
+                product={product}
+                pending={pendingId === product.id}
+                onAdd={() => void addToBag(product)}
+              />
+            ))}
+          </ul>
+        )}
+      </ProductFilterLayout>
     </div>
   );
 }

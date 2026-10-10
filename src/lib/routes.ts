@@ -36,6 +36,10 @@ export const routes = {
   vendorSignUp: "/vendor/sign-up",
   vendorRegister: "/vendor/register",
   vendorProducts: "/vendor/products",
+  vendorProductsCategory: (categoryPath?: string | null) => {
+    const path = categoryPath?.replace(/^\/+|\/+$/g, "");
+    return path ? `/vendor/products/${path}` : "/vendor/products";
+  },
   vendorNewProduct: "/vendor/products/new",
   vendorImport: "/vendor/products/import",
   vendorProduct: (productId: Id<"products"> | string) => `/vendor/products/${productId}`,

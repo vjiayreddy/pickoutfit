@@ -88,6 +88,7 @@ import type * as shared_credits from "../shared/credits.js";
 import type * as shared_demo_wardrobe from "../shared/demo_wardrobe.js";
 import type * as shared_grooming from "../shared/grooming.js";
 import type * as shared_jobs from "../shared/jobs.js";
+import type * as shared_productFilters from "../shared/productFilters.js";
 import type * as shared_productPhotoFill from "../shared/productPhotoFill.js";
 import type * as shared_products from "../shared/products.js";
 import type * as shared_services from "../shared/services.js";
@@ -203,6 +204,7 @@ declare const fullApi: ApiFromModules<{
   "shared/demo_wardrobe": typeof shared_demo_wardrobe;
   "shared/grooming": typeof shared_grooming;
   "shared/jobs": typeof shared_jobs;
+  "shared/productFilters": typeof shared_productFilters;
   "shared/productPhotoFill": typeof shared_productPhotoFill;
   "shared/products": typeof shared_products;
   "shared/services": typeof shared_services;

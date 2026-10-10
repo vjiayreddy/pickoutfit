@@ -71,6 +71,25 @@ export const vAttributeListRow = vAttributeDoc.extend({
   attributeTypeLabel: v.string(),
 });
 
+/** Public PLP facet value (active, filterable types only). */
+export const vAttributeFacetValue = v.object({
+  _id: v.id("attributes"),
+  label: v.string(),
+  value: v.string(),
+  slug: v.string(),
+  hex: v.union(v.string(), v.null()),
+  mediaUrl: v.union(v.string(), v.null()),
+});
+
+export const vAttributeFacetType = v.object({
+  _id: v.id("attributeTypes"),
+  label: v.string(),
+  displayLabel: v.string(),
+  slug: v.string(),
+  sortOrder: v.number(),
+  values: v.array(vAttributeFacetValue),
+});
+
 export const vVariantCategoryDoc = v.object({
   _id: v.id("variantCategories"),
   _creationTime: v.number(),

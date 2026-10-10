@@ -2,12 +2,32 @@ import type { Infer } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { appError } from "../lib/errors";
+import { categoryScopeMatches, type CategoryTreeNode } from "../shared/categories";
 import type { vVariantOptionRef } from "../shared/products";
 import { COLOUR_HEX } from "../shared/variants";
+import { getTree } from "./categories";
 import { listVariantCategories } from "./variantCategories";
 
 type Ctx = QueryCtx | MutationCtx;
 export type VariantOptionRef = Infer<typeof vVariantOptionRef>;
+
+export type VariantFacetValue = {
+  _id: Id<"attributes">;
+  label: string;
+  value: string;
+  slug: string;
+  hex: string | null;
+  mediaUrl: string | null;
+};
+
+export type VariantFacetType = {
+  _id: Id<"attributeTypes">;
+  label: string;
+  displayLabel: string;
+  slug: string;
+  sortOrder: number;
+  values: VariantFacetValue[];
+};
 
 export type VariantCatalogRow = {
   id: Id<"variantCategories">;
@@ -21,11 +41,86 @@ export type VariantCatalogRow = {
     variantCategoryId: Id<"variantCategories">;
     label: string;
     value: string;
+    slug: string;
     sortOrder: number;
     isActive: boolean;
     hex: string | null;
   }>;
 };
+
+/**
+ * PLP facets from variant categories (SKU axes), not product attributeSelections.
+ * Options are merged by attribute type; scoped by selected taxonomy category.
+ */
+export async function listVariantFilterFacets(
+  ctx: Ctx,
+  vendorId: Id<"vendors">,
+  opts: { categoryId?: Id<"categories"> } = {},
+): Promise<VariantFacetType[]> {
+  const catalog = await loadVariantCatalog(ctx, vendorId);
+  let tree: CategoryTreeNode[] | null = null;
+  if (opts.categoryId) {
+    tree = (await getTree(ctx, vendorId, { activeOnly: true })) as CategoryTreeNode[];
+  }
+
+  const byType = new Map<
+    string,
+    {
+      _id: Id<"attributeTypes">;
+      label: string;
+      displayLabel: string;
+      slug: string;
+      sortOrder: number;
+      values: Map<string, VariantFacetValue>;
+    }
+  >();
+
+  for (const recipe of catalog) {
+    if (opts.categoryId && tree) {
+      if (!categoryScopeMatches(opts.categoryId, recipe.categoryIds, tree)) continue;
+    }
+    const type = await ctx.db.get(recipe.attributeTypeId);
+    if (!type || !type.isActive) continue;
+
+    let group = byType.get(recipe.attributeTypeId);
+    if (!group) {
+      group = {
+        _id: type._id,
+        label: type.label,
+        displayLabel: type.displayLabel || type.label,
+        slug: type.slug,
+        sortOrder: type.sortOrder,
+        values: new Map(),
+      };
+      byType.set(recipe.attributeTypeId, group);
+    }
+
+    for (const option of recipe.options) {
+      if (!option.isActive) continue;
+      if (group.values.has(option.id)) continue;
+      group.values.set(option.id, {
+        _id: option.id,
+        label: option.label,
+        value: option.value,
+        slug: option.slug,
+        hex: option.hex,
+        mediaUrl: null,
+      });
+    }
+  }
+
+  return [...byType.values()]
+    .map((group) => ({
+      _id: group._id,
+      label: group.label,
+      displayLabel: group.displayLabel,
+      slug: group.slug,
+      sortOrder: group.sortOrder,
+      values: [...group.values.values()].sort((a, b) => a.label.localeCompare(b.label)),
+    }))
+    .filter((group) => group.values.length > 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+}
 
 /** Variants (recipes) + attribute options for the product editor. */
 export async function loadVariantCatalog(
@@ -46,6 +141,7 @@ export async function loadVariantCatalog(
         variantCategoryId: recipe._id,
         label: attr.label,
         value: attr.value,
+        slug: attr.slug,
         sortOrder: index,
         isActive: attr.isActive,
         hex: attr.hex ?? null,
