@@ -1,9 +1,10 @@
 import { v } from "convex/values";
+import { COLOUR_HEX, MAX_VARIANT_CATEGORIES } from "./variants";
 
 /** Soft caps so one vendor cannot blow the attribute tables. */
 export const MAX_ATTRIBUTE_TYPES = 40;
 export const MAX_ATTRIBUTES_PER_TYPE = 200;
-export const MAX_VARIANT_CATEGORIES = 40;
+export { MAX_VARIANT_CATEGORIES };
 
 export function attributeSlug(value: string): string {
   return value
@@ -13,6 +14,26 @@ export function attributeSlug(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
+}
+
+const HEX_RE = /^#([0-9a-fA-F]{6})$/;
+
+/** Normalize `#RGB` / `#RRGGBB` to lowercase `#rrggbb`, or null if invalid. */
+export function normalizeAttributeHex(value: string | undefined | null): string | null {
+  if (value == null) return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  const withHash = raw.startsWith("#") ? raw : `#${raw}`;
+  if (/^#[0-9a-fA-F]{3}$/.test(withHash)) {
+    const [, r, g, b] = withHash;
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  const match = HEX_RE.exec(withHash);
+  return match ? withHash.toLowerCase() : null;
+}
+
+export function isColourAttributeType(slug: string): boolean {
+  return slug === "colour" || slug === "color";
 }
 
 export const vAttributeTypeDoc = v.object({
@@ -37,6 +58,7 @@ export const vAttributeDoc = v.object({
   label: v.string(),
   value: v.string(),
   slug: v.string(),
+  hex: v.optional(v.string()),
   categoryIds: v.array(v.id("categories")),
   mediaStorageId: v.optional(v.id("_storage")),
   isActive: v.boolean(),
@@ -64,16 +86,15 @@ export const vVariantCategoryDoc = v.object({
 
 export const vVariantCategoryView = vVariantCategoryDoc.extend({
   attributeTypeLabel: v.string(),
-  variantTypeId: v.union(v.id("variantTypes"), v.null()),
   optionCount: v.number(),
 });
 
-/** Default attribute type + value seeds (aligned with SEED_VARIANT_TYPES). */
+/** Default attribute type + value seeds (Size, Colour, Audience, Age). */
 export const SEED_ATTRIBUTE_TYPES: Array<{
   label: string;
   displayLabel: string;
   slug: string;
-  values: Array<{ label: string; value: string }>;
+  values: Array<{ label: string; value: string; hex?: string }>;
 }> = [
   {
     label: "Size",
@@ -101,20 +122,41 @@ export const SEED_ATTRIBUTE_TYPES: Array<{
     displayLabel: "Colour",
     slug: "colour",
     values: [
-      { label: "Black", value: "black" },
-      { label: "White", value: "white" },
-      { label: "Navy", value: "navy" },
-      { label: "Grey", value: "grey" },
-      { label: "Beige", value: "beige" },
-      { label: "Brown", value: "brown" },
-      { label: "Red", value: "red" },
-      { label: "Blue", value: "blue" },
-      { label: "Green", value: "green" },
-      { label: "Pink", value: "pink" },
-      { label: "Yellow", value: "yellow" },
-      { label: "Orange", value: "orange" },
-      { label: "Purple", value: "purple" },
-      { label: "Multi", value: "multi" },
+      { label: "Black", value: "black", hex: COLOUR_HEX.black },
+      { label: "White", value: "white", hex: COLOUR_HEX.white },
+      { label: "Navy", value: "navy", hex: COLOUR_HEX.navy },
+      { label: "Grey", value: "grey", hex: COLOUR_HEX.grey },
+      { label: "Beige", value: "beige", hex: COLOUR_HEX.beige },
+      { label: "Brown", value: "brown", hex: COLOUR_HEX.brown },
+      { label: "Red", value: "red", hex: COLOUR_HEX.red },
+      { label: "Blue", value: "blue", hex: COLOUR_HEX.blue },
+      { label: "Green", value: "green", hex: COLOUR_HEX.green },
+      { label: "Pink", value: "pink", hex: COLOUR_HEX.pink },
+      { label: "Yellow", value: "yellow", hex: COLOUR_HEX.yellow },
+      { label: "Orange", value: "orange", hex: COLOUR_HEX.orange },
+      { label: "Purple", value: "purple", hex: COLOUR_HEX.purple },
+      { label: "Multi", value: "multi", hex: COLOUR_HEX.multi },
+    ],
+  },
+  {
+    label: "Audience",
+    displayLabel: "Audience",
+    slug: "audience",
+    values: [
+      { label: "Men", value: "men" },
+      { label: "Women", value: "women" },
+      { label: "Unisex", value: "unisex" },
+      { label: "Kids", value: "kids" },
+    ],
+  },
+  {
+    label: "Age",
+    displayLabel: "Age",
+    slug: "age",
+    values: [
+      { label: "Adult", value: "adult" },
+      { label: "Child", value: "child" },
+      { label: "All ages", value: "all" },
     ],
   },
 ];

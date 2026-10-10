@@ -14,6 +14,7 @@ import {
   LayoutGrid,
   LogOut,
   MessageCircle,
+  Package,
   Palette,
   Plus,
   Scissors,
@@ -353,6 +354,12 @@ function Sidebar({
         />
       </nav>
       <div className="flex flex-col gap-1 border-t border-hairline px-3 py-4">
+        <SidebarLink
+          href={routes.orders}
+          label="Orders"
+          icon={Package}
+          active={isActivePath(pathname, routes.orders)}
+        />
         <SidebarLink
           href={routes.settings}
           label="Settings"

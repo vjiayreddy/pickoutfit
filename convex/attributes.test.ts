@@ -10,8 +10,8 @@ async function activeVendor() {
   return { t, owner, vendorId };
 }
 
-describe("attributes + variantCategories", () => {
-  test("seed attribute catalog, create recipe, syncs variant type/options", async () => {
+describe("attributes + variants", () => {
+  test("seed attribute catalog, create variant, appears in catalog without sync table", async () => {
     const { t, owner } = await activeVendor();
 
     const seeded = await asUser(t, owner).mutation(api.attributes.seedDefaults, {});
@@ -32,37 +32,87 @@ describe("attributes + variantCategories", () => {
     expect(categories.length).toBeGreaterThan(0);
     const categoryId = categories[0]!._id;
 
-    const recipeId = await asUser(t, owner).mutation(api.variantCategories.upsert, {
+    const variantId = await asUser(t, owner).mutation(api.variants.upsert, {
       title: "Men Size",
       attributeTypeId: sizeType!._id,
       categoryIds: [categoryId],
       attributeIds: sizeAttrs.slice(0, 3).map((row) => row._id),
     });
 
-    const recipes = await asUser(t, owner).query(api.variantCategories.list, {});
-    const recipe = recipes.find((row) => row._id === recipeId);
-    expect(recipe).toBeTruthy();
-    expect(recipe!.variantTypeId).toBeTruthy();
-    expect(recipe!.optionCount).toBe(3);
+    const rows = await asUser(t, owner).query(api.variants.list, {});
+    const row = rows.find((item) => item._id === variantId);
+    expect(row).toBeTruthy();
+    expect(row!.optionCount).toBe(3);
 
-    const catalog = await asUser(t, owner).query(api.variants.catalog, { activeOnly: false });
-    const synced = catalog.find((row) => row.id === recipe!.variantTypeId);
-    expect(synced).toBeTruthy();
-    expect(synced!.label).toBe("Men Size");
-    expect(synced!.categoryIds).toEqual([categoryId]);
-    expect(synced!.options).toHaveLength(3);
-    expect(synced!.options.every((option) => option.attributeId !== null)).toBe(true);
+    const catalog = await asUser(t, owner).query(api.variants.catalog, {});
+    const catalogRow = catalog.find((item) => item.id === variantId);
+    expect(catalogRow).toBeTruthy();
+    expect(catalogRow!.label).toBe("Men Size");
+    expect(catalogRow!.categoryIds).toEqual([categoryId]);
+    expect(catalogRow!.options).toHaveLength(3);
 
-    // Update recipe options (drop one, keep two) and re-sync.
-    await asUser(t, owner).mutation(api.variantCategories.upsert, {
-      variantCategoryId: recipeId,
+    await asUser(t, owner).mutation(api.variants.upsert, {
+      variantCategoryId: variantId,
       title: "Men Size",
       attributeTypeId: sizeType!._id,
       categoryIds: [categoryId],
       attributeIds: sizeAttrs.slice(0, 2).map((row) => row._id),
     });
-    const after = await asUser(t, owner).query(api.variants.catalog, { activeOnly: false });
-    const updated = after.find((row) => row.id === recipe!.variantTypeId);
+    const after = await asUser(t, owner).query(api.variants.catalog, {});
+    const updated = after.find((item) => item.id === variantId);
     expect(updated!.options).toHaveLength(2);
+  });
+
+  test("create attribute requires value and rejects duplicates", async () => {
+    const { t, owner } = await activeVendor();
+    const typeId = await asUser(t, owner).mutation(api.attributes.createType, {
+      label: "Fabric",
+    });
+
+    const id = await asUser(t, owner).mutation(api.attributes.create, {
+      attributeTypeId: typeId,
+      label: "Cotton",
+      value: "cotton",
+    });
+    expect(id).toBeTruthy();
+
+    const rows = await asUser(t, owner).query(api.attributes.list, {
+      attributeTypeId: typeId,
+      activeOnly: false,
+    });
+    const cotton = rows.find((row) => row._id === id);
+    expect(cotton?.label).toBe("Cotton");
+    expect(cotton?.value).toBe("cotton");
+    expect(cotton?.slug).toBe("cotton");
+
+    await expect(
+      asUser(t, owner).mutation(api.attributes.create, {
+        attributeTypeId: typeId,
+        label: "Cotton blend",
+        value: "cotton",
+      }),
+    ).rejects.toThrow(/already exists/i);
+
+    await asUser(t, owner).mutation(api.attributes.update, {
+      attributeId: id,
+      value: "organic-cotton",
+    });
+    const updated = await asUser(t, owner).query(api.attributes.list, {
+      attributeTypeId: typeId,
+      activeOnly: false,
+    });
+    expect(updated.find((row) => row._id === id)?.value).toBe("organic-cotton");
+
+    const otherId = await asUser(t, owner).mutation(api.attributes.create, {
+      attributeTypeId: typeId,
+      label: "Linen",
+      value: "linen",
+    });
+    await expect(
+      asUser(t, owner).mutation(api.attributes.update, {
+        attributeId: otherId,
+        value: "organic-cotton",
+      }),
+    ).rejects.toThrow(/already exists/i);
   });
 });

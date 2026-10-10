@@ -1,25 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import {
-  findCategoryAncestry,
   legacyProductCategoryFromPath,
   productTypeFromCategoryPath,
   type CategoryTreeNode,
 } from "@convex/shared/categories";
 import type { ProductCategory } from "@convex/shared/products";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { cn } from "@/lib/cn";
 
 type Tree = FunctionReturnType<typeof api.categories.tree>;
 
@@ -38,24 +39,43 @@ type Props = {
   onChange: (pick: CategoryPick | null) => void;
 };
 
-const LEVEL_LABELS = ["Department", "Category", "Type", "Style"] as const;
+type FlatCategory = {
+  id: Id<"categories">;
+  name: string;
+  slug: string;
+  path: string;
+  /** Display breadcrumb, e.g. Men → Topwear → Shirts → Formal */
+  label: string;
+};
 
 function asTree(nodes: Tree): CategoryTreeNode[] {
   return nodes as CategoryTreeNode[];
 }
 
-function levelLabel(index: number): string {
-  return LEVEL_LABELS[index] ?? `Level ${index + 1}`;
-}
-
-function levelPlaceholder(index: number): string {
-  return `Select ${levelLabel(index).toLowerCase()}`;
+/** Depth-first flatten: every node is selectable, labeled with ancestor chain. */
+function flattenCategories(nodes: CategoryTreeNode[], ancestors: string[] = []): FlatCategory[] {
+  const out: FlatCategory[] = [];
+  for (const node of nodes) {
+    const chain = [...ancestors, node.name];
+    out.push({
+      id: node._id as Id<"categories">,
+      name: node.name,
+      slug: node.slug,
+      path: node.path,
+      label: chain.join(" → "),
+    });
+    if (node.children.length > 0) {
+      out.push(...flattenCategories(node.children, chain));
+    }
+  }
+  return out;
 }
 
 export function CategoryTreePicker({ value, onChange }: Props) {
   const tree = useQuery(api.categories.tree, { activeOnly: true });
   const ensureSeeded = useMutation(api.categories.ensureSeeded);
   const seeded = useRef(false);
+  const [inputValue, setInputValue] = useState("");
 
   useEffect(() => {
     if (seeded.current) return;
@@ -68,95 +88,106 @@ export function CategoryTreePicker({ value, onChange }: Props) {
     void ensureSeeded({});
   }, [tree, ensureSeeded]);
 
-  const nodes = useMemo(() => (tree ? asTree(tree) : []), [tree]);
-  const ancestry = useMemo(
-    () => (value && nodes.length ? findCategoryAncestry(nodes, value) : null),
-    [nodes, value],
+  const flat = useMemo(() => (tree ? flattenCategories(asTree(tree)) : []), [tree]);
+
+  const selected = useMemo(
+    () => (value ? (flat.find((row) => row.id === value) ?? null) : null),
+    [flat, value],
   );
 
-  /** Selected id at each depth; length grows as the user drills down. */
-  const selectedIds = useMemo(() => {
-    if (ancestry) return ancestry.map((node) => node._id as Id<"categories">);
-    return [] as Id<"categories">[];
-  }, [ancestry]);
+  const options = useMemo(() => {
+    const q = inputValue.trim().toLowerCase();
+    if (!q) return flat;
+    return flat.filter(
+      (row) =>
+        row.label.toLowerCase().includes(q) ||
+        row.path.toLowerCase().includes(q) ||
+        row.name.toLowerCase().includes(q),
+    );
+  }, [flat, inputValue]);
 
-  const levels = useMemo(() => {
-    const out: CategoryTreeNode[][] = [];
-    let current: CategoryTreeNode[] = nodes;
-    out.push(current);
-    for (const id of selectedIds) {
-      const match = current.find((node) => node._id === id);
-      if (!match || match.children.length === 0) break;
-      current = match.children;
-      out.push(current);
-    }
-    return out;
-  }, [nodes, selectedIds]);
-
-  function pickAtLevel(node: CategoryTreeNode) {
-    const legacy = legacyProductCategoryFromPath(node.path);
+  function pick(row: FlatCategory) {
+    const legacy = legacyProductCategoryFromPath(row.path);
     onChange({
-      categoryId: node._id as Id<"categories">,
-      path: node.path,
-      name: node.name,
-      slug: node.slug,
+      categoryId: row.id,
+      path: row.path,
+      name: row.name,
+      slug: row.slug,
       legacyCategory: legacy,
-      productTypeHint: productTypeFromCategoryPath(node.path, legacy),
+      productTypeHint: productTypeFromCategoryPath(row.path, legacy),
     });
+    setInputValue("");
   }
 
   if (tree === undefined) {
-    return <div className="h-24 animate-pulse rounded-md bg-soft-cloud" />;
+    return <div className="h-16 animate-pulse rounded-md bg-soft-cloud" />;
   }
 
-  if (nodes.length === 0) {
+  if (flat.length === 0) {
     return <p className="text-sm text-mute">Loading categories…</p>;
   }
 
-  const breadcrumb = ancestry?.map((node) => node.name).join(" / ");
-  const canGoDeeper = Boolean(value && ancestry && ancestry[ancestry.length - 1]?.children.length);
-
   return (
-    <div className="space-y-4">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">Category</p>
-        {breadcrumb ? <p className="text-xs text-mute">{breadcrumb}</p> : null}
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {levels.map((options, levelIndex) => {
-          const selected = selectedIds[levelIndex] ?? null;
-          const selectedName = options.find((item) => item._id === selected)?.name;
-          return (
-            <Field key={levelIndex}>
-              <FieldLabel>{levelLabel(levelIndex)}</FieldLabel>
-              <Select
-                value={selected}
-                onValueChange={(next) => {
-                  if (!next) return;
-                  const node = options.find((item) => item._id === next);
-                  if (node) pickAtLevel(node);
-                }}
-              >
-                <SelectTrigger className="h-10 w-full rounded-full border-transparent bg-muted px-4 shadow-none">
-                  <SelectValue placeholder={levelPlaceholder(levelIndex)}>
-                    {selectedName}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent className="rounded-none">
-                  {options.map((node) => (
-                    <SelectItem key={node._id} value={node._id}>
-                      {node.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          );
-        })}
-      </div>
-      {canGoDeeper ? (
-        <FieldDescription>Pick a more specific type below, or keep this level.</FieldDescription>
-      ) : null}
-    </div>
+    <Field>
+      <FieldLabel>Category</FieldLabel>
+      <Combobox
+        items={options}
+        value={selected}
+        onValueChange={(next) => {
+          if (!next) {
+            onChange(null);
+            setInputValue("");
+            return;
+          }
+          pick(next);
+        }}
+        inputValue={selected && !inputValue ? selected.label : inputValue}
+        onInputValueChange={(next) => {
+          setInputValue(next);
+          if (selected && next !== selected.label) {
+            onChange(null);
+          }
+        }}
+        itemToStringLabel={(item) => item.label}
+        isItemEqualToValue={(a, b) => a.id === b.id}
+        autoHighlight
+      >
+        <ComboboxInput
+          className={cn(
+            "h-10! w-full rounded-full! border-transparent! bg-muted shadow-none",
+            "has-[[data-slot=input-group-control]:focus-visible]:border-foreground",
+            "has-[[data-slot=input-group-control]:focus-visible]:bg-background",
+            "has-[[data-slot=input-group-control]:focus-visible]:ring-2",
+            "has-[[data-slot=input-group-control]:focus-visible]:ring-muted",
+          )}
+          placeholder="Search categories…"
+          showClear={Boolean(selected || inputValue)}
+        />
+        <ComboboxContent className="rounded-none">
+          <ComboboxEmpty>No categories match.</ComboboxEmpty>
+          <ComboboxList>
+            {(item: FlatCategory) => (
+              <ComboboxItem key={item.id} value={item} className="rounded-none py-2">
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate font-medium">{item.label}</span>
+                  <span className="truncate font-mono text-xs text-muted-foreground">
+                    {item.path}
+                  </span>
+                </span>
+              </ComboboxItem>
+            )}
+          </ComboboxList>
+        </ComboboxContent>
+      </Combobox>
+      {selected ? (
+        <FieldDescription>
+          Path: <span className="font-medium text-foreground">{selected.path}</span>
+        </FieldDescription>
+      ) : (
+        <FieldDescription>
+          Pick one category. Path is saved as slug segments, e.g. men/topwear/shirts/casual.
+        </FieldDescription>
+      )}
+    </Field>
   );
 }

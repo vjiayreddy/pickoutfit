@@ -68,11 +68,12 @@ export function ProductDetail({
   }
 
   const { product, look } = data;
-  const activeVariants = product.variants.filter((variant) => variant.active);
-  const multiVariant = activeVariants.length > 1;
+  const variants = product.variants;
+  const selectableVariants = variants.filter((variant) => variant.active);
+  const multiVariant = variants.length > 1;
   const selectedVariant =
-    activeVariants.find((variant) => variant.id === variantId) ??
-    (multiVariant ? null : (activeVariants[0] ?? null));
+    selectableVariants.find((variant) => variant.id === variantId) ??
+    (multiVariant ? null : (selectableVariants[0] ?? null));
   const variantImages = selectedVariant
     ? product.images.filter((image) => image.variantId === selectedVariant.id)
     : [];
@@ -86,7 +87,9 @@ export function ProductDetail({
   const activeImageUrl = imageUrls[imageIndex] ?? imageUrls[0] ?? null;
   const priceInr = selectedVariant?.priceInr ?? product.priceInr;
   const soldOut =
-    product.totalStock === 0 || (selectedVariant !== null && selectedVariant.stock === 0);
+    selectableVariants.length === 0 ||
+    product.totalStock === 0 ||
+    (selectedVariant !== null && selectedVariant.stock === 0);
   const displayAttributes = product.attributes.filter(
     (row) => row.value && !HIDDEN_ATTR_KEYS.has(row.key),
   );
@@ -205,8 +208,8 @@ export function ProductDetail({
             <div className="space-y-2">
               <p className="text-sm font-medium">Size</p>
               <div className="flex flex-wrap gap-2">
-                {activeVariants.map((variant) => {
-                  const unavailable = variant.stock === 0;
+                {variants.map((variant) => {
+                  const unavailable = !variant.active || variant.stock === 0;
                   return (
                     <button
                       key={variant.id}
@@ -215,7 +218,7 @@ export function ProductDetail({
                       onClick={() => setVariantId(variant.id)}
                       className={cn(
                         "h-10 min-w-10 rounded-full px-4 text-sm font-medium disabled:opacity-40",
-                        variantId === variant.id
+                        !unavailable && variantId === variant.id
                           ? "bg-ink text-canvas"
                           : "bg-canvas ring-1 ring-inset ring-hairline",
                       )}

@@ -1,8 +1,28 @@
 import { describe, expect, test } from "vitest";
 import {
+  categoryPathMatchesFilter,
+  categoryScopeMatches,
   legacyProductCategoryFromPath,
   productTypeFromCategoryPath,
+  type CategoryTreeNode,
 } from "./categories";
+
+function node(
+  id: string,
+  name: string,
+  children: CategoryTreeNode[] = [],
+): CategoryTreeNode {
+  return {
+    _id: id,
+    name,
+    slug: name.toLowerCase(),
+    path: name.toLowerCase(),
+    parentId: null,
+    sortOrder: 0,
+    isActive: true,
+    children,
+  };
+}
 
 describe("productTypeFromCategoryPath", () => {
   test("maps seed leaf slugs to PRODUCT_TYPES enums", () => {
@@ -35,5 +55,45 @@ describe("productTypeFromCategoryPath", () => {
     expect(productTypeFromCategoryPath(path, "eyewear")).toBe("glasses");
     // Wrong legacy bucket rejects the eyewear mapping.
     expect(productTypeFromCategoryPath(path, "clothes")).toBeNull();
+  });
+});
+
+describe("categoryScopeMatches", () => {
+  const formal = node("formal", "Formal");
+  const shirts = node("shirts", "Shirts", [formal]);
+  const topwear = node("topwear", "Topwear", [shirts]);
+  const men = node("men", "Men", [topwear]);
+  const tree = [men];
+
+  test("empty scope matches any product category", () => {
+    expect(categoryScopeMatches("formal", [], tree)).toBe(true);
+    expect(categoryScopeMatches(null, [], tree)).toBe(true);
+  });
+
+  test("product leaf matches parent-scoped variant", () => {
+    expect(categoryScopeMatches("formal", ["shirts"], tree)).toBe(true);
+    expect(categoryScopeMatches("formal", ["men"], tree)).toBe(true);
+    expect(categoryScopeMatches("formal", ["formal"], tree)).toBe(true);
+  });
+
+  test("unrelated branch does not match", () => {
+    expect(categoryScopeMatches("formal", ["other"], tree)).toBe(false);
+    expect(categoryScopeMatches(null, ["shirts"], tree)).toBe(false);
+  });
+});
+
+describe("categoryPathMatchesFilter", () => {
+  const leaf = "men/topwear/shirts/formal";
+
+  test("matches self and every ancestor path", () => {
+    expect(categoryPathMatchesFilter(leaf, "men")).toBe(true);
+    expect(categoryPathMatchesFilter(leaf, "men/topwear")).toBe(true);
+    expect(categoryPathMatchesFilter(leaf, "men/topwear/shirts")).toBe(true);
+    expect(categoryPathMatchesFilter(leaf, leaf)).toBe(true);
+  });
+
+  test("does not match sibling branches", () => {
+    expect(categoryPathMatchesFilter(leaf, "men/bottomwear")).toBe(false);
+    expect(categoryPathMatchesFilter(leaf, "women/topwear")).toBe(false);
   });
 });

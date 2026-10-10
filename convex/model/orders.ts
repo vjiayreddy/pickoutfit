@@ -5,6 +5,7 @@ import {
   ORDER_SAMPLE_CAP,
   type OrderLineStatus,
   type OrderStatus,
+  type ReturnStatus,
 } from "../shared/products";
 import { pricedUnitInr } from "./offers";
 import {
@@ -17,6 +18,32 @@ import {
 type Ctx = QueryCtx | MutationCtx;
 
 const ORDER_STATUSES: OrderStatus[] = ["placed", "fulfilled", "cancelled"];
+const BUYER_ORDER_LIST_CAP = 50;
+const PREVIEW_NAMES = 3;
+
+export type TimelineEvent = {
+  kind: "placed" | "shipped" | "delivered" | "return_requested" | "return_resolved";
+  at: number;
+  label: string | null;
+  carrier: string | null;
+  trackingNumber: string | null;
+  shipmentId: Id<"shipments"> | null;
+  returnStatus: ReturnStatus | null;
+};
+
+function timelineEvent(
+  partial: Pick<TimelineEvent, "kind" | "at"> & Partial<Omit<TimelineEvent, "kind" | "at">>,
+): TimelineEvent {
+  return {
+    kind: partial.kind,
+    at: partial.at,
+    label: partial.label ?? null,
+    carrier: partial.carrier ?? null,
+    trackingNumber: partial.trackingNumber ?? null,
+    shipmentId: partial.shipmentId ?? null,
+    returnStatus: partial.returnStatus ?? null,
+  };
+}
 
 export type CheckoutInput = {
   name: string;
@@ -134,6 +161,150 @@ export async function toOrderView(ctx: Ctx, order: Doc<"orders">) {
     createdAt: order.createdAt,
     items: items.map(toOrderItemView),
   };
+}
+
+export function toShipmentView(row: Doc<"shipments">) {
+  return {
+    id: row._id,
+    orderId: row.orderId,
+    orderItemIds: row.orderItemIds,
+    carrier: row.carrier ?? null,
+    trackingNumber: row.trackingNumber ?? null,
+    status: row.status,
+    shippedAt: row.shippedAt ?? null,
+    deliveredAt: row.deliveredAt ?? null,
+    createdAt: row.createdAt,
+  };
+}
+
+export function toReturnView(row: Doc<"returns">) {
+  return {
+    id: row._id,
+    orderId: row.orderId,
+    orderItemId: row.orderItemId,
+    quantity: row.quantity,
+    reason: row.reason,
+    status: row.status,
+    restocked: row.restocked,
+    createdAt: row.createdAt,
+    resolvedAt: row.resolvedAt ?? null,
+  };
+}
+
+export async function shipmentsForOrder(ctx: Ctx, orderId: Id<"orders">) {
+  return ctx.db
+    .query("shipments")
+    .withIndex("by_orderId", (q) => q.eq("orderId", orderId))
+    .take(50);
+}
+
+export async function returnsForOrder(ctx: Ctx, orderId: Id<"orders">) {
+  return ctx.db
+    .query("returns")
+    .withIndex("by_orderId", (q) => q.eq("orderId", orderId))
+    .take(50);
+}
+
+export function buildOrderTimeline(
+  order: Doc<"orders">,
+  shipments: Doc<"shipments">[],
+  returns: Doc<"returns">[],
+): TimelineEvent[] {
+  const events: TimelineEvent[] = [
+    timelineEvent({ kind: "placed", at: order.createdAt, label: "Order placed" }),
+  ];
+  for (const shipment of shipments) {
+    const shippedAt = shipment.shippedAt ?? shipment.createdAt;
+    events.push(
+      timelineEvent({
+        kind: "shipped",
+        at: shippedAt,
+        label: "Shipped",
+        carrier: shipment.carrier ?? null,
+        trackingNumber: shipment.trackingNumber ?? null,
+        shipmentId: shipment._id,
+      }),
+    );
+    if (shipment.status === "delivered") {
+      events.push(
+        timelineEvent({
+          kind: "delivered",
+          at: shipment.deliveredAt ?? shippedAt,
+          label: "Delivered",
+          carrier: shipment.carrier ?? null,
+          trackingNumber: shipment.trackingNumber ?? null,
+          shipmentId: shipment._id,
+        }),
+      );
+    }
+  }
+  for (const row of returns) {
+    events.push(
+      timelineEvent({
+        kind: "return_requested",
+        at: row.createdAt,
+        label: "Return requested",
+        returnStatus: row.status,
+      }),
+    );
+    if (row.resolvedAt !== undefined) {
+      events.push(
+        timelineEvent({
+          kind: "return_resolved",
+          at: row.resolvedAt,
+          label: row.status === "accepted" ? "Return accepted" : "Return rejected",
+          returnStatus: row.status,
+        }),
+      );
+    }
+  }
+  events.sort((a, b) => a.at - b.at || a.kind.localeCompare(b.kind));
+  return events;
+}
+
+export async function toBuyerOrderDetail(ctx: Ctx, order: Doc<"orders">) {
+  const [items, shipments, returns] = await Promise.all([
+    orderItemsFor(ctx, order._id),
+    shipmentsForOrder(ctx, order._id),
+    returnsForOrder(ctx, order._id),
+  ]);
+  return {
+    id: order._id,
+    name: order.name,
+    email: order.email,
+    phone: order.phone,
+    address: order.address,
+    city: order.city,
+    pincode: order.pincode,
+    status: order.status,
+    totalInr: order.totalInr,
+    createdAt: order.createdAt,
+    items: items.map(toOrderItemView),
+    shipments: shipments.map(toShipmentView),
+    returns: returns.map(toReturnView),
+    timeline: buildOrderTimeline(order, shipments, returns),
+  };
+}
+
+export async function listOrdersForUser(ctx: QueryCtx, userId: Id<"users">) {
+  const orders = await ctx.db
+    .query("orders")
+    .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", userId))
+    .order("desc")
+    .take(BUYER_ORDER_LIST_CAP);
+  const rows = [];
+  for (const order of orders) {
+    const items = await orderItemsFor(ctx, order._id);
+    rows.push({
+      id: order._id,
+      createdAt: order.createdAt,
+      status: order.status,
+      totalInr: order.totalInr,
+      itemCount: items.length,
+      itemPreview: items.slice(0, PREVIEW_NAMES).map((item) => item.name),
+    });
+  }
+  return rows;
 }
 
 export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: CheckoutInput) {

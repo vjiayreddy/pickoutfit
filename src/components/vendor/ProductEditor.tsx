@@ -1,7 +1,7 @@
 "use client";
 
 import { useAction, useMutation, useQuery } from "convex/react";
-import { ArrowLeft, ImagePlus, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, ImagePlus, Layers, Plus, Tags, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useForm, useFormState, useWatch } from "react-hook-form";
@@ -10,20 +10,16 @@ import { toast } from "sonner";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import {
+  categoryScopeMatches,
+  type CategoryTreeNode,
+} from "@convex/shared/categories";
 import { COLOUR_HEX } from "@convex/shared/variants";
 import {
-  AGE_GROUPS,
-  AGE_GROUP_LABELS,
-  ATTR,
-  attrLabel,
   MAX_INFO_SECTIONS,
   MAX_PRODUCT_IMAGES,
-  OCCASIONS,
-  OCCASION_LABELS,
   productTypeLabel,
-  type AgeGroup,
   type InfoSectionKind,
-  type Occasion,
 } from "@convex/shared/products";
 import type { Presentation } from "@convex/shared/wardrobe";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
@@ -37,6 +33,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -54,6 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -77,23 +82,54 @@ import {
   productFormSchema,
   type ProductFormValues,
 } from "@/lib/product-form-schema";
+import {
+  resolvePhotoFill,
+  type PhotoFillSuggestion,
+} from "@convex/shared/productPhotoFill";
 import { routes } from "@/lib/routes";
 
-const AUDIENCE: { value: Presentation; label: string }[] = [
-  { value: "masculine", label: "Men" },
-  { value: "feminine", label: "Women" },
-  { value: "neutral", label: "Everyone" },
-];
+type EditorSection =
+  | "basics"
+  | "classification"
+  | "attributes"
+  | "info"
+  | "pricing"
+  | "variants";
+
+/** First viewport on create — keep Pricing/Stock collapsed until Basics + Category are done. */
+const CREATE_OPEN_SECTIONS: EditorSection[] = ["basics", "classification"];
+
+function sectionsForFormErrors(errors: Record<string, unknown>): EditorSection[] {
+  const open: EditorSection[] = [];
+  if (errors.name || errors.brand || errors.brandId || errors.description) {
+    open.push("basics");
+  }
+  if (errors.categoryId || errors.category || errors.productType) {
+    open.push("classification");
+  }
+  if (errors.attributeSelections) open.push("attributes");
+  if (errors.infoSections) open.push("info");
+  if (errors.priceInr || errors.aiRecommend) open.push("pricing");
+  if (errors.variants || errors.variantCategoryIds) open.push("variants");
+  return open;
+}
+
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** Hidden catalog field — derived from category path, not shown in the form. */
+function presentationFromPath(path: string | undefined): Presentation {
+  const root = path?.split("/")[0];
+  if (root === "men") return "masculine";
+  if (root === "women") return "feminine";
+  return "neutral";
+}
 
 type Slot = { key: string; storageId?: Id<"_storage">; previewUrl: string; uploading: boolean };
 
 type VariantRow = ProductFormValues["variants"][number];
 type InfoRow = ProductFormValues["infoSections"][number];
 type Draft = ProductFormValues;
-
-const KNOWN_ATTR_KEYS = new Set<string>(Object.values(ATTR));
 
 function newInfoSection(title = ""): InfoRow {
   return {
@@ -108,7 +144,7 @@ function newInfoSection(title = ""): InfoRow {
 function newVariant(): VariantRow {
   return {
     key: crypto.randomUUID(),
-    optionIds: [],
+    attributeIds: [],
     size: "",
     colourName: "",
     colourHex: "",
@@ -128,24 +164,10 @@ const EMPTY: Draft = {
   category: "clothes",
   categoryId: null,
   presentation: "neutral",
-  colourPrimary: "",
-  colourSecondary: "",
-  colourHex: "",
-  pattern: "",
-  material: "",
-  size: "",
-  ageGroup: "",
-  occasion: "",
-  customAttributes: [],
-  infoSections: [
-    newInfoSection("Fit, Fabric & Wash Care"),
-    newInfoSection("Manufacturing Details"),
-    newInfoSection("Alterations, Returns & Exchanges"),
-    { ...newInfoSection("FAQ"), kind: "faq" as const },
-  ],
+  attributeSelections: [],
+  infoSections: [],
   priceInr: "",
-  compareAtPriceInr: "",
-  variantTypeIds: [],
+  variantCategoryIds: [],
   variants: [newVariant()],
   aiRecommend: false,
 };
@@ -155,6 +177,30 @@ type VariantCatalog = FunctionReturnType<typeof api.variants.catalog>;
 type CatalogType = VariantCatalog[number];
 type CatalogOption = CatalogType["options"][number];
 
+function initialOpenSections(product: ProductView | null): EditorSection[] {
+  if (!product) return [...CREATE_OPEN_SECTIONS];
+  const open: EditorSection[] = ["basics", "classification", "pricing", "variants"];
+  if ((product.attributeSelections?.length ?? 0) > 0) open.push("attributes");
+  if ((product.infoSections?.length ?? 0) > 0) open.push("info");
+  return open;
+}
+
+/** Collapse identical SKU combinations (same attributeIds). */
+function dedupeVariantRows(rows: VariantRow[]): VariantRow[] {
+  const seen = new Set<string>();
+  const out: VariantRow[] = [];
+  for (const row of rows) {
+    const key =
+      row.attributeIds.length > 0
+        ? [...row.attributeIds].sort().join("|")
+        : `empty:${row.key}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out.length > 0 ? out : [newVariant()];
+}
+
 function optionById(catalog: VariantCatalog, optionId: string): CatalogOption | undefined {
   for (const type of catalog) {
     const match = type.options.find((option) => option.id === optionId);
@@ -163,50 +209,54 @@ function optionById(catalog: VariantCatalog, optionId: string): CatalogOption | 
   return undefined;
 }
 
+/** Variant scoped to a parent (e.g. Shirts) also matches product leaf (e.g. Formal). */
+function variantTypeMatchesCategory(
+  type: Pick<CatalogType, "categoryIds">,
+  categoryId: Id<"categories"> | null | undefined,
+  tree: CategoryTreeNode[],
+): boolean {
+  return categoryScopeMatches(categoryId, type.categoryIds, tree);
+}
+
 /** Keep free-text size/colour in sync with selected catalog options. */
 function labelsFromOptions(
   catalog: VariantCatalog,
-  optionIds: string[],
+  attributeIds: string[],
 ): Pick<VariantRow, "size" | "colourName" | "colourHex"> {
   let size = "";
   let colourName = "";
   let colourHex = "";
-  for (const optionId of optionIds) {
-    const option = optionById(catalog, optionId);
+  for (const attributeId of attributeIds) {
+    const option = optionById(catalog, attributeId);
     if (!option) continue;
-    const type = catalog.find((row) => row.id === option.variantTypeId);
+    const type = catalog.find((row) => row.id === option.variantCategoryId);
     if (!type) continue;
-    if (type.slug === "size") size = option.label;
-    if (type.slug === "colour") {
+    if (type.attributeTypeSlug === "size") size = option.label;
+    if (type.attributeTypeSlug === "colour" || type.attributeTypeSlug === "color") {
       colourName = option.label;
-      colourHex = COLOUR_HEX[option.value] ?? colourHex;
+      colourHex = option.hex ?? COLOUR_HEX[option.value] ?? colourHex;
     }
   }
   return { size, colourName, colourHex };
 }
 
 function draftFrom(product: ProductView): Draft {
-  const customAttributes = (product.attributes ?? [])
-    .filter((row) => !KNOWN_ATTR_KEYS.has(row.key))
-    .map((row) => ({
-      key: row.key,
-      keyInput: row.key,
-      label: row.label,
-      value: row.value,
+  const infoSections = product.infoSections
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .map((section) => ({
+      id: section.id,
+      title: section.title,
+      kind: section.kind,
+      body: section.body ?? "",
+      rows: (section.rows ?? []).map((row) => ({ label: row.label, value: row.value })),
     }));
-  const infoSections =
-    product.infoSections.length > 0
-      ? product.infoSections
-          .slice()
-          .sort((a, b) => a.position - b.position)
-          .map((section) => ({
-            id: section.id,
-            title: section.title,
-            kind: section.kind,
-            body: section.body ?? "",
-            rows: (section.rows ?? []).map((row) => ({ label: row.label, value: row.value })),
-          }))
-      : EMPTY.infoSections.map((section) => ({ ...section, id: crypto.randomUUID() }));
+
+  const attributeSelections = (product.attributeSelections ?? []).map((row) => ({
+    attributeTypeId: row.attributeTypeId as string,
+    attributeIds: row.attributeIds.map((id) => id as string),
+  }));
+
   return {
     name: product.name,
     brandId: product.brandId,
@@ -217,25 +267,16 @@ function draftFrom(product: ProductView): Draft {
     category: product.category,
     categoryId: product.categoryId,
     presentation: product.presentation,
-    colourPrimary: product.colours.primary,
-    colourSecondary: product.colours.secondary.join(", "),
-    colourHex: product.colours.hex[0] ?? "",
-    pattern: product.pattern ?? "",
-    material: product.material ?? "",
-    size: product.size ?? "",
-    ageGroup: product.ageGroup ?? "",
-    occasion: product.occasion ?? "",
-    customAttributes,
+    attributeSelections,
     infoSections,
     priceInr: String(product.priceInr),
-    compareAtPriceInr: product.compareAtPriceInr ? String(product.compareAtPriceInr) : "",
-    variantTypeIds: product.variantTypeIds,
+    variantCategoryIds: product.variantCategoryIds,
     aiRecommend: product.aiRecommend,
     variants: product.variants.length
       ? product.variants.map((variant) => ({
           key: variant.id,
           id: variant.id,
-          optionIds: variant.optionIds,
+          attributeIds: variant.attributeIds,
           size: variant.size ?? "",
           colourName: variant.colour?.name ?? "",
           colourHex: variant.colour?.hex ?? "",
@@ -263,9 +304,14 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
   const unpublish = useMutation(api.vendorProducts.unpublish);
   const archive = useMutation(api.vendorProducts.archive);
   const discardImage = useMutation(api.vendorProducts.discardImage);
-  const seedVariantDefaults = useMutation(api.variants.seedDefaults);
   const catalog = useQuery(api.variants.catalog, {});
+  const categoryTree = useQuery(api.categories.tree, { activeOnly: true });
+  const attributeTypes = useQuery(api.attributes.listTypes, { activeOnly: true });
+  const brands = useQuery(api.brands.list, { activeOnly: true });
+  /** Unscoped catalog for photo-fill matching (before a category is chosen). */
+  const attributesCatalog = useQuery(api.attributes.list, { activeOnly: true });
   const describe = useAction(api.ai.openai.describeProduct);
+  const ensureBrand = useMutation(api.brands.ensure);
   const { upload } = useUpload("vendor");
 
   const form = useForm<ProductFormValues>({
@@ -275,7 +321,19 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     reValidateMode: "onChange",
   });
   const draft = (useWatch({ control: form.control }) ?? form.getValues()) as ProductFormValues;
+  /** Dedicated watch so Variants UI updates when Classification changes. */
+  const watchedCategoryId = useWatch({ control: form.control, name: "categoryId" });
+  const productCategoryId = (watchedCategoryId ?? draft.categoryId) as Id<"categories"> | null;
+  const allAttributes = useQuery(api.attributes.list, {
+    categoryId: productCategoryId ?? undefined,
+    activeOnly: true,
+  });
   const { errors, isSubmitted } = useFormState({ control: form.control });
+
+  const categoryNodes = useMemo(
+    () => (categoryTree ? (categoryTree as CategoryTreeNode[]) : []),
+    [categoryTree],
+  );
 
   const [slots, setSlots] = useState<Slot[]>(() =>
     (product?.images ?? []).map((image) => ({
@@ -288,13 +346,24 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
   const [selectedKey, setSelectedKey] = useState<string | null>(product?.images[0]?.storageId ?? null);
   const [saving, setSaving] = useState(false);
   const [filling, setFilling] = useState(false);
-  const [seedingCatalog, setSeedingCatalog] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoSuggestions, setPhotoSuggestions] = useState<PhotoFillSuggestion[]>([]);
+  const [openSections, setOpenSections] = useState<EditorSection[]>(() =>
+    initialOpenSections(product),
+  );
   const fileRef = useRef<HTMLInputElement>(null);
-  const seededOnce = useRef(false);
   /** Skip auto Size/Colour enable when editing an existing product. */
   const defaultedTypes = useRef(Boolean(product));
   const locked = me.vendor.status === "suspended" || me.vendor.status === "closed";
+
+  const ensureSectionsOpen = (sections: EditorSection[]) => {
+    if (sections.length === 0) return;
+    setOpenSections((current) => {
+      const next = new Set(current);
+      for (const section of sections) next.add(section);
+      return [...next];
+    });
+  };
 
   const set = <K extends keyof ProductFormValues>(key: K, value: ProductFormValues[K]) => {
     form.setValue(key, value as never, { shouldDirty: true, shouldValidate: isSubmitted });
@@ -308,109 +377,160 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     });
   };
 
-  // Bootstrap Size + Colour once so the desk has options to pick.
+  // Drop stale/orphan variant + attribute ids that are not in this store's catalog,
+  // and drop variants that don't match the selected product category.
   useEffect(() => {
-    if (catalog === undefined || catalog.length > 0 || seededOnce.current || locked) return;
-    seededOnce.current = true;
-    setSeedingCatalog(true);
-    void seedVariantDefaults({})
-      .then(() => toast.success("Size and colour options ready."))
-      .catch((caught) => {
-        seededOnce.current = false;
-        toast.error(reportError(caught).message);
-      })
-      .finally(() => setSeedingCatalog(false));
-  }, [catalog, locked, seedVariantDefaults]);
-
-  // Drop stale/orphan type + option ids that are not in this store's catalog.
-  useEffect(() => {
-    if (!catalog?.length) return;
-    const allowedTypes = new Set(catalog.map((type) => type.id as string));
+    if (!catalog?.length || categoryTree === undefined) return;
+    const allowedTypes = new Set(
+      catalog
+        .filter((type) => variantTypeMatchesCategory(type, productCategoryId, categoryNodes))
+        .map((type) => type.id as string),
+    );
     const allowedOptions = new Set(
-      catalog.flatMap((type) => type.options.map((option) => option.id as string)),
+      catalog
+        .filter((type) => allowedTypes.has(type.id as string))
+        .flatMap((type) => type.options.map((option) => option.id as string)),
     );
     setDraft((current) => {
-      const variantTypeIds = current.variantTypeIds.filter((id) => allowedTypes.has(id));
+      const variantCategoryIds = current.variantCategoryIds.filter((id) => allowedTypes.has(id));
       let variantsChanged = false;
       const variants = current.variants.map((row) => {
-        const optionIds = row.optionIds.filter((id) => allowedOptions.has(id));
-        if (optionIds.length === row.optionIds.length) return row;
+        const attributeIds = row.attributeIds.filter((id) => allowedOptions.has(id));
+        if (attributeIds.length === row.attributeIds.length) return row;
         variantsChanged = true;
         return {
           ...row,
-          optionIds,
-          ...labelsFromOptions(catalog, optionIds),
+          attributeIds,
+          ...labelsFromOptions(catalog, attributeIds),
         };
       });
-      if (variantTypeIds.length === current.variantTypeIds.length && !variantsChanged) {
+      const deduped = dedupeVariantRows(variants);
+      const dedupedChanged = deduped.length !== current.variants.length;
+      if (
+        variantCategoryIds.length === current.variantCategoryIds.length &&
+        !variantsChanged &&
+        !dedupedChanged
+      ) {
         return current;
       }
-      return { ...current, variantTypeIds, variants };
+      return { ...current, variantCategoryIds, variants: deduped };
     });
-  }, [catalog]);
+  }, [catalog, categoryNodes, categoryTree, productCategoryId]);
 
-  // New products default to Size + Colour once the catalog loads.
-  useEffect(() => {
-    if (product || !catalog?.length || defaultedTypes.current) return;
-    defaultedTypes.current = true;
-    const defaults = catalog
-      .filter((type) => type.slug === "size" || type.slug === "colour")
-      .map((type) => type.id as string);
-    if (defaults.length > 0) {
-      setDraft((current) =>
-        current.variantTypeIds.length > 0 ? current : { ...current, variantTypeIds: defaults },
-      );
-    }
-  }, [catalog, product]);
-
-  /** Prefer recipe-synced types that match this product's category. */
+  /** Variants linked to this product's category (including parent-scoped Variants). */
   const sortedCatalog = useMemo(() => {
-    if (!catalog) return [];
-    const categoryId = draft.categoryId;
-    return [...catalog].sort((a, b) => {
-      const aMatch =
-        categoryId && a.categoryIds.length > 0
-          ? a.categoryIds.includes(categoryId as Id<"categories">)
-          : false;
-      const bMatch =
-        categoryId && b.categoryIds.length > 0
-          ? b.categoryIds.includes(categoryId as Id<"categories">)
-          : false;
-      if (aMatch !== bMatch) return aMatch ? -1 : 1;
-      const aRecipe = Boolean(a.variantCategoryId);
-      const bRecipe = Boolean(b.variantCategoryId);
-      if (aRecipe !== bRecipe) return aRecipe ? -1 : 1;
-      return a.sortOrder - b.sortOrder || a.label.localeCompare(b.label);
-    });
-  }, [catalog, draft.categoryId]);
+    if (!catalog || categoryTree === undefined) return [];
+    return catalog
+      .filter((type) => variantTypeMatchesCategory(type, productCategoryId, categoryNodes))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [catalog, categoryNodes, categoryTree, productCategoryId]);
 
   const enabledTypes = useMemo(() => {
-    if (!catalog) return [];
-    return catalog.filter((type) => draft.variantTypeIds.includes(type.id));
-  }, [catalog, draft.variantTypeIds]);
+    return sortedCatalog.filter((type) => draft.variantCategoryIds.includes(type.id));
+  }, [sortedCatalog, draft.variantCategoryIds]);
 
-  function setVariantTypeIds(nextIds: string[]) {
-    const removed = draft.variantTypeIds.filter((id) => !nextIds.includes(id));
-    const removedOptionIds = new Set<string>();
-    if (removed.length > 0 && catalog) {
-      for (const typeId of removed) {
-        const type = catalog.find((row) => row.id === typeId);
-        for (const option of type?.options ?? []) removedOptionIds.add(option.id);
+  const MAX_VARIANT_COMBO_ROWS = 48;
+
+  /** One SKU row per combination of enabled dimension options (capped). Keeps stock/price when ids match. */
+  function buildCombinationRows(
+    catalogRows: VariantCatalog,
+    types: CatalogType[],
+    previous: VariantRow[] = [],
+  ): VariantRow[] | null {
+    if (types.length === 0) return [newVariant()];
+    const lists = types.map((type) => type.options);
+    if (lists.some((list) => list.length === 0)) return null;
+
+    let combos: CatalogOption[][] = [[]];
+    for (const options of lists) {
+      const next: CatalogOption[][] = [];
+      for (const prefix of combos) {
+        for (const option of options) {
+          next.push([...prefix, option]);
+          if (next.length >= MAX_VARIANT_COMBO_ROWS) break;
+        }
+        if (next.length >= MAX_VARIANT_COMBO_ROWS) break;
       }
+      combos = next;
     }
-    setDraft((current) => ({
-      ...current,
-      variantTypeIds: nextIds,
-      variants: current.variants.map((row) => {
-        if (removedOptionIds.size === 0) return row;
-        const optionIds = row.optionIds.filter((id) => !removedOptionIds.has(id));
+
+    const prevByKey = new Map(
+      previous.map((row) => {
+        const key = [...row.attributeIds].sort().join("|");
+        return [key, row] as const;
+      }),
+    );
+
+    return dedupeVariantRows(
+      combos.map((picked) => {
+        const attributeIds = picked.map((option) => option.id);
+        const key = [...attributeIds].sort().join("|");
+        const prior = prevByKey.get(key);
         return {
-          ...row,
-          optionIds,
-          ...(catalog ? labelsFromOptions(catalog, optionIds) : {}),
+          ...(prior ?? newVariant()),
+          key: prior?.key ?? crypto.randomUUID(),
+          id: prior?.id,
+          attributeIds,
+          ...labelsFromOptions(catalogRows, attributeIds),
+          stock: prior?.stock ?? "0",
+          priceInr: prior?.priceInr ?? "",
+          active: prior?.active ?? true,
         };
       }),
-    }));
+    );
+  }
+
+  // New products: turn on Size + Colour dimensions only — do not explode every combination.
+  useEffect(() => {
+    if (product || !catalog?.length || defaultedTypes.current || categoryTree === undefined) return;
+    if (!productCategoryId) return;
+    defaultedTypes.current = true;
+    const defaults = catalog.filter(
+      (type) =>
+        (type.attributeTypeSlug === "size" ||
+          type.attributeTypeSlug === "colour" ||
+          type.attributeTypeSlug === "color") &&
+        variantTypeMatchesCategory(type, productCategoryId, categoryNodes),
+    );
+    if (defaults.length === 0) return;
+    setDraft((current) => {
+      if (current.variantCategoryIds.length > 0) return current;
+      return {
+        ...current,
+        variantCategoryIds: defaults.map((type) => type.id as string),
+        variants: current.variants.length > 0 ? current.variants : [newVariant()],
+      };
+    });
+  }, [catalog, categoryNodes, categoryTree, product, productCategoryId]);
+
+  /** Toggle dimensions without generating the cartesian product. */
+  function setVariantCategoryIds(nextIds: string[]) {
+    if (!catalog) {
+      set("variantCategoryIds", nextIds);
+      return;
+    }
+    const enabled = new Set(nextIds);
+    const allowedOptionIds = new Set(
+      catalog
+        .filter((type) => enabled.has(type.id as string))
+        .flatMap((type) => type.options.map((option) => option.id as string)),
+    );
+    setDraft((current) => {
+      const variants = current.variants.map((row) => {
+        const attributeIds = row.attributeIds.filter((id) => allowedOptionIds.has(id));
+        if (attributeIds.length === row.attributeIds.length) return row;
+        return {
+          ...row,
+          attributeIds,
+          ...labelsFromOptions(catalog, attributeIds),
+        };
+      });
+      return {
+        ...current,
+        variantCategoryIds: nextIds,
+        variants: variants.length > 0 ? variants : [newVariant()],
+      };
+    });
   }
 
   function setRowOption(rowKey: string, type: CatalogType, optionId: string) {
@@ -419,51 +539,46 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       ...current,
       variants: current.variants.map((row) => {
         if (row.key !== rowKey) return row;
-        // Keep only options that still exist in the live catalog (drop legacy orphans).
-        const known = row.optionIds.filter((id) => Boolean(optionById(catalog, id)));
+        const known = row.attributeIds.filter((id) => Boolean(optionById(catalog, id)));
         const withoutType = known.filter((id) => {
           const option = optionById(catalog, id);
-          return option?.variantTypeId !== type.id;
+          return option?.variantCategoryId !== type.id;
         });
-        const optionIds = optionId ? [...withoutType, optionId] : withoutType;
+        const attributeIds = optionId ? [...withoutType, optionId] : withoutType;
         return {
           ...row,
-          optionIds,
-          ...labelsFromOptions(catalog, optionIds),
+          attributeIds,
+          ...labelsFromOptions(catalog, attributeIds),
         };
       }),
     }));
   }
 
-  /** Build one SKU row per combination of enabled type options (capped). */
+  /** Explicitly build every combination of enabled dimensions (capped). */
   function fillAllCombinations() {
     if (!catalog || enabledTypes.length === 0) return;
-    const lists = enabledTypes.map((type) => type.options);
-    if (lists.some((list) => list.length === 0)) {
+    const comboCount = enabledTypes.reduce((n, type) => n * Math.max(1, type.options.length), 1);
+    if (comboCount > MAX_VARIANT_COMBO_ROWS) {
+      const ok = window.confirm(
+        `That would create ${comboCount} SKUs (capped at ${MAX_VARIANT_COMBO_ROWS}). Continue?`,
+      );
+      if (!ok) return;
+    } else if (comboCount > 12) {
+      const labels = enabledTypes.map((type) => type.label).join(" × ");
+      const ok = window.confirm(`Generate all ${comboCount} ${labels} combinations as SKU rows?`);
+      if (!ok) return;
+    }
+    const rows = buildCombinationRows(catalog, enabledTypes, draft.variants);
+    if (rows === null) {
       toast.error("Each enabled dimension needs at least one option.");
       return;
     }
-    const MAX_ROWS = 48;
-    let combos: CatalogOption[][] = [[]];
-    for (const options of lists) {
-      const next: CatalogOption[][] = [];
-      for (const prefix of combos) {
-        for (const option of options) {
-          next.push([...prefix, option]);
-          if (next.length >= MAX_ROWS) break;
-        }
-        if (next.length >= MAX_ROWS) break;
-      }
-      combos = next;
-    }
-    set(
-      "variants",
-      combos.map((picked) => {
-        const optionIds = picked.map((option) => option.id);
-        return { ...newVariant(), optionIds, ...labelsFromOptions(catalog, optionIds), stock: "0" };
-      }),
-    );
-    toast.success(`Created ${combos.length} variant row${combos.length === 1 ? "" : "s"}.`);
+    set("variants", rows);
+    toast.success(`Created ${rows.length} SKU row${rows.length === 1 ? "" : "s"}.`);
+  }
+
+  function addVariantRow() {
+    set("variants", [...draft.variants, newVariant()]);
   }
 
   const chosen = slots.find((slot) => slot.key === selectedKey) ?? slots[0] ?? null;
@@ -474,22 +589,27 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       aiRecommendReadiness({
         name: draft.name,
         description: draft.description,
-        colourPrimary: draft.colourPrimary,
-        material: draft.material,
-        pattern: draft.pattern,
         priceInr: draft.priceInr,
         hasImage: hasEmbedImage,
+        hasAttributes: draft.attributeSelections.some((row) => row.attributeIds.length > 0),
       }),
-    [
-      draft.name,
-      draft.description,
-      draft.colourPrimary,
-      draft.material,
-      draft.pattern,
-      draft.priceInr,
-      hasEmbedImage,
-    ],
+    [draft.name, draft.description, draft.priceInr, draft.attributeSelections, hasEmbedImage],
   );
+
+  const attributesByType = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof allAttributes>>();
+    for (const row of allAttributes ?? []) {
+      const list = map.get(row.attributeTypeId) ?? [];
+      list.push(row);
+      map.set(row.attributeTypeId, list);
+    }
+    return map;
+  }, [allAttributes]);
+
+  const unusedAttributeTypes = useMemo(() => {
+    const used = new Set(draft.attributeSelections.map((row) => row.attributeTypeId));
+    return (attributeTypes ?? []).filter((type) => type.isActive && !used.has(type._id));
+  }, [attributeTypes, draft.attributeSelections]);
 
   // Drop the flag if the listing no longer has enough style signal to embed.
   useEffect(() => {
@@ -558,24 +678,79 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     setFilling(true);
     try {
       const result = await describe({ storageId: chosen.storageId });
-      setDraft((current) => ({
-        ...current,
-        name: result.name,
-        brandId: null,
-        brand: result.brand ?? "",
-        subcategory: result.subcategory,
-        productType: result.productType ?? "",
-        description: result.description,
-        category: result.category,
-        presentation: result.presentation,
-        colourPrimary: result.colours.primary,
-        colourSecondary: result.colours.secondary.join(", "),
-        colourHex: result.colours.hex,
-        size: result.size ?? "",
-        ageGroup: result.ageGroup ?? "",
-        occasion: result.occasion ?? "",
-      }));
-      toast.success("Listing filled from the photo. Check it over.");
+      const resolved = resolvePhotoFill({
+        draft: {
+          name: result.name,
+          brand: result.brand,
+          subcategory: result.subcategory,
+          productType: result.productType,
+          description: result.description,
+          category: result.category,
+          presentation: result.presentation || "neutral",
+          colours: result.colours,
+          size: result.size,
+          ageGroup: result.ageGroup,
+          occasion: result.occasion,
+        },
+        brands: (brands ?? []).map((row) => ({
+          _id: row._id,
+          name: row.name,
+          slug: row.slug,
+        })),
+        categoryTree: categoryNodes,
+        attributeTypes: (attributeTypes ?? []).map((row) => ({
+          _id: row._id,
+          label: row.label,
+          displayLabel: row.displayLabel,
+          slug: row.slug,
+        })),
+        attributes: (attributesCatalog ?? []).map((row) => ({
+          _id: row._id,
+          attributeTypeId: row.attributeTypeId,
+          label: row.label,
+          value: row.value,
+          slug: row.slug,
+          hex: row.hex,
+        })),
+      });
+
+      setDraft((current) => {
+        const mergedSelections = [...resolved.attributeSelections];
+        for (const row of current.attributeSelections) {
+          if (!mergedSelections.some((item) => item.attributeTypeId === row.attributeTypeId)) {
+            mergedSelections.push(row);
+          }
+        }
+        return {
+          ...current,
+          name: resolved.name,
+          description: resolved.description,
+          brandId: resolved.brandId,
+          brand: resolved.brand,
+          subcategory: resolved.subcategory,
+          productType: resolved.productType,
+          category: resolved.category,
+          categoryId: resolved.categoryId,
+          presentation: resolved.categoryPath
+            ? presentationFromPath(resolved.categoryPath)
+            : resolved.presentation,
+          attributeSelections: mergedSelections,
+        };
+      });
+
+      setPhotoSuggestions(resolved.suggestions);
+      const open: EditorSection[] = ["basics", "classification", "pricing", "variants"];
+      if (resolved.attributeSelections.length > 0 || resolved.suggestions.some((s) => s.kind === "attribute")) {
+        open.push("attributes");
+      }
+      ensureSectionsOpen(open);
+
+      const summary = resolved.appliedSummary.join(", ");
+      toast.success(
+        resolved.suggestions.length > 0
+          ? `Filled: ${summary}. Review AI suggestions below.`
+          : `Filled: ${summary}. Check price and stock.`,
+      );
     } catch (caught) {
       toast.error(reportError(caught).message);
     } finally {
@@ -583,21 +758,87 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     }
   }
 
+  async function applyPhotoSuggestion(suggestion: PhotoFillSuggestion) {
+    if (suggestion.kind === "brand" && suggestion.brandName) {
+      try {
+        const brandId = await ensureBrand({ name: suggestion.brandName });
+        setDraft((current) => ({
+          ...current,
+          brandId,
+          brand: suggestion.brandName ?? current.brand,
+        }));
+        setPhotoSuggestions((rows) => rows.filter((row) => row.id !== suggestion.id));
+        toast.success(`Brand “${suggestion.brandName}” ready.`);
+      } catch (caught) {
+        toast.error(reportError(caught).message);
+      }
+      return;
+    }
+    if (suggestion.kind === "category" && suggestion.category) {
+      const pick = suggestion.category;
+      setDraft((current) => ({
+        ...current,
+        categoryId: pick.categoryId,
+        category: pick.legacyCategory,
+        productType: pick.productTypeHint ?? current.productType,
+        subcategory: pick.name,
+        presentation: presentationFromPath(pick.path),
+      }));
+      setPhotoSuggestions((rows) => rows.filter((row) => row.kind !== "category"));
+      ensureSectionsOpen(["classification", "pricing", "variants"]);
+      toast.success(`Category set to ${pick.path.replace(/\//g, " → ")}.`);
+      return;
+    }
+    if (suggestion.kind === "attribute" && suggestion.attributeTypeId && suggestion.attributeId) {
+      setDraft((current) => {
+        const existing = current.attributeSelections.find(
+          (row) => row.attributeTypeId === suggestion.attributeTypeId,
+        );
+        if (existing) {
+          if (existing.attributeIds.includes(suggestion.attributeId!)) return current;
+          return {
+            ...current,
+            attributeSelections: current.attributeSelections.map((row) =>
+              row.attributeTypeId === suggestion.attributeTypeId
+                ? { ...row, attributeIds: [...row.attributeIds, suggestion.attributeId!] }
+                : row,
+            ),
+          };
+        }
+        return {
+          ...current,
+          attributeSelections: [
+            ...current.attributeSelections,
+            {
+              attributeTypeId: suggestion.attributeTypeId!,
+              attributeIds: [suggestion.attributeId!],
+            },
+          ],
+        };
+      });
+      setPhotoSuggestions((rows) => rows.filter((row) => row.id !== suggestion.id));
+      ensureSectionsOpen(["attributes"]);
+      return;
+    }
+    // Notes / unmatched attributes: dismiss and point the vendor at the right section.
+    setPhotoSuggestions((rows) => rows.filter((row) => row.id !== suggestion.id));
+    if (suggestion.kind === "attribute") ensureSectionsOpen(["attributes"]);
+    if (suggestion.kind === "note" && suggestion.label.toLowerCase().includes("occasion")) {
+      ensureSectionsOpen(["basics"]);
+    }
+  }
+
   function buildArgs(values: ProductFormValues) {
     const price = Number(values.priceInr);
-    const compareAt = values.compareAtPriceInr ? Number(values.compareAtPriceInr) : undefined;
-    const hex = values.colourHex.trim();
     const subcategory = values.productType
       ? productTypeLabel(values.productType)
       : values.subcategory.trim();
-    const customAttributes = values.customAttributes
-      .map((row) => {
-        const key = row.keyInput.trim().toLowerCase().replace(/\s+/g, "_");
-        const value = row.value.trim();
-        if (!key || !value || KNOWN_ATTR_KEYS.has(key)) return null;
-        return { key, label: row.label.trim() || attrLabel(key), value };
-      })
-      .filter((row): row is { key: string; label: string; value: string } => row !== null);
+    const attributeSelections = values.attributeSelections
+      .filter((row) => row.attributeTypeId && row.attributeIds.length > 0)
+      .map((row) => ({
+        attributeTypeId: row.attributeTypeId as Id<"attributeTypes">,
+        attributeIds: row.attributeIds as Id<"attributes">[],
+      }));
     const infoSections = values.infoSections
       .map((section, position) => {
         const title = section.title.trim();
@@ -629,49 +870,46 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       brandId: (values.brandId as Id<"brands"> | null) ?? undefined,
       brand: values.brandId ? undefined : values.brand.trim() || undefined,
       description: values.description.trim(),
-      attributes: customAttributes,
+      attributeSelections: attributeSelections.length > 0 ? attributeSelections : undefined,
       infoSections: infoSections.length > 0 ? infoSections : undefined,
       subcategory: subcategory || values.category,
       productType: values.productType || undefined,
-      colours: {
-        primary: values.colourPrimary.trim(),
-        secondary: values.colourSecondary
-          .split(",")
-          .map((part) => part.trim())
-          .filter(Boolean),
-        hex: /^#[0-9a-fA-F]{6}$/.test(hex) ? [hex.toLowerCase()] : [],
-      },
-      pattern: values.pattern.trim() || undefined,
-      material: values.material.trim() || undefined,
-      size: values.size.trim() || undefined,
-      ageGroup: values.ageGroup || undefined,
-      occasion: values.occasion || undefined,
       priceInr: Math.round(price),
-      compareAtPriceInr: compareAt && compareAt > 0 ? Math.round(compareAt) : undefined,
-      variantTypeIds:
-        values.variantTypeIds.length > 0
-          ? (values.variantTypeIds as Id<"variantTypes">[])
+      variantCategoryIds:
+        values.variantCategoryIds.length > 0
+          ? (values.variantCategoryIds as Id<"variantCategories">[])
           : undefined,
       aiRecommend: values.aiRecommend,
       imageIds: slots.flatMap((slot) => (slot.storageId ? [slot.storageId] : [])),
-      variants: values.variants.map((row) => ({
-        id: row.id as Id<"productVariants"> | undefined,
-        optionIds:
-          row.optionIds.length > 0 ? (row.optionIds as Id<"variantOptions">[]) : undefined,
-        size: row.size.trim() || undefined,
-        colour:
-          row.colourName.trim() || /^#[0-9a-fA-F]{6}$/.test(row.colourHex)
+      variants: (values.variantCategoryIds.length > 0
+        ? values.variants
+        : values.variants.slice(0, 1)
+      ).map((row) => {
+        const labels =
+          catalog && row.attributeIds.length > 0
+            ? labelsFromOptions(catalog, row.attributeIds)
+            : { size: "", colourName: "", colourHex: "" };
+        const size = labels.size || undefined;
+        const colour =
+          labels.colourName || /^#[0-9a-fA-F]{6}$/.test(labels.colourHex)
             ? {
-                name: row.colourName.trim() || values.colourPrimary.trim(),
-                hex: /^#[0-9a-fA-F]{6}$/.test(row.colourHex)
-                  ? row.colourHex.toLowerCase()
-                  : hex || "#111111",
+                name: labels.colourName,
+                hex: /^#[0-9a-fA-F]{6}$/.test(labels.colourHex)
+                  ? labels.colourHex.toLowerCase()
+                  : "#111111",
               }
-            : undefined,
-        priceInr: row.priceInr ? Math.round(Number(row.priceInr)) : undefined,
-        stock: Math.max(0, Math.round(Number(row.stock) || 0)),
-        active: row.active,
-      })),
+            : undefined;
+        return {
+          id: row.id as Id<"productVariants"> | undefined,
+          attributeIds:
+            row.attributeIds.length > 0 ? (row.attributeIds as Id<"attributes">[]) : undefined,
+          ...(size ? { size } : {}),
+          ...(colour ? { colour } : {}),
+          priceInr: row.priceInr ? Math.round(Number(row.priceInr)) : undefined,
+          stock: Math.max(0, Math.round(Number(row.stock) || 0)),
+          active: row.active,
+        };
+      }),
     };
   }
 
@@ -702,6 +940,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
       },
       (formErrors) => {
         const message = firstFormError(formErrors) ?? "Fix the highlighted fields.";
+        ensureSectionsOpen(sectionsForFormErrors(formErrors as Record<string, unknown>));
         setError(message);
         toast.error(message);
       },
@@ -748,7 +987,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
             <p className="truncate text-xs text-muted-foreground">
               {product?.sku ? `SKU ${product.sku}` : "SKU assigned on save"}
               {" · "}
-              {draft.variants.length} variant{draft.variants.length === 1 ? "" : "s"}
+              {draft.variants.length} SKU{draft.variants.length === 1 ? "" : "s"}
               {" · "}
               <span className={totalStock === 0 ? "text-destructive" : undefined}>{totalStock} in stock</span>
               {draft.priceInr ? ` · ${formatInr(Number(draft.priceInr) || 0)}` : ""}
@@ -813,7 +1052,8 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="grid items-start gap-8 px-4 py-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-        <aside className="space-y-3 lg:sticky lg:top-0 lg:self-start">
+        {/* Not sticky: sticky media made Pricing/Stock float beside an empty cover while Basics scrolled away. */}
+        <aside className="space-y-3 lg:self-start">
           <SectionHead title="Media" hint={`Up to ${MAX_PRODUCT_IMAGES} photos · JPEG, PNG, WebP`} />
           <div className="relative aspect-square bg-soft-cloud">
             {chosen?.previewUrl ? (
@@ -899,32 +1139,94 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
               event.target.value = "";
             }}
           />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={!chosen?.storageId || filling || saving}
-              onClick={() => void fillFromPhoto()}
-            >
-              {filling ? "Reading…" : "Fill from photo"}
-            </Button>
-            {chosen && chosen.key !== coverKey ? (
-              <Button type="button" variant="secondary" size="sm" onClick={() => makeCover(chosen.key)}>
-                Make cover
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={!chosen?.storageId || filling || saving}
+                onClick={() => void fillFromPhoto()}
+              >
+                {filling ? "Reading…" : "Fill from photo"}
               </Button>
+              {chosen && chosen.key !== coverKey ? (
+                <Button type="button" variant="secondary" size="sm" onClick={() => makeCover(chosen.key)}>
+                  Make cover
+                </Button>
+              ) : null}
+            </div>
+            {!chosen?.storageId ? (
+              <p className="text-xs text-muted-foreground">
+                Add a cover photo first — AI fills name, description, brand, category, and traits.
+              </p>
             ) : null}
           </div>
+          {photoSuggestions.length > 0 ? (
+            <div className="space-y-2 border border-dashed border-border p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">AI suggestions</p>
+                  <p className="text-xs text-muted-foreground">
+                    Applied what we could match. Use these to finish category, brand, or traits.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPhotoSuggestions([])}
+                >
+                  Dismiss
+                </Button>
+              </div>
+              <ul className="space-y-2">
+                {photoSuggestions.map((suggestion) => (
+                  <li
+                    key={suggestion.id}
+                    className="flex flex-wrap items-center justify-between gap-2 border border-border px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium capitalize">{suggestion.label}</p>
+                      {suggestion.detail ? (
+                        <p className="text-xs text-muted-foreground">{suggestion.detail}</p>
+                      ) : null}
+                    </div>
+                    {suggestion.kind === "brand" || suggestion.kind === "category" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void applyPhotoSuggestion(suggestion)}
+                      >
+                        {suggestion.kind === "brand" ? "Add brand" : "Use category"}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void applyPhotoSuggestion(suggestion)}
+                      >
+                        Got it
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </aside>
 
         <div className="min-w-0">
           <Accordion
             multiple
-            defaultValue={["basics", "classification", "attributes", "info", "pricing", "variants"]}
+            value={openSections}
+            onValueChange={(next) => setOpenSections(next as EditorSection[])}
             className="w-full"
           >
           <AccordionItem value="basics" className="border-border">
-            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
+            <AccordionTrigger className="items-center rounded-none py-4 hover:no-underline">
               <SectionHead title="Basics" hint="What shoppers see first on the product page." />
             </AccordionTrigger>
             <AccordionContent className="space-y-4 pb-6">
@@ -965,15 +1267,25 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
           </AccordionItem>
 
           <AccordionItem value="classification" className="border-border">
-            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
-              <SectionHead title="Classification" hint="Category tree and who this piece is for." />
+            <AccordionTrigger className="items-center rounded-none py-4 hover:no-underline">
+              <SectionHead
+                title="Category"
+                hint="Pick where this product lives in the catalog. Audience and age belong under Product traits."
+                meta={draft.subcategory ? draft.subcategory : undefined}
+              />
             </AccordionTrigger>
             <AccordionContent className="space-y-4 pb-6">
             <CategoryTreePicker
               value={draft.categoryId as Id<"categories"> | null}
               onChange={(pick) => {
                 if (!pick) {
-                  setDraft((prev) => ({ ...prev, categoryId: null, productType: "" }));
+                  setDraft((prev) => ({
+                    ...prev,
+                    categoryId: null,
+                    productType: "",
+                    subcategory: "",
+                    presentation: "neutral",
+                  }));
                   return;
                 }
                 setDraft((prev) => ({
@@ -982,455 +1294,449 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                   category: pick.legacyCategory,
                   productType: pick.productTypeHint ?? "",
                   subcategory: pick.name,
+                  presentation: presentationFromPath(pick.path),
                 }));
+                ensureSectionsOpen(["pricing", "variants"]);
               }}
             />
-            <EditorField label="Audience">
-              <Select
-                value={draft.presentation}
-                onValueChange={(next) => {
-                  if (!next) return;
-                  set("presentation", next as Presentation);
-                }}
-              >
-                <SelectTrigger className="h-10 w-full rounded-full border-transparent bg-muted px-4 shadow-none">
-                  <SelectValue placeholder="Select audience">
-                    {AUDIENCE.find((option) => option.value === draft.presentation)?.label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent className="rounded-none">
-                  {AUDIENCE.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </EditorField>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <EditorField label="Age">
-                <Select
-                  value={draft.ageGroup || null}
-                  onValueChange={(next) => set("ageGroup", (next as AgeGroup | null) ?? "")}
-                >
-                  <SelectTrigger className="h-10 w-full rounded-full border-transparent bg-muted px-4 shadow-none">
-                    <SelectValue placeholder="Select age">
-                      {draft.ageGroup ? AGE_GROUP_LABELS[draft.ageGroup] : null}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="rounded-none">
-                    {AGE_GROUPS.map((item) => (
-                      <SelectItem key={item} value={item}>
-                        {AGE_GROUP_LABELS[item]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </EditorField>
-              <EditorField label="Occasion" error={errors.occasion?.message}>
-                <Select
-                  value={draft.occasion || null}
-                  onValueChange={(next) => {
-                    if (!next) return;
-                    set("occasion", next as Occasion);
-                  }}
-                >
-                  <SelectTrigger
-                    className="h-10 w-full rounded-full border-transparent bg-muted px-4 shadow-none"
-                    aria-invalid={Boolean(errors.occasion)}
-                  >
-                    <SelectValue placeholder="Select occasion">
-                      {draft.occasion ? OCCASION_LABELS[draft.occasion] : null}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="rounded-none">
-                    {OCCASIONS.map((item) => (
-                      <SelectItem key={item} value={item}>
-                        {OCCASION_LABELS[item]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </EditorField>
-            </div>
             </AccordionContent>
           </AccordionItem>
 
           <AccordionItem value="attributes" className="border-border">
-            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
-              <SectionHead title="Attributes" hint="Helps search and outfit matching." />
+            <AccordionTrigger className="items-center rounded-none py-4 hover:no-underline">
+              <SectionHead
+                title="Product traits"
+                hint="Optional filters and PDP details — not stock. Colour, material, audience, age, and more."
+                meta={
+                  draft.attributeSelections.length > 0
+                    ? `${draft.attributeSelections.length} type${draft.attributeSelections.length === 1 ? "" : "s"}`
+                    : "Optional"
+                }
+              />
             </AccordionTrigger>
             <AccordionContent className="space-y-4 pb-6">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <EditorField label="Primary colour" error={errors.colourPrimary?.message}>
-                <Input
-                  maxLength={40}
-                  value={draft.colourPrimary}
-                  aria-invalid={Boolean(errors.colourPrimary)}
-                  onChange={(e) => set("colourPrimary", e.target.value)}
-                  placeholder="Khaki"
-                />
-              </EditorField>
-              <EditorField label="Colour hex" error={errors.colourHex?.message}>
-                <span className="flex gap-2">
-                  <input
-                    type="color"
-                    aria-label="Pick a colour"
-                    value={/^#[0-9a-fA-F]{6}$/.test(draft.colourHex) ? draft.colourHex : "#111111"}
-                    onChange={(e) => set("colourHex", e.target.value)}
-                    className="h-10 w-10 shrink-0 rounded-full border border-transparent bg-muted"
-                  />
-                  <Input
-                    value={draft.colourHex}
-                    aria-invalid={Boolean(errors.colourHex)}
-                    onChange={(e) => set("colourHex", e.target.value)}
-                    placeholder="#c4a574"
-                    maxLength={7}
-                  />
-                </span>
-              </EditorField>
-              <EditorField label="Other colours" error={errors.colourSecondary?.message}>
-                <Input
-                  value={draft.colourSecondary}
-                  aria-invalid={Boolean(errors.colourSecondary)}
-                  onChange={(e) => set("colourSecondary", e.target.value)}
-                  placeholder="navy, white"
-                />
-              </EditorField>
-              <EditorField label="Pattern" error={errors.pattern?.message}>
-                <Input
-                  maxLength={40}
-                  value={draft.pattern}
-                  aria-invalid={Boolean(errors.pattern)}
-                  onChange={(e) => set("pattern", e.target.value)}
-                  placeholder="solid, stripe, check"
-                />
-              </EditorField>
-              <EditorField label="Material" error={errors.material?.message}>
-                <Input
-                  maxLength={60}
-                  value={draft.material}
-                  aria-invalid={Boolean(errors.material)}
-                  onChange={(e) => set("material", e.target.value)}
-                  placeholder="Cotton twill"
-                />
-              </EditorField>
-              <EditorField
-                label="One-size note"
-                hint="Only if this piece has no size variants."
-                error={errors.size?.message}
-              >
-                <Input
-                  maxLength={24}
-                  value={draft.size}
-                  aria-invalid={Boolean(errors.size)}
-                  onChange={(e) => set("size", e.target.value)}
-                  placeholder="One size"
-                />
-              </EditorField>
-            </div>
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium">Custom attributes</p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                Traits describe the product. SKU size/colour options are set under Stock below.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button href={routes.vendorAttributes} variant="ghost" size="sm">
+                  Manage catalog
+                </Button>
                 <Button
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={() =>
-                    set(
-                      "customAttributes",
-                      [
-                        ...draft.customAttributes,
-                        { key: "", keyInput: "", label: "", value: "" },
-                      ],
-                    )
-                  }
+                  disabled={unusedAttributeTypes.length === 0}
+                  onClick={() => {
+                    const first = unusedAttributeTypes[0];
+                    if (!first) return;
+                    set("attributeSelections", [
+                      ...draft.attributeSelections,
+                      { attributeTypeId: first._id, attributeIds: [] },
+                    ]);
+                  }}
                 >
                   <Plus className="size-3.5" aria-hidden />
-                  Add
+                  Add type
                 </Button>
               </div>
-              {draft.customAttributes.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Optional. Add neckline, SPF, frame shape, or any trait.</p>
-              ) : (
-                <ul className="space-y-3">
-                  {draft.customAttributes.map((row, index) => (
-                    <li key={`attr-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                      <div className="space-y-1">
-                        <Input
-                          value={row.keyInput}
-                          aria-invalid={Boolean(errors.customAttributes?.[index]?.keyInput)}
-                          onChange={(e) => {
-                            const keyInput = e.target.value;
+            </div>
+            {(attributeTypes?.length ?? 0) === 0 ? (
+              <Empty className="min-h-0 rounded-none border border-dashed border-border py-8">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Tags />
+                  </EmptyMedia>
+                  <EmptyTitle>No attribute types yet</EmptyTitle>
+                  <EmptyDescription>
+                    Create Colour, Material, Audience, and other types in the Attributes desk, then
+                    select values here.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button href={routes.vendorAttributes} size="sm">
+                    Open Attributes
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            ) : draft.attributeSelections.length === 0 ? (
+              <Empty className="min-h-0 rounded-none border border-dashed border-border py-8">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Tags />
+                  </EmptyMedia>
+                  <EmptyTitle>No traits added</EmptyTitle>
+                  <EmptyDescription>
+                    Optional. Add a type, then multi-select values shoppers can filter by.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={unusedAttributeTypes.length === 0}
+                    onClick={() => {
+                      const first = unusedAttributeTypes[0];
+                      if (!first) return;
+                      set("attributeSelections", [
+                        ...draft.attributeSelections,
+                        { attributeTypeId: first._id, attributeIds: [] },
+                      ]);
+                    }}
+                  >
+                    <Plus className="size-3.5" aria-hidden />
+                    Add type
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            ) : (
+              <ul className="space-y-4">
+                {draft.attributeSelections.map((row, index) => {
+                  const type =
+                    attributeTypes?.find((item) => item._id === row.attributeTypeId) ?? null;
+                  const options = attributesByType.get(row.attributeTypeId) ?? [];
+                  const typeChoices = [
+                    ...(type ? [type] : []),
+                    ...unusedAttributeTypes,
+                  ];
+                  return (
+                    <li key={`${row.attributeTypeId}-${index}`} className="space-y-3 border border-border p-3">
+                      <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <EditorField
+                            label="Attribute type"
+                            error={errors.attributeSelections?.[index]?.attributeTypeId?.message}
+                          >
+                            <Select
+                              value={row.attributeTypeId || null}
+                              onValueChange={(next) => {
+                                if (!next) return;
+                                set(
+                                  "attributeSelections",
+                                  draft.attributeSelections.map((item, i) =>
+                                    i === index
+                                      ? { attributeTypeId: next, attributeIds: [] }
+                                      : item,
+                                  ),
+                                );
+                              }}
+                            >
+                              <SelectTrigger className="h-10 w-full rounded-full border-transparent bg-muted px-4 shadow-none">
+                                <SelectValue placeholder="Select type">
+                                  {type?.displayLabel || type?.label || null}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent className="rounded-none">
+                                {typeChoices.map((item) => (
+                                  <SelectItem key={item._id} value={item._id}>
+                                    {item.displayLabel || item.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </EditorField>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="mt-7"
+                          aria-label="Remove attribute type"
+                          onClick={() =>
                             set(
-                              "customAttributes",
-                              draft.customAttributes.map((item, i) =>
-                                i === index
-                                  ? {
-                                      ...item,
-                                      keyInput,
-                                      label:
-                                        item.label ||
-                                        attrLabel(keyInput.trim().toLowerCase().replace(/\s+/g, "_")),
-                                    }
-                                  : item,
-                              ),
-                            );
-                          }}
-                          placeholder="Key (e.g. neckline)"
-                          maxLength={40}
-                        />
-                        {errors.customAttributes?.[index]?.keyInput?.message ? (
-                          <FieldError>{errors.customAttributes[index].keyInput.message}</FieldError>
-                        ) : null}
+                              "attributeSelections",
+                              draft.attributeSelections.filter((_, i) => i !== index),
+                            )
+                          }
+                        >
+                          <X className="size-3.5" aria-hidden />
+                        </Button>
                       </div>
-                      <div className="space-y-1">
-                        <Input
-                          value={row.value}
-                          aria-invalid={Boolean(errors.customAttributes?.[index]?.value)}
-                          onChange={(e) =>
+                      {options.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          No values for this type
+                          {productCategoryId ? " in the selected category" : ""}. Add them under
+                          Attributes.
+                        </p>
+                      ) : (
+                        <ToggleGroup
+                          multiple
+                          value={row.attributeIds}
+                          onValueChange={(next) =>
                             set(
-                              "customAttributes",
-                              draft.customAttributes.map((item, i) =>
-                                i === index ? { ...item, value: e.target.value } : item,
+                              "attributeSelections",
+                              draft.attributeSelections.map((item, i) =>
+                                i === index ? { ...item, attributeIds: next } : item,
                               ),
                             )
                           }
-                          placeholder="Value"
-                          maxLength={120}
-                        />
-                        {errors.customAttributes?.[index]?.value?.message ? (
-                          <FieldError>{errors.customAttributes[index].value.message}</FieldError>
-                        ) : null}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Remove attribute"
-                        onClick={() =>
-                          set(
-                            "customAttributes",
-                            draft.customAttributes.filter((_, i) => i !== index),
-                          )
-                        }
-                      >
-                        <X className="size-3.5" aria-hidden />
-                      </Button>
+                          spacing={2}
+                          className="flex w-full flex-wrap"
+                        >
+                          {options.map((option) => (
+                            <ToggleGroupItem
+                              key={option._id}
+                              value={option._id}
+                              size="sm"
+                              className="h-8 rounded-full px-3 aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+                            >
+                              {option.hex ? (
+                                <span
+                                  className="size-2.5 shrink-0 rounded-full border border-border"
+                                  style={{ backgroundColor: option.hex }}
+                                  aria-hidden
+                                />
+                              ) : null}
+                              {option.label}
+                            </ToggleGroupItem>
+                          ))}
+                        </ToggleGroup>
+                      )}
+                      {errors.attributeSelections?.[index]?.attributeIds?.message ? (
+                        <FieldError>
+                          {errors.attributeSelections[index].attributeIds.message}
+                        </FieldError>
+                      ) : null}
                     </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                  );
+                })}
+              </ul>
+            )}
             </AccordionContent>
           </AccordionItem>
 
           <AccordionItem value="info" className="border-border">
-            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
+            <AccordionTrigger className="items-center rounded-none py-4 hover:no-underline">
               <SectionHead
                 title="Product information"
-                hint="Accordion sections on the product page. Add, rename, or remove freely."
+                hint="Optional care, FAQ, or other PDP accordion blocks — not catalog attributes."
+                meta={
+                  draft.infoSections.length > 0
+                    ? `${draft.infoSections.length} section${draft.infoSections.length === 1 ? "" : "s"}`
+                    : "Optional"
+                }
               />
             </AccordionTrigger>
             <AccordionContent className="space-y-4 pb-6">
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={draft.infoSections.length >= MAX_INFO_SECTIONS}
-                onClick={() => set("infoSections", [...draft.infoSections, newInfoSection()])}
-              >
-                <Plus className="size-3.5" aria-hidden />
-                Section
-              </Button>
-            </div>
-            <ul className="space-y-4">
-              {draft.infoSections.map((section, index) => (
-                <li key={section.id} className="space-y-3 border border-border p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Input
-                      value={section.title}
-                      onChange={(e) =>
-                        set(
-                          "infoSections",
-                          draft.infoSections.map((item, i) =>
-                            i === index ? { ...item, title: e.target.value } : item,
-                          ),
-                        )
-                      }
-                      placeholder="Section title"
-                      maxLength={80}
-                      className="min-w-0 flex-1"
-                    />
-                    <Select
-                      value={section.kind}
-                      onValueChange={(next) => {
-                        if (!next) return;
-                        set(
-                          "infoSections",
-                          draft.infoSections.map((item, i) =>
-                            i === index ? { ...item, kind: next as InfoSectionKind } : item,
-                          ),
-                        );
-                      }}
-                    >
-                      <SelectTrigger className="h-10 min-w-32 rounded-full border-transparent bg-muted px-4 shadow-none">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-none">
-                        <SelectItem value="rich_text">Text</SelectItem>
-                        <SelectItem value="key_value">Key / value</SelectItem>
-                        <SelectItem value="faq">FAQ</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Remove section"
-                      onClick={() =>
-                        set(
-                          "infoSections",
-                          draft.infoSections.filter((_, i) => i !== index),
-                        )
-                      }
-                    >
-                      <X className="size-3.5" aria-hidden />
-                    </Button>
-                  </div>
-                  {section.kind === "rich_text" ? (
-                    <Textarea
-                      rows={4}
-                      maxLength={4000}
-                      value={section.body}
-                      onChange={(e) =>
-                        set(
-                          "infoSections",
-                          draft.infoSections.map((item, i) =>
-                            i === index ? { ...item, body: e.target.value } : item,
-                          ),
-                        )
-                      }
-                      placeholder="Details shoppers see when they expand this section."
-                    />
-                  ) : (
-                    <div className="space-y-2">
-                      {section.rows.map((row, rowIndex) => (
-                        <div key={`${section.id}-row-${rowIndex}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                          <Input
-                            value={row.label}
-                            onChange={(e) =>
-                              set(
-                                "infoSections",
-                                draft.infoSections.map((item, i) => {
-                                  if (i !== index) return item;
-                                  const rows = item.rows.map((entry, j) =>
-                                    j === rowIndex ? { ...entry, label: e.target.value } : entry,
-                                  );
-                                  return { ...item, rows };
-                                }),
-                              )
-                            }
-                            placeholder={section.kind === "faq" ? "Question" : "Label"}
-                          />
-                          <Input
-                            value={row.value}
-                            onChange={(e) =>
-                              set(
-                                "infoSections",
-                                draft.infoSections.map((item, i) => {
-                                  if (i !== index) return item;
-                                  const rows = item.rows.map((entry, j) =>
-                                    j === rowIndex ? { ...entry, value: e.target.value } : entry,
-                                  );
-                                  return { ...item, rows };
-                                }),
-                              )
-                            }
-                            placeholder={section.kind === "faq" ? "Answer" : "Value"}
-                          />
+            {draft.infoSections.length === 0 ? (
+              <Empty className="min-h-0 rounded-none border border-dashed border-border py-8">
+                <EmptyHeader>
+                  <EmptyTitle>No information sections</EmptyTitle>
+                  <EmptyDescription>
+                    Skip unless the product page needs care instructions, specs, or FAQ.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={draft.infoSections.length >= MAX_INFO_SECTIONS}
+                    onClick={() => set("infoSections", [...draft.infoSections, newInfoSection()])}
+                  >
+                    <Plus className="size-3.5" aria-hidden />
+                    Add section
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            ) : (
+              <>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={draft.infoSections.length >= MAX_INFO_SECTIONS}
+                    onClick={() => set("infoSections", [...draft.infoSections, newInfoSection()])}
+                  >
+                    <Plus className="size-3.5" aria-hidden />
+                    Section
+                  </Button>
+                </div>
+                <ul className="space-y-4">
+                  {draft.infoSections.map((section, index) => (
+                    <li key={section.id} className="space-y-3 border border-border p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          value={section.title}
+                          onChange={(e) =>
+                            set(
+                              "infoSections",
+                              draft.infoSections.map((item, i) =>
+                                i === index ? { ...item, title: e.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="Section title"
+                          maxLength={80}
+                          className="min-w-0 flex-1"
+                        />
+                        <Select
+                          value={section.kind}
+                          onValueChange={(next) => {
+                            if (!next) return;
+                            set(
+                              "infoSections",
+                              draft.infoSections.map((item, i) =>
+                                i === index ? { ...item, kind: next as InfoSectionKind } : item,
+                              ),
+                            );
+                          }}
+                        >
+                          <SelectTrigger className="h-10 min-w-32 rounded-full border-transparent bg-muted px-4 shadow-none">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-none">
+                            <SelectItem value="rich_text">Text</SelectItem>
+                            <SelectItem value="key_value">Key / value</SelectItem>
+                            <SelectItem value="faq">FAQ</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Remove section"
+                          onClick={() =>
+                            set(
+                              "infoSections",
+                              draft.infoSections.filter((_, i) => i !== index),
+                            )
+                          }
+                        >
+                          <X className="size-3.5" aria-hidden />
+                        </Button>
+                      </div>
+                      {section.kind === "rich_text" ? (
+                        <Textarea
+                          rows={4}
+                          maxLength={4000}
+                          value={section.body}
+                          onChange={(e) =>
+                            set(
+                              "infoSections",
+                              draft.infoSections.map((item, i) =>
+                                i === index ? { ...item, body: e.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="Details shoppers see when they expand this section."
+                        />
+                      ) : (
+                        <div className="space-y-2">
+                          {section.rows.map((row, rowIndex) => (
+                            <div key={`${section.id}-row-${rowIndex}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                              <Input
+                                value={row.label}
+                                onChange={(e) =>
+                                  set(
+                                    "infoSections",
+                                    draft.infoSections.map((item, i) => {
+                                      if (i !== index) return item;
+                                      const rows = item.rows.map((entry, j) =>
+                                        j === rowIndex ? { ...entry, label: e.target.value } : entry,
+                                      );
+                                      return { ...item, rows };
+                                    }),
+                                  )
+                                }
+                                placeholder={section.kind === "faq" ? "Question" : "Label"}
+                              />
+                              <Input
+                                value={row.value}
+                                onChange={(e) =>
+                                  set(
+                                    "infoSections",
+                                    draft.infoSections.map((item, i) => {
+                                      if (i !== index) return item;
+                                      const rows = item.rows.map((entry, j) =>
+                                        j === rowIndex ? { ...entry, value: e.target.value } : entry,
+                                      );
+                                      return { ...item, rows };
+                                    }),
+                                  )
+                                }
+                                placeholder={section.kind === "faq" ? "Answer" : "Value"}
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label="Remove row"
+                                onClick={() =>
+                                  set(
+                                    "infoSections",
+                                    draft.infoSections.map((item, i) =>
+                                      i === index
+                                        ? { ...item, rows: item.rows.filter((_, j) => j !== rowIndex) }
+                                        : item,
+                                    ),
+                                  )
+                                }
+                              >
+                                <X className="size-3.5" aria-hidden />
+                              </Button>
+                            </div>
+                          ))}
                           <Button
                             type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label="Remove row"
+                            variant="secondary"
+                            size="sm"
                             onClick={() =>
                               set(
                                 "infoSections",
                                 draft.infoSections.map((item, i) =>
                                   i === index
-                                    ? { ...item, rows: item.rows.filter((_, j) => j !== rowIndex) }
+                                    ? { ...item, rows: [...item.rows, { label: "", value: "" }] }
                                     : item,
                                 ),
                               )
                             }
                           >
-                            <X className="size-3.5" aria-hidden />
+                            <Plus className="size-3.5" aria-hidden />
+                            Row
                           </Button>
                         </div>
-                      ))}
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() =>
-                          set(
-                            "infoSections",
-                            draft.infoSections.map((item, i) =>
-                              i === index
-                                ? { ...item, rows: [...item.rows, { label: "", value: "" }] }
-                                : item,
-                            ),
-                          )
-                        }
-                      >
-                        <Plus className="size-3.5" aria-hidden />
-                        Row
-                      </Button>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
             </AccordionContent>
           </AccordionItem>
 
           <AccordionItem value="pricing" className="border-border">
-            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
-              <SectionHead title="Pricing" hint="Base price for the product. Variants can override." />
+            <AccordionTrigger className="items-center rounded-none py-4 hover:no-underline">
+              <SectionHead
+                title="Pricing"
+                hint="Base price. SKU rows can override; promotions live in Discounts."
+                meta={draft.priceInr ? formatInr(Number(draft.priceInr) || 0) : undefined}
+              />
             </AccordionTrigger>
             <AccordionContent className="space-y-4 pb-6">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <EditorField label="Price (INR)" error={errors.priceInr?.message}>
-                <Input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={draft.priceInr}
-                  aria-invalid={Boolean(errors.priceInr)}
-                  onChange={(e) => set("priceInr", e.target.value)}
-                  placeholder="2499"
-                />
-              </EditorField>
-              <EditorField
-                label="Compare-at (INR)"
-                hint="Shown struck through when higher than price."
-                error={errors.compareAtPriceInr?.message}
-              >
-                <Input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={draft.compareAtPriceInr}
-                  aria-invalid={Boolean(errors.compareAtPriceInr)}
-                  onChange={(e) => set("compareAtPriceInr", e.target.value)}
-                />
-              </EditorField>
-            </div>
-            <label
+            <EditorField
+              label="Price (INR)"
+              hint="Required. Must be greater than 0. Promotions come from the Discounts desk."
+              error={errors.priceInr?.message}
+            >
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                value={draft.priceInr}
+                aria-invalid={Boolean(errors.priceInr)}
+                onChange={(e) => set("priceInr", e.target.value)}
+                placeholder="2499"
+                className="max-w-48"
+              />
+            </EditorField>
+            <Field
+              orientation="horizontal"
               className={cn(
-                "flex items-start gap-3 border border-border px-4 py-3",
+                "items-start border border-border px-4 py-3",
                 aiReady.ready && !locked ? "cursor-pointer" : "cursor-not-allowed opacity-60",
               )}
             >
@@ -1438,53 +1744,50 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 checked={draft.aiRecommend}
                 disabled={locked || !aiReady.ready}
                 onCheckedChange={(checked) => set("aiRecommend", checked === true)}
-                className="mt-1"
+                className="mt-0.5"
               />
-              <span className="min-w-0 space-y-0.5">
-                <span className="block text-sm font-medium">Recommend by AI</span>
-                <span className="block text-xs text-muted-foreground">
+              <div className="min-w-0 space-y-0.5">
+                <FieldLabel className="text-sm font-medium">Recommend by AI</FieldLabel>
+                <FieldDescription>
                   {aiReady.ready
                     ? "When this product is live, the stylist can suggest it in shop looks. Embeddings update on save and publish."
                     : `Add ${formatMissingList(aiReady.missing)} so the stylist has enough to embed.`}
-                </span>
-              </span>
-            </label>
+                </FieldDescription>
+              </div>
+            </Field>
             </AccordionContent>
           </AccordionItem>
 
           <AccordionItem value="variants" className="border-border">
-            <AccordionTrigger className="rounded-none py-4 hover:no-underline">
+            <AccordionTrigger className="items-center rounded-none py-4 hover:no-underline">
               <SectionHead
-                title="Variants & stock"
-                hint="Enable dimensions (from Variants or Attribute recipes), then set stock per SKU."
+                title="Stock & SKUs"
+                hint="Turn on Colour/Size, add SKU rows yourself, or generate all combinations."
+                meta={`${draft.variants.length} SKU${draft.variants.length === 1 ? "" : "s"} · ${totalStock} in stock`}
               />
             </AccordionTrigger>
             <AccordionContent className="space-y-4 pb-6">
             <div className="flex flex-wrap justify-end gap-2">
-                <Button href={routes.vendorAttributes} variant="ghost" size="sm">
-                  Attributes
-                </Button>
-                <Button href={routes.vendorVariantCategories} variant="ghost" size="sm">
-                  Recipes
-                </Button>
                 <Button href={routes.vendorVariants} variant="ghost" size="sm">
-                  Manage options
+                  Manage SKU recipes
                 </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={locked || enabledTypes.length === 0}
-                  onClick={fillAllCombinations}
-                >
-                  Fill combinations
-                </Button>
+                {enabledTypes.length > 0 ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={locked}
+                    onClick={fillAllCombinations}
+                  >
+                    Generate all combinations
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="secondary"
                   size="sm"
                   disabled={locked}
-                  onClick={() => set("variants", [...draft.variants, newVariant()])}
+                  onClick={addVariantRow}
                 >
                   <Plus />
                   Add row
@@ -1493,17 +1796,42 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
 
             <div className="space-y-2">
               <p className="text-sm font-medium">Option dimensions</p>
-              {catalog === undefined || seedingCatalog ? (
-                <p className="text-sm text-muted-foreground">Loading size and colour options…</p>
+              <p className="text-xs text-muted-foreground">
+                Toggle Colour/Size to choose options per row. Use Generate all combinations only when
+                you want every pair at once.
+              </p>
+              {catalog === undefined || categoryTree === undefined ? (
+                <p className="text-sm text-muted-foreground">Loading SKU recipes…</p>
               ) : sortedCatalog.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No variant catalog yet. Seed Size/Colour under Variants, or create an Attribute recipe.
-                </p>
+                <Empty className="min-h-0 rounded-none border border-dashed border-border py-8">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <Layers />
+                    </EmptyMedia>
+                    <EmptyTitle>
+                      {!productCategoryId ? "Pick a category first" : "No SKU recipes for this category"}
+                    </EmptyTitle>
+                    <EmptyDescription>
+                      {!productCategoryId
+                        ? "Choose a category above to see Size, Colour, and other sellable dimensions."
+                        : catalog.length === 0
+                          ? "Create Size/Colour recipes under Variants, then enable them here."
+                          : "No recipes linked to this category or its parents. Link one under Variants."}
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  {productCategoryId ? (
+                    <EmptyContent>
+                      <Button href={routes.vendorVariants} size="sm">
+                        Open Variants
+                      </Button>
+                    </EmptyContent>
+                  ) : null}
+                </Empty>
               ) : (
                 <ToggleGroup
                   multiple
-                  value={draft.variantTypeIds}
-                  onValueChange={(next) => setVariantTypeIds(next)}
+                  value={draft.variantCategoryIds}
+                  onValueChange={(next) => setVariantCategoryIds(next)}
                   disabled={locked}
                   spacing={2}
                   className="flex flex-wrap"
@@ -1523,23 +1851,95 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
               )}
             </div>
 
+            <Separator />
+
+            {enabledTypes.length === 0 ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {!productCategoryId
+                    ? "Pick a category, then enable Size/Colour (or other dimensions) to build SKUs. Until then, use the single stock row below."
+                    : sortedCatalog.length === 0
+                      ? "No SKU recipes for this category yet. Use the default stock row, or create recipes under Variants."
+                      : "Enable one or more dimensions above to auto-create SKU rows. Until then, use the single stock row below."}
+                </p>
+                <div className="overflow-hidden border border-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="h-9 text-xs text-muted-foreground">SKU</TableHead>
+                        <TableHead className="h-9 w-28 text-xs text-muted-foreground">Price</TableHead>
+                        <TableHead className="h-9 w-24 text-xs text-muted-foreground">Stock</TableHead>
+                        <TableHead className="h-9 w-16 text-center text-xs text-muted-foreground">
+                          Active
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {draft.variants.slice(0, 1).map((row, index) => {
+                        const rowErrors = errors.variants?.[index];
+                        const patch = (changes: Partial<VariantRow>) =>
+                          set(
+                            "variants",
+                            draft.variants.map((item) =>
+                              item.key === row.key
+                                ? { ...item, ...changes, size: "", colourName: "", colourHex: "", attributeIds: [] }
+                                : item,
+                            ),
+                          );
+                        return (
+                          <TableRow key={row.key} className="hover:bg-transparent">
+                            <TableCell className="py-1.5 text-sm text-muted-foreground">
+                              Default
+                            </TableCell>
+                            <TableCell className="py-1.5">
+                              <Input
+                                className="h-8 rounded-md px-3 tabular-nums"
+                                type="number"
+                                min={0}
+                                placeholder={draft.priceInr || "—"}
+                                value={row.priceInr}
+                                aria-invalid={Boolean(rowErrors?.priceInr)}
+                                onChange={(e) => patch({ priceInr: e.target.value })}
+                              />
+                            </TableCell>
+                            <TableCell className="py-1.5">
+                              <Input
+                                className="h-8 rounded-md px-3 tabular-nums"
+                                type="number"
+                                min={0}
+                                value={row.stock}
+                                aria-invalid={Boolean(rowErrors?.stock)}
+                                onChange={(e) => patch({ stock: e.target.value })}
+                              />
+                            </TableCell>
+                            <TableCell className="py-1.5 text-center">
+                              <div className="flex justify-center">
+                                <Checkbox
+                                  checked={row.active}
+                                  onCheckedChange={(checked) =>
+                                    patch({ active: checked === true })
+                                  }
+                                  aria-label="Default SKU active"
+                                />
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ) : (
             <div className="overflow-hidden border border-border">
               <Table className="min-w-[40rem]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    {enabledTypes.length > 0 ? (
-                      enabledTypes.map((type) => (
-                        <TableHead key={type.id} className="h-9 text-xs text-muted-foreground">
-                          {type.label}
-                        </TableHead>
-                      ))
-                    ) : (
-                      <>
-                        <TableHead className="h-9 text-xs text-muted-foreground">Size</TableHead>
-                        <TableHead className="h-9 text-xs text-muted-foreground">Colour</TableHead>
-                        <TableHead className="h-9 w-28 text-xs text-muted-foreground">Hex</TableHead>
-                      </>
-                    )}
+                    {enabledTypes.map((type) => (
+                      <TableHead key={type.id} className="h-9 text-xs text-muted-foreground">
+                        {type.label}
+                      </TableHead>
+                    ))}
                     <TableHead className="h-9 w-28 text-xs text-muted-foreground">Price</TableHead>
                     <TableHead className="h-9 w-24 text-xs text-muted-foreground">Stock</TableHead>
                     <TableHead className="h-9 w-16 text-center text-xs text-muted-foreground">Active</TableHead>
@@ -1556,75 +1956,34 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                       );
                     return (
                       <TableRow key={row.key} className="hover:bg-transparent">
-                        {enabledTypes.length > 0 ? (
-                          enabledTypes.map((type) => {
-                            const selectedId =
-                              row.optionIds.find(
-                                (id) => optionById(catalog ?? [], id)?.variantTypeId === type.id,
-                              ) ?? "";
-                            const selected = selectedId
-                              ? type.options.find((option) => option.id === selectedId)
+                        {enabledTypes.map((type) => {
+                          const selectedId =
+                            row.attributeIds.find(
+                              (id) =>
+                                optionById(catalog ?? [], id)?.variantCategoryId === type.id,
+                            ) ?? "";
+                          const selected = selectedId
+                            ? type.options.find((option) => option.id === selectedId)
+                            : undefined;
+                          const swatch =
+                            (type.attributeTypeSlug === "colour" ||
+                              type.attributeTypeSlug === "color") &&
+                            selected
+                              ? (selected.hex ?? COLOUR_HEX[selected.value])
                               : undefined;
-                            const swatch =
-                              type.slug === "colour" && selected
-                                ? COLOUR_HEX[selected.value]
-                                : undefined;
-                            return (
-                              <TableCell key={type.id} className="py-1.5">
-                                <VariantOptionPicker
-                                  type={type}
-                                  value={selected ?? null}
-                                  disabled={locked}
-                                  swatch={swatch}
-                                  ariaLabel={`${type.label} for option ${index + 1}`}
-                                  onChange={(optionId) => setRowOption(row.key, type, optionId)}
-                                />
-                              </TableCell>
-                            );
-                          })
-                        ) : (
-                          <>
-                            <TableCell className="py-1.5">
-                              <Input
-                                className="h-8 rounded-md px-3"
-                                placeholder="M"
-                                value={row.size}
-                                aria-invalid={Boolean(rowErrors?.size)}
-                                onChange={(e) => patch({ size: e.target.value })}
+                          return (
+                            <TableCell key={type.id} className="py-1.5">
+                              <VariantOptionPicker
+                                type={type}
+                                value={selected ?? null}
+                                disabled={locked}
+                                swatch={swatch}
+                                ariaLabel={`${type.label} for option ${index + 1}`}
+                                onChange={(optionId) => setRowOption(row.key, type, optionId)}
                               />
                             </TableCell>
-                            <TableCell className="py-1.5">
-                              <Input
-                                className="h-8 rounded-md px-3"
-                                placeholder="Oat"
-                                value={row.colourName}
-                                aria-invalid={Boolean(rowErrors?.colourName)}
-                                onChange={(e) => patch({ colourName: e.target.value })}
-                              />
-                            </TableCell>
-                            <TableCell className="py-1.5">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  aria-hidden
-                                  className="size-5 shrink-0 rounded-full border border-border"
-                                  style={{
-                                    backgroundColor: /^#[0-9a-fA-F]{6}$/.test(row.colourHex)
-                                      ? row.colourHex
-                                      : "transparent",
-                                  }}
-                                />
-                                <Input
-                                  className="h-8 rounded-md px-3 font-mono text-xs"
-                                  placeholder="#d8cbb4"
-                                  maxLength={7}
-                                  value={row.colourHex}
-                                  aria-invalid={Boolean(rowErrors?.colourHex)}
-                                  onChange={(e) => patch({ colourHex: e.target.value })}
-                                />
-                              </div>
-                            </TableCell>
-                          </>
-                        )}
+                          );
+                        })}
                         <TableCell className="py-1.5">
                           <Input
                             className="h-8 rounded-md px-3 tabular-nums"
@@ -1673,6 +2032,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                 </TableBody>
               </Table>
             </div>
+            )}
 
             {errors.variants?.message || errors.variants?.root?.message ? (
               <p className="text-sm text-destructive">
@@ -1723,11 +2083,29 @@ function formatMissingList(items: string[]): string {
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
-function SectionHead({ title, hint }: { title: string; hint?: string }) {
+function SectionHead({
+  title,
+  hint,
+  meta,
+}: {
+  title: string;
+  hint?: string;
+  meta?: ReactNode;
+}) {
   return (
-    <div className="space-y-0.5 text-left">
-      <h3 className="text-sm font-medium tracking-tight">{title}</h3>
-      {hint ? <p className="text-xs font-normal text-muted-foreground">{hint}</p> : null}
+    <div className="min-w-0 flex-1 pr-3 text-left">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-medium tracking-tight">{title}</h3>
+        {meta ? (
+          <Badge variant="outline" className="font-normal text-muted-foreground">
+            {meta}
+          </Badge>
+        ) : null}
+      </div>
+      {/* Keep hint short in the trigger so it cannot paint over AccordionContent. */}
+      {hint ? (
+        <p className="mt-0.5 line-clamp-1 text-xs font-normal text-muted-foreground">{hint}</p>
+      ) : null}
     </div>
   );
 }
@@ -1805,7 +2183,10 @@ function VariantOptionPicker({
         <ComboboxEmpty>No matches.</ComboboxEmpty>
         <ComboboxList>
           {(option: CatalogOption) => {
-            const hex = type.slug === "colour" ? COLOUR_HEX[option.value] : undefined;
+            const hex =
+              type.attributeTypeSlug === "colour" || type.attributeTypeSlug === "color"
+                ? (option.hex ?? COLOUR_HEX[option.value])
+                : undefined;
             return (
               <ComboboxItem key={option.id} value={option}>
                 {hex ? (

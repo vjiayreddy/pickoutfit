@@ -18,7 +18,9 @@ import {
   vAgeGroup,
   vInventoryReason,
   vOccasion,
+  vOtherDetail,
   vProductAttribute,
+  vProductAttributeSelection,
   vProductCategory,
   vProductInfoSection,
   vProductStatus,
@@ -35,8 +37,11 @@ const vProductFields = {
   brandId: v.optional(v.id("brands")),
   brand: v.optional(v.string()),
   description: v.string(),
+  /** @deprecated Prefer attributeSelections. */
   attributes: v.optional(v.array(vProductAttribute)),
+  attributeSelections: v.optional(v.array(vProductAttributeSelection)),
   infoSections: v.optional(v.array(vProductInfoSection)),
+  otherDetails: v.optional(v.array(vOtherDetail)),
   /** @deprecated Prefer attributes; still merged on write. */
   subcategory: v.optional(v.string()),
   productType: v.optional(v.string()),
@@ -50,10 +55,12 @@ const vProductFields = {
   ageGroup: v.optional(vAgeGroup),
   occasion: v.optional(vOccasion),
   priceInr: v.number(),
+  /** @deprecated Prefer discounts table. */
   compareAtPriceInr: v.optional(v.number()),
-  /** Payload-style dimensions enabled on this product (Size, Colour, …). */
-  variantTypeIds: v.optional(v.array(v.id("variantTypes"))),
+  /** Variants (dimensions) enabled on this product. */
+  variantCategoryIds: v.optional(v.array(v.id("variantCategories"))),
   imageIds: v.array(v.id("_storage")),
+  /** Empty → one default variation for inventory. */
   variants: v.array(vVariantInput),
   aiRecommend: v.optional(v.boolean()),
 };

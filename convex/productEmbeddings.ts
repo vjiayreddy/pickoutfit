@@ -7,7 +7,13 @@ import {
   upsertProductEmbedding,
 } from "./model/productEmbeddings";
 import { pricedUnitInr } from "./model/offers";
-import { buildProductSearchText, coverUrl, isProductActive, vendorFor, type VendorCache } from "./model/products";
+import {
+  coverUrl,
+  isProductActive,
+  resolveProductSearchText,
+  vendorFor,
+  type VendorCache,
+} from "./model/products";
 import { slotHintForProduct, vShopSearchHit } from "./model/shopLooks";
 import { vendorSellable } from "./shared/vendors";
 
@@ -24,20 +30,21 @@ export const productForEmbed = internalQuery({
   handler: async (ctx, { productId }) => {
     const product = await ctx.db.get(productId);
     if (!product || !shouldEmbedProduct(product) || !product.vendorId) return null;
-    const searchText =
-      product.searchText?.trim() ||
-      buildProductSearchText({
-        name: product.name,
-        brand: product.brand,
-        category: product.category,
-        subcategory: product.subcategory,
-        productType: product.productType,
-        colours: product.colours,
-        pattern: product.pattern,
-        material: product.material,
-        description: product.description,
-        attributes: product.attributes,
-      });
+    // Always rebuild so catalog attribute labels + category path stay in the vector.
+    const searchText = await resolveProductSearchText(ctx, {
+      name: product.name,
+      brand: product.brand,
+      category: product.category,
+      categoryPath: product.categoryPath,
+      subcategory: product.subcategory,
+      productType: product.productType,
+      colours: product.colours,
+      pattern: product.pattern,
+      material: product.material,
+      description: product.description,
+      attributes: product.attributes,
+      attributeSelections: product.attributeSelections,
+    });
     if (!searchText) return null;
     return { productId: product._id, vendorId: product.vendorId, searchText };
   },

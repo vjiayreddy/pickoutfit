@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalMutation } from "../_generated/server";
 import { attributesFromLegacy } from "../shared/products";
-import { buildProductSearchText } from "../model/products";
+import { resolveProductSearchText } from "../model/products";
 
 /**
  * One-off: copy legacy typed fashion columns into `products.attributes`
@@ -41,10 +41,11 @@ export const run = internalMutation({
       if (attributes.length === 0) continue;
       await ctx.db.patch(product._id, {
         attributes,
-        searchText: buildProductSearchText({
+        searchText: await resolveProductSearchText(ctx, {
           name: product.name,
           brand: product.brand,
           category: product.category,
+          categoryPath: product.categoryPath,
           subcategory: product.subcategory,
           productType: product.productType,
           colours: product.colours,
@@ -52,6 +53,7 @@ export const run = internalMutation({
           material: product.material,
           description: product.description,
           attributes,
+          attributeSelections: product.attributeSelections,
         }),
         updatedAt: Date.now(),
       });

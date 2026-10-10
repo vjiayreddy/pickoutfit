@@ -73,6 +73,12 @@ export function AccountMenu() {
                 <span className="tabular-nums">{me?.balance.total ?? "—"}</span>
               </Link>
               <MenuLink
+                href={routes.orders}
+                label="Orders"
+                active={isActivePath(pathname, routes.orders)}
+                onNavigate={() => setOpen(false)}
+              />
+              <MenuLink
                 href={routes.billing}
                 label="Billing"
                 active={isActivePath(pathname, routes.billing)}

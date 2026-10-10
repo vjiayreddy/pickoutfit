@@ -207,6 +207,18 @@ export type CategoryTreeNode = {
   children: CategoryTreeNode[];
 };
 
+/**
+ * True when `productPath` is the filter path or a descendant
+ * (e.g. filter `men/topwear` matches `men/topwear/shirts/formal`).
+ */
+export function categoryPathMatchesFilter(productPath: string, filterPath: string): boolean {
+  const product = productPath.replace(/^\/+|\/+$/g, "");
+  const filter = filterPath.replace(/^\/+|\/+$/g, "");
+  if (!filter) return true;
+  if (!product) return false;
+  return product === filter || product.startsWith(`${filter}/`);
+}
+
 /** Map a nested path onto the legacy flat product category enum. */
 export function legacyProductCategoryFromPath(
   path: string,
@@ -293,4 +305,23 @@ export function findCategoryAncestry(
     if (nested) return [node, ...nested];
   }
   return null;
+}
+
+/**
+ * True when a Variant (or attribute) scoped to `scopeCategoryIds` applies to
+ * `productCategoryId`. Empty scope = global. Otherwise the product leaf matches
+ * if it is the scoped node or a descendant (scoped id appears in the ancestry).
+ */
+export function categoryScopeMatches(
+  productCategoryId: string | null | undefined,
+  scopeCategoryIds: readonly string[],
+  tree: CategoryTreeNode[],
+): boolean {
+  if (scopeCategoryIds.length === 0) return true;
+  if (!productCategoryId) return false;
+  if (scopeCategoryIds.includes(productCategoryId)) return true;
+  const ancestry = findCategoryAncestry(tree, productCategoryId);
+  if (!ancestry) return false;
+  const ancestorIds = new Set(ancestry.map((node) => node._id));
+  return scopeCategoryIds.some((id) => ancestorIds.has(id));
 }

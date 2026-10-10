@@ -123,8 +123,9 @@ export function OrderConfirmation({ orderId }: { orderId: string }) {
   return (
     <div className="max-w-xl space-y-4">
       <h1 className="font-display text-4xl uppercase">Order placed</h1>
+      <p className="text-sm capitalize text-mute">Status: {order.status}</p>
       <p className="text-sm text-mute">
-        Payment is not collected yet. The platform owner can see this order.
+        Payment is not collected yet. You can track this order anytime from Orders.
       </p>
       <p className="text-sm font-medium">Total {formatInr(order.totalInr)}</p>
       <ul className="space-y-1 text-sm">
@@ -137,9 +138,14 @@ export function OrderConfirmation({ orderId }: { orderId: string }) {
       <p className="text-sm text-mute">
         {order.name}, {order.address}, {order.city} {order.pincode}
       </p>
-      <Link href={routes.wardrobe} className="text-sm font-medium underline">
-        Back to wardrobe
-      </Link>
+      <div className="flex flex-wrap gap-4">
+        <Link href={routes.order(orderId)} className="text-sm font-medium underline">
+          View order
+        </Link>
+        <Link href={routes.wardrobe} className="text-sm font-medium text-mute underline">
+          Back to wardrobe
+        </Link>
+      </div>
     </div>
   );
 }

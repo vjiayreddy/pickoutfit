@@ -320,9 +320,25 @@ export const vInfoSectionKind = v.union(
   v.literal("faq"),
 );
 
+/** @deprecated Prefer attributeSelections (attributeTypeId + attributeIds). */
 export const vProductAttribute = v.object({
   key: v.string(),
   label: v.string(),
+  value: v.string(),
+});
+
+/**
+ * Product-level trait selection from the vendor attribute catalog.
+ * Multi-select: one type → many attribute value ids (e.g. Colour → Blue, Navy).
+ */
+export const vProductAttributeSelection = v.object({
+  attributeTypeId: v.id("attributeTypes"),
+  attributeIds: v.array(v.id("attributes")),
+});
+
+/** Free-form PDP facts that are not filterable attributes (care, COO, sleeve…). */
+export const vOtherDetail = v.object({
+  key: v.string(),
   value: v.string(),
 });
 
@@ -343,8 +359,8 @@ export const vProductInfoSection = v.object({
 export const vVariantColour = v.object({ name: v.string(), hex: v.string() });
 
 export const vVariantOptionRef = v.object({
-  id: v.id("variantOptions"),
-  variantTypeId: v.id("variantTypes"),
+  id: v.id("attributes"),
+  variantCategoryId: v.union(v.id("variantCategories"), v.null()),
   label: v.string(),
   value: v.string(),
 });
@@ -352,7 +368,7 @@ export const vVariantOptionRef = v.object({
 export const vVariantView = v.object({
   id: v.id("productVariants"),
   sku: v.string(),
-  optionIds: v.array(v.id("variantOptions")),
+  attributeIds: v.array(v.id("attributes")),
   options: v.array(vVariantOptionRef),
   size: v.union(v.string(), v.null()),
   colour: v.union(vVariantColour, v.null()),
@@ -363,11 +379,11 @@ export const vVariantView = v.object({
   position: v.number(),
 });
 
-/** Editable variant fields. `id` present means update, absent means create. */
+/** Editable SKU fields. `id` present means update, absent means create. */
 export const vVariantInput = v.object({
   id: v.optional(v.id("productVariants")),
-  /** Preferred: one option per product variant type (Payload-style). */
-  optionIds: v.optional(v.array(v.id("variantOptions"))),
+  /** Preferred: one attribute per enabled Variant dimension. */
+  attributeIds: v.optional(v.array(v.id("attributes"))),
   size: v.optional(v.string()),
   colour: v.optional(vVariantColour),
   priceInr: v.optional(v.number()),
@@ -418,8 +434,10 @@ export const vProductView = v.object({
   source: vProductSource,
   slug: v.string(),
   category: vProductCategory,
-  /** Nested taxonomy node when set; legacy flat `category` remains. */
+  /** Nested taxonomy leaf when set; legacy flat `category` remains. */
   categoryId: v.union(v.id("categories"), v.null()),
+  /** Denormalized `categories.path` for prefix filters (men/topwear/…). */
+  categoryPath: v.union(v.string(), v.null()),
   presentation: vPresentation,
   name: v.string(),
   sku: v.union(v.string(), v.null()),
@@ -428,10 +446,14 @@ export const vProductView = v.object({
   subcategory: v.string(),
   productType: v.union(v.string(), v.null()),
   description: v.string(),
-  /** Dynamic short traits (color, fit, fabric, custom). */
+  /** @deprecated Prefer attributeSelections. */
   attributes: v.array(vProductAttribute),
+  /** Catalog-backed multi-select traits (Colour, Material, Occasion…). */
+  attributeSelections: v.array(vProductAttributeSelection),
   /** Dynamic PDP accordion blocks. */
   infoSections: v.array(vProductInfoSection),
+  /** Simple key/value PDP facts (care, country of origin…). */
+  otherDetails: v.array(vOtherDetail),
   /** Derived from attributes / legacy columns for older UI. */
   colours: vColours,
   pattern: v.union(v.string(), v.null()),
@@ -440,12 +462,14 @@ export const vProductView = v.object({
   ageGroup: v.union(vAgeGroup, v.null()),
   occasion: v.union(vOccasion, v.null()),
   priceInr: v.number(),
+  /** @deprecated Prefer discounts table for sale pricing. */
   compareAtPriceInr: v.union(v.number(), v.null()),
   /** Present when a live auto offer reduced the price. */
   offer: v.union(vAppliedOffer, v.null()),
   hasVariants: v.boolean(),
-  /** Enabled option dimensions (Payload `variantTypes` on the product). */
-  variantTypeIds: v.array(v.id("variantTypes")),
+  /** Enabled Variants (dimensions) on the product. */
+  variantCategoryIds: v.array(v.id("variantCategories")),
+  /** Sum of active variation stocks (inventory lives on variations). */
   totalStock: v.number(),
   /** `status === "active"`; kept so older UI keeps working. */
   active: v.boolean(),
@@ -612,6 +636,31 @@ export const vOrderView = v.object({
   items: v.array(vOrderItemView),
 });
 
+export const vBuyerOrderListItem = v.object({
+  id: v.id("orders"),
+  createdAt: v.number(),
+  status: vOrderStatus,
+  totalInr: v.number(),
+  itemCount: v.number(),
+  itemPreview: v.array(v.string()),
+});
+
+export const vTimelineEvent = v.object({
+  kind: v.union(
+    v.literal("placed"),
+    v.literal("shipped"),
+    v.literal("delivered"),
+    v.literal("return_requested"),
+    v.literal("return_resolved"),
+  ),
+  at: v.number(),
+  label: v.union(v.string(), v.null()),
+  carrier: v.union(v.string(), v.null()),
+  trackingNumber: v.union(v.string(), v.null()),
+  shipmentId: v.union(v.id("shipments"), v.null()),
+  returnStatus: v.union(vReturnStatus, v.null()),
+});
+
 export const vShipmentView = v.object({
   id: v.id("shipments"),
   orderId: v.id("orders"),
@@ -620,6 +669,7 @@ export const vShipmentView = v.object({
   trackingNumber: v.union(v.string(), v.null()),
   status: vShipmentStatus,
   shippedAt: v.union(v.number(), v.null()),
+  deliveredAt: v.union(v.number(), v.null()),
   createdAt: v.number(),
 });
 
@@ -633,6 +683,23 @@ export const vReturnView = v.object({
   restocked: v.boolean(),
   createdAt: v.number(),
   resolvedAt: v.union(v.number(), v.null()),
+});
+
+export const vBuyerOrderDetail = v.object({
+  id: v.id("orders"),
+  name: v.string(),
+  email: v.string(),
+  phone: v.string(),
+  address: v.string(),
+  city: v.string(),
+  pincode: v.string(),
+  status: vOrderStatus,
+  totalInr: v.number(),
+  createdAt: v.number(),
+  items: v.array(vOrderItemView),
+  shipments: v.array(vShipmentView),
+  returns: v.array(vReturnView),
+  timeline: v.array(vTimelineEvent),
 });
 
 /** One vendor's slice of an order for the desk list. */
@@ -674,9 +741,17 @@ export const MAX_CART_LINES = 30;
 export const ORDER_SAMPLE_CAP = 200;
 export const MAX_PRODUCT_IMAGES = 6;
 export const MAX_PRODUCT_ATTRIBUTES = 40;
+export const MAX_ATTRIBUTE_SELECTIONS = 40;
+export const MAX_ATTRIBUTES_PER_SELECTION = 40;
+export const MAX_OTHER_DETAILS = 40;
 export const MAX_INFO_SECTIONS = 12;
 
 export type ProductAttribute = { key: string; label: string; value: string };
+export type ProductAttributeSelection = {
+  attributeTypeId: string;
+  attributeIds: string[];
+};
+export type OtherDetail = { key: string; value: string };
 export type ProductInfoSection = {
   id: string;
   title: string;

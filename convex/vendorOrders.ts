@@ -79,6 +79,7 @@ function toShipmentView(row: Doc<"shipments">) {
     trackingNumber: row.trackingNumber ?? null,
     status: row.status,
     shippedAt: row.shippedAt ?? null,
+    deliveredAt: row.deliveredAt ?? null,
     createdAt: row.createdAt,
   };
 }
@@ -338,7 +339,7 @@ export const markDelivered = mutation({
     if (shipment.status !== "shipped") {
       throw appError("CONFLICT", "Only shipped packages can be marked delivered.");
     }
-    await ctx.db.patch(shipment._id, { status: "delivered" });
+    await ctx.db.patch(shipment._id, { status: "delivered", deliveredAt: Date.now() });
     return null;
   },
 });

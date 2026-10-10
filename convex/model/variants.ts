@@ -1,328 +1,192 @@
+import type { Infer } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { appError } from "../lib/errors";
-import {
-  COLOUR_HEX,
-  MAX_OPTIONS_PER_TYPE,
-  MAX_VARIANT_TYPES,
-  SEED_VARIANT_TYPES,
-  variantOptionValue,
-  variantTypeSlug,
-  type SeedVariantType,
-} from "../shared/variants";
-import type { Infer } from "convex/values";
 import type { vVariantOptionRef } from "../shared/products";
+import { COLOUR_HEX } from "../shared/variants";
+import { listVariantCategories } from "./variantCategories";
 
 type Ctx = QueryCtx | MutationCtx;
 export type VariantOptionRef = Infer<typeof vVariantOptionRef>;
 
-export async function listVariantTypes(
-  ctx: Ctx,
-  vendorId: Id<"vendors">,
-  opts: { activeOnly?: boolean } = {},
-): Promise<Doc<"variantTypes">[]> {
-  const rows = await ctx.db
-    .query("variantTypes")
-    .withIndex("by_vendorId_and_sortOrder", (q) => q.eq("vendorId", vendorId))
-    .take(MAX_VARIANT_TYPES);
-  const filtered = opts.activeOnly ? rows.filter((row) => row.isActive) : rows;
-  return filtered.sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
-}
+export type VariantCatalogRow = {
+  id: Id<"variantCategories">;
+  label: string;
+  slug: string;
+  attributeTypeId: Id<"attributeTypes">;
+  attributeTypeSlug: string;
+  categoryIds: Id<"categories">[];
+  options: Array<{
+    id: Id<"attributes">;
+    variantCategoryId: Id<"variantCategories">;
+    label: string;
+    value: string;
+    sortOrder: number;
+    isActive: boolean;
+    hex: string | null;
+  }>;
+};
 
-export async function listOptionsForType(
-  ctx: Ctx,
-  variantTypeId: Id<"variantTypes">,
-  opts: { activeOnly?: boolean } = {},
-): Promise<Doc<"variantOptions">[]> {
-  const rows = await ctx.db
-    .query("variantOptions")
-    .withIndex("by_variantTypeId_and_sortOrder", (q) => q.eq("variantTypeId", variantTypeId))
-    .take(MAX_OPTIONS_PER_TYPE);
-  const filtered = opts.activeOnly ? rows.filter((row) => row.isActive) : rows;
-  return filtered.sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
-}
-
+/** Variants (recipes) + attribute options for the product editor. */
 export async function loadVariantCatalog(
   ctx: Ctx,
   vendorId: Id<"vendors">,
-  opts: { activeOnly?: boolean } = {},
-): Promise<
-  Array<
-    Doc<"variantTypes"> & {
-      options: Doc<"variantOptions">[];
+): Promise<VariantCatalogRow[]> {
+  const recipes = await listVariantCategories(ctx, vendorId);
+  const out: VariantCatalogRow[] = [];
+  for (const recipe of recipes) {
+    const type = await ctx.db.get(recipe.attributeTypeId);
+    if (!type || !type.isActive) continue;
+    const options = [];
+    for (const [index, attributeId] of recipe.attributeIds.entries()) {
+      const attr = await ctx.db.get(attributeId);
+      if (!attr || attr.vendorId !== vendorId || !attr.isActive) continue;
+      options.push({
+        id: attr._id,
+        variantCategoryId: recipe._id,
+        label: attr.label,
+        value: attr.value,
+        sortOrder: index,
+        isActive: attr.isActive,
+        hex: attr.hex ?? null,
+      });
     }
-  >
-> {
-  const types = await listVariantTypes(ctx, vendorId, opts);
-  const out = [];
-  for (const type of types) {
-    out.push({ ...type, options: await listOptionsForType(ctx, type._id, opts) });
+    out.push({
+      id: recipe._id,
+      label: recipe.title,
+      slug: recipe.slug,
+      attributeTypeId: recipe.attributeTypeId,
+      attributeTypeSlug: type.slug,
+      categoryIds: recipe.categoryIds,
+      options,
+    });
   }
   return out;
 }
 
-async function assertOwnedType(
+export async function requireActiveVariantCategories(
   ctx: Ctx,
   vendorId: Id<"vendors">,
-  variantTypeId: Id<"variantTypes">,
-): Promise<Doc<"variantTypes">> {
-  const row = await ctx.db.get(variantTypeId);
-  if (!row || row.vendorId !== vendorId) {
-    throw appError("NOT_FOUND", "That variant type doesn't exist.");
+  variantCategoryIds: Id<"variantCategories">[],
+): Promise<Id<"variantCategories">[]> {
+  const unique = [...new Set(variantCategoryIds)];
+  const valid: Id<"variantCategories">[] = [];
+  for (const id of unique) {
+    const row = await ctx.db.get(id);
+    if (row && row.vendorId === vendorId) valid.push(id);
   }
-  return row;
+  if (unique.length > 0 && valid.length === 0) {
+    throw appError(
+      "NOT_FOUND",
+      "Those variants are outdated. Turn them off and on again, then save.",
+    );
+  }
+  return valid;
 }
 
-export async function createVariantType(
-  ctx: MutationCtx,
-  vendorId: Id<"vendors">,
-  input: { label: string; slug?: string; sortOrder?: number },
-): Promise<Id<"variantTypes">> {
-  const label = input.label.trim();
-  if (label.length < 1 || label.length > 40) {
-    throw appError("INVALID_INPUT", "Type label must be 1–40 characters.");
-  }
-  const slug = variantTypeSlug(input.slug?.trim() || label);
-  if (!slug) throw appError("INVALID_INPUT", "Type needs a valid slug.");
-  const existing = await ctx.db
-    .query("variantTypes")
-    .withIndex("by_vendorId_and_slug", (q) => q.eq("vendorId", vendorId).eq("slug", slug))
-    .unique();
-  if (existing) throw appError("CONFLICT", "A type with that slug already exists.");
-  const types = await listVariantTypes(ctx, vendorId);
-  if (types.length >= MAX_VARIANT_TYPES) {
-    throw appError("RATE_LIMITED", `At most ${MAX_VARIANT_TYPES} variant types.`);
-  }
-  const now = Date.now();
-  return ctx.db.insert("variantTypes", {
-    vendorId,
-    label,
-    slug,
-    sortOrder: input.sortOrder ?? types.length,
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-  });
-}
-
-export async function updateVariantType(
-  ctx: MutationCtx,
-  vendorId: Id<"vendors">,
-  variantTypeId: Id<"variantTypes">,
-  patch: { label?: string; sortOrder?: number; isActive?: boolean },
-): Promise<void> {
-  await assertOwnedType(ctx, vendorId, variantTypeId);
-  const next: Partial<Doc<"variantTypes">> = { updatedAt: Date.now() };
-  if (patch.label !== undefined) {
-    const label = patch.label.trim();
-    if (label.length < 1 || label.length > 40) {
-      throw appError("INVALID_INPUT", "Type label must be 1–40 characters.");
-    }
-    next.label = label;
-  }
-  if (patch.sortOrder !== undefined) next.sortOrder = patch.sortOrder;
-  if (patch.isActive !== undefined) next.isActive = patch.isActive;
-  await ctx.db.patch(variantTypeId, next);
-}
-
-export async function createVariantOption(
-  ctx: MutationCtx,
-  vendorId: Id<"vendors">,
-  input: { variantTypeId: Id<"variantTypes">; label: string; value?: string; sortOrder?: number },
-): Promise<Id<"variantOptions">> {
-  await assertOwnedType(ctx, vendorId, input.variantTypeId);
-  const label = input.label.trim();
-  if (label.length < 1 || label.length > 40) {
-    throw appError("INVALID_INPUT", "Option label must be 1–40 characters.");
-  }
-  const value = variantOptionValue(input.value?.trim() || label);
-  const clash = await ctx.db
-    .query("variantOptions")
-    .withIndex("by_variantTypeId_and_value", (q) =>
-      q.eq("variantTypeId", input.variantTypeId).eq("value", value),
-    )
-    .unique();
-  if (clash) throw appError("CONFLICT", "That option value already exists on this type.");
-  const options = await listOptionsForType(ctx, input.variantTypeId);
-  if (options.length >= MAX_OPTIONS_PER_TYPE) {
-    throw appError("RATE_LIMITED", `At most ${MAX_OPTIONS_PER_TYPE} options per type.`);
-  }
-  const now = Date.now();
-  return ctx.db.insert("variantOptions", {
-    variantTypeId: input.variantTypeId,
-    label,
-    value,
-    sortOrder: input.sortOrder ?? options.length,
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-  });
-}
-
-export async function updateVariantOption(
-  ctx: MutationCtx,
-  vendorId: Id<"vendors">,
-  variantOptionId: Id<"variantOptions">,
-  patch: { label?: string; sortOrder?: number; isActive?: boolean },
-): Promise<void> {
-  const row = await ctx.db.get(variantOptionId);
-  if (!row) throw appError("NOT_FOUND", "That option doesn't exist.");
-  await assertOwnedType(ctx, vendorId, row.variantTypeId);
-  const next: Partial<Doc<"variantOptions">> = { updatedAt: Date.now() };
-  if (patch.label !== undefined) {
-    const label = patch.label.trim();
-    if (label.length < 1 || label.length > 40) {
-      throw appError("INVALID_INPUT", "Option label must be 1–40 characters.");
-    }
-    next.label = label;
-  }
-  if (patch.sortOrder !== undefined) next.sortOrder = patch.sortOrder;
-  if (patch.isActive !== undefined) next.isActive = patch.isActive;
-  await ctx.db.patch(variantOptionId, next);
-}
-
-async function ensureType(
-  ctx: MutationCtx,
-  vendorId: Id<"vendors">,
-  seed: SeedVariantType,
-  sortOrder: number,
-): Promise<Id<"variantTypes">> {
-  const existing = await ctx.db
-    .query("variantTypes")
-    .withIndex("by_vendorId_and_slug", (q) => q.eq("vendorId", vendorId).eq("slug", seed.slug))
-    .unique();
-  const now = Date.now();
-  if (existing) {
-    await ctx.db.patch(existing._id, {
-      label: seed.label,
-      sortOrder,
-      isActive: true,
-      updatedAt: now,
-    });
-    return existing._id;
-  }
-  return ctx.db.insert("variantTypes", {
-    vendorId,
-    label: seed.label,
-    slug: seed.slug,
-    sortOrder,
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-  });
-}
-
-async function ensureOption(
-  ctx: MutationCtx,
-  variantTypeId: Id<"variantTypes">,
-  label: string,
-  value: string,
-  sortOrder: number,
-): Promise<void> {
-  const existing = await ctx.db
-    .query("variantOptions")
-    .withIndex("by_variantTypeId_and_value", (q) =>
-      q.eq("variantTypeId", variantTypeId).eq("value", value),
-    )
-    .unique();
-  const now = Date.now();
-  if (existing) {
-    await ctx.db.patch(existing._id, { label, sortOrder, isActive: true, updatedAt: now });
-    return;
-  }
-  await ctx.db.insert("variantOptions", {
-    variantTypeId,
-    label,
-    value,
-    sortOrder,
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-  });
-}
-
-/** Idempotent seed of Size + Colour for one store. */
-export async function seedVariantTypes(
-  ctx: MutationCtx,
-  vendorId: Id<"vendors">,
-): Promise<{ types: number; options: number }> {
-  let types = 0;
-  let options = 0;
-  for (const [typeIndex, seed] of SEED_VARIANT_TYPES.entries()) {
-    const typeId = await ensureType(ctx, vendorId, seed, typeIndex);
-    types += 1;
-    for (const [optionIndex, option] of seed.options.entries()) {
-      await ensureOption(ctx, typeId, option.label, option.value, optionIndex);
-      options += 1;
-    }
-  }
-  return { types, options };
-}
-
-export async function resolveOptionIds(
+export async function resolveAttributeIds(
   ctx: Ctx,
-  optionIds: Id<"variantOptions">[],
-  allowedTypeIds?: Id<"variantTypes">[],
+  attributeIds: Id<"attributes">[],
+  allowedCategoryIds?: Id<"variantCategories">[],
   vendorId?: Id<"vendors">,
 ): Promise<{
-  optionIds: Id<"variantOptions">[];
-  options: Doc<"variantOptions">[];
-  types: Map<Id<"variantTypes">, Doc<"variantTypes">>;
+  attributeIds: Id<"attributes">[];
+  attributes: Doc<"attributes">[];
+  categories: Map<Id<"variantCategories">, Doc<"variantCategories">>;
+  types: Map<Id<"attributeTypes">, Doc<"attributeTypes">>;
 }> {
-  if (optionIds.length === 0) {
-    return { optionIds: [], options: [], types: new Map() };
+  if (attributeIds.length === 0) {
+    return {
+      attributeIds: [],
+      attributes: [],
+      categories: new Map(),
+      types: new Map(),
+    };
   }
-  const unique = [...new Set(optionIds)];
-  if (unique.length !== optionIds.length) {
+  const unique = [...new Set(attributeIds)];
+  if (unique.length !== attributeIds.length) {
     throw appError("INVALID_INPUT", "Each option can only be selected once.");
   }
-  const options: Doc<"variantOptions">[] = [];
-  const types = new Map<Id<"variantTypes">, Doc<"variantTypes">>();
-  const seenTypes = new Set<Id<"variantTypes">>();
-  for (const optionId of unique) {
-    const option = await ctx.db.get(optionId);
-    if (!option || !option.isActive) {
+
+  const recipes =
+    allowedCategoryIds && allowedCategoryIds.length > 0
+      ? (
+          await Promise.all(allowedCategoryIds.map((id) => ctx.db.get(id)))
+        ).filter((row): row is Doc<"variantCategories"> => Boolean(row))
+      : [];
+
+  const attributes: Doc<"attributes">[] = [];
+  const categories = new Map<Id<"variantCategories">, Doc<"variantCategories">>();
+  const types = new Map<Id<"attributeTypes">, Doc<"attributeTypes">>();
+  const seenCategories = new Set<Id<"variantCategories">>();
+
+  for (const attributeId of unique) {
+    const attr = await ctx.db.get(attributeId);
+    if (!attr || !attr.isActive) {
       throw appError("NOT_FOUND", "One of the selected options no longer exists.");
     }
-    if (allowedTypeIds && !allowedTypeIds.includes(option.variantTypeId)) {
-      throw appError("INVALID_INPUT", "That option is not enabled on this product.");
+    if (vendorId && attr.vendorId !== vendorId) {
+      throw appError("FORBIDDEN", "That option belongs to another store.");
     }
-    if (seenTypes.has(option.variantTypeId)) {
-      throw appError("INVALID_INPUT", "Pick only one option per type (e.g. one size, one colour).");
-    }
-    seenTypes.add(option.variantTypeId);
-    let type = types.get(option.variantTypeId);
-    if (!type) {
-      const loaded = await ctx.db.get(option.variantTypeId);
-      if (!loaded || !loaded.isActive) {
-        throw appError("NOT_FOUND", "A variant type for this option is missing.");
+
+    const matchingRecipes = recipes.filter(
+      (recipe) =>
+        recipe.attributeTypeId === attr.attributeTypeId &&
+        recipe.attributeIds.includes(attr._id),
+    );
+    if (allowedCategoryIds && allowedCategoryIds.length > 0) {
+      if (matchingRecipes.length === 0) {
+        throw appError("INVALID_INPUT", "That option is not enabled on this product.");
       }
-      if (vendorId && loaded.vendorId && loaded.vendorId !== vendorId) {
-        throw appError("FORBIDDEN", "That option belongs to another store.");
+      const recipe = matchingRecipes[0]!;
+      if (seenCategories.has(recipe._id)) {
+        throw appError(
+          "INVALID_INPUT",
+          "Pick only one option per variant (e.g. one size, one colour).",
+        );
+      }
+      seenCategories.add(recipe._id);
+      categories.set(recipe._id, recipe);
+    } else {
+      // No enabled dimensions — still enforce one attribute per attribute type.
+      if (types.has(attr.attributeTypeId)) {
+        throw appError(
+          "INVALID_INPUT",
+          "Pick only one option per variant (e.g. one size, one colour).",
+        );
+      }
+    }
+
+    let type = types.get(attr.attributeTypeId);
+    if (!type) {
+      const loaded = await ctx.db.get(attr.attributeTypeId);
+      if (!loaded || !loaded.isActive) {
+        throw appError("NOT_FOUND", "An attribute type for this option is missing.");
       }
       type = loaded;
       types.set(loaded._id, loaded);
     }
-    options.push(option);
+    attributes.push(attr);
   }
-  return { optionIds: unique, options, types };
+
+  return { attributeIds: unique, attributes, categories, types };
 }
 
-/** Derive legacy size/colour from structured options so cart labels keep working. */
-export function legacyFieldsFromOptions(
-  options: Doc<"variantOptions">[],
-  types: Map<Id<"variantTypes">, Doc<"variantTypes">>,
+/** Derive legacy size/colour from structured attributes so cart labels keep working. */
+export function legacyFieldsFromAttributes(
+  attributes: Doc<"attributes">[],
+  types: Map<Id<"attributeTypes">, Doc<"attributeTypes">>,
 ): { size?: string; colour?: { name: string; hex: string } } {
   let size: string | undefined;
   let colour: { name: string; hex: string } | undefined;
-  for (const option of options) {
-    const type = types.get(option.variantTypeId);
+  for (const attr of attributes) {
+    const type = types.get(attr.attributeTypeId);
     if (!type) continue;
-    if (type.slug === "size") size = option.label;
-    if (type.slug === "colour") {
+    if (type.slug === "size") size = attr.label;
+    if (type.slug === "colour" || type.slug === "color") {
       colour = {
-        name: option.label,
-        hex: COLOUR_HEX[option.value] ?? "#707072",
+        name: attr.label,
+        hex: attr.hex ?? COLOUR_HEX[attr.value] ?? "#707072",
       };
     }
   }
@@ -332,44 +196,35 @@ export function legacyFieldsFromOptions(
   };
 }
 
-export async function optionRefsFor(
+export async function attributeRefsFor(
   ctx: Ctx,
-  optionIds: Id<"variantOptions">[] | undefined,
+  attributeIds: Id<"attributes">[] | undefined,
+  variantCategoryIds?: Id<"variantCategories">[],
 ): Promise<VariantOptionRef[]> {
-  if (!optionIds?.length) return [];
+  if (!attributeIds?.length) return [];
+  const recipes =
+    variantCategoryIds && variantCategoryIds.length > 0
+      ? (
+          await Promise.all(variantCategoryIds.map((id) => ctx.db.get(id)))
+        ).filter((row): row is Doc<"variantCategories"> => Boolean(row))
+      : [];
+
   const refs: VariantOptionRef[] = [];
-  for (const optionId of optionIds) {
-    const option = await ctx.db.get(optionId);
-    if (!option) continue;
+  for (const attributeId of attributeIds) {
+    const attr = await ctx.db.get(attributeId);
+    if (!attr) continue;
+    const recipe =
+      recipes.find(
+        (row) =>
+          row.attributeTypeId === attr.attributeTypeId &&
+          row.attributeIds.includes(attr._id),
+      ) ?? null;
     refs.push({
-      id: option._id,
-      variantTypeId: option.variantTypeId,
-      label: option.label,
-      value: option.value,
+      id: attr._id,
+      variantCategoryId: recipe?._id ?? null,
+      label: attr.label,
+      value: attr.value,
     });
   }
   return refs;
-}
-
-export async function requireActiveVariantTypes(
-  ctx: Ctx,
-  vendorId: Id<"vendors">,
-  variantTypeIds: Id<"variantTypes">[],
-): Promise<Id<"variantTypes">[]> {
-  const unique = [...new Set(variantTypeIds)];
-  const valid: Id<"variantTypes">[] = [];
-  for (const id of unique) {
-    const type = await ctx.db.get(id);
-    // Drop legacy/orphan ids (no vendorId) and types from other stores.
-    if (type && type.isActive && type.vendorId === vendorId) {
-      valid.push(id);
-    }
-  }
-  if (unique.length > 0 && valid.length === 0) {
-    throw appError(
-      "NOT_FOUND",
-      "Those option dimensions are outdated. Turn Size/Colour off and on again, then save.",
-    );
-  }
-  return valid;
 }

@@ -2,8 +2,8 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser } from "./lib/auth";
 import { appError } from "./lib/errors";
-import { placeOrder, toOrderView } from "./model/orders";
-import { vOrderView } from "./shared/products";
+import { listOrdersForUser, placeOrder, toBuyerOrderDetail } from "./model/orders";
+import { vBuyerOrderDetail, vBuyerOrderListItem } from "./shared/products";
 
 export const checkout = mutation({
   args: {
@@ -24,15 +24,24 @@ export const checkout = mutation({
   },
 });
 
+export const listMine = query({
+  args: {},
+  returns: v.array(vBuyerOrderListItem),
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    return listOrdersForUser(ctx, user._id);
+  },
+});
+
 export const getMine = query({
   args: { orderId: v.id("orders") },
-  returns: vOrderView,
+  returns: vBuyerOrderDetail,
   handler: async (ctx, { orderId }) => {
     const user = await requireUser(ctx);
     const order = await ctx.db.get(orderId);
     if (!order || order.userId !== user._id) {
       throw appError("NOT_FOUND", "That order doesn't exist.");
     }
-    return toOrderView(ctx, order);
+    return toBuyerOrderDetail(ctx, order);
   },
 });

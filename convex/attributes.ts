@@ -118,7 +118,8 @@ export const create = mutation({
   args: {
     attributeTypeId: v.id("attributeTypes"),
     label: v.string(),
-    value: v.optional(v.string()),
+    value: v.string(),
+    hex: v.optional(v.string()),
     categoryIds: v.optional(v.array(v.id("categories"))),
     mediaStorageId: v.optional(v.id("_storage")),
   },
@@ -133,6 +134,8 @@ export const update = mutation({
   args: {
     attributeId: v.id("attributes"),
     label: v.optional(v.string()),
+    value: v.optional(v.string()),
+    hex: v.optional(v.union(v.string(), v.null())),
     categoryIds: v.optional(v.array(v.id("categories"))),
     mediaStorageId: v.optional(v.union(v.id("_storage"), v.null())),
     isActive: v.optional(v.boolean()),

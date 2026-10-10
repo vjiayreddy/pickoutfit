@@ -6,6 +6,8 @@ import {
   MAX_ATTRIBUTE_TYPES,
   SEED_ATTRIBUTE_TYPES,
   attributeSlug,
+  isColourAttributeType,
+  normalizeAttributeHex,
 } from "../shared/attributes";
 
 type Ctx = QueryCtx | MutationCtx;
@@ -156,37 +158,74 @@ export async function updateAttributeType(
   await ctx.db.patch(attributeTypeId, next);
 }
 
+function resolveHexForType(
+  typeSlug: string,
+  hex: string | undefined | null,
+  opts: { required?: boolean } = {},
+): string | undefined {
+  if (!isColourAttributeType(typeSlug)) {
+    return undefined;
+  }
+  const normalized = normalizeAttributeHex(hex);
+  if (normalized) return normalized;
+  if (hex != null && String(hex).trim() !== "") {
+    throw appError("INVALID_INPUT", "Use a hex colour like #c4a574.");
+  }
+  if (opts.required) {
+    throw appError("INVALID_INPUT", "Pick a hex colour for Colour attributes.");
+  }
+  return undefined;
+}
+
 export async function createAttribute(
   ctx: MutationCtx,
   vendorId: Id<"vendors">,
   input: {
     attributeTypeId: Id<"attributeTypes">;
     label: string;
-    value?: string;
+    value: string;
+    hex?: string;
     categoryIds?: Id<"categories">[];
     mediaStorageId?: Id<"_storage">;
     sortOrder?: number;
   },
 ): Promise<Id<"attributes">> {
-  await assertOwnedAttributeType(ctx, vendorId, input.attributeTypeId);
+  const type = await assertOwnedAttributeType(ctx, vendorId, input.attributeTypeId);
   const label = input.label.trim();
   if (label.length < 1 || label.length > 60) {
     throw appError("INVALID_INPUT", "Attribute label must be 1–60 characters.");
   }
-  const value = attributeSlug(input.value?.trim() || label);
+  const rawValue = input.value.trim();
+  if (!rawValue) {
+    throw appError("INVALID_INPUT", "Attribute value is required.");
+  }
+  const value = attributeSlug(rawValue);
   if (!value) throw appError("INVALID_INPUT", "Attribute needs a valid value.");
-  const slug = attributeSlug(label);
+  const slug = attributeSlug(label) || value;
   const categoryIds = input.categoryIds ?? [];
   await assertOwnedCategories(ctx, vendorId, categoryIds);
+  const hex = resolveHexForType(type.slug, input.hex, {
+    required: isColourAttributeType(type.slug),
+  });
 
-  const clash = await ctx.db
+  const valueClash = await ctx.db
     .query("attributes")
     .withIndex("by_attributeTypeId_and_value", (q) =>
       q.eq("attributeTypeId", input.attributeTypeId).eq("value", value),
     )
     .unique();
-  if (clash && clash.vendorId === vendorId) {
+  if (valueClash && valueClash.vendorId === vendorId) {
     throw appError("CONFLICT", "That attribute value already exists on this type.");
+  }
+
+  const slugClash = await ctx.db
+    .query("attributes")
+    .withIndex("by_attributeTypeId_and_slug", (q) =>
+      q.eq("attributeTypeId", input.attributeTypeId).eq("slug", slug),
+    )
+    .unique();
+  if (slugClash && slugClash.vendorId === vendorId) {
+    throw appError("CONFLICT", "An attribute with that slug already exists on this type.");
   }
 
   const existing = await listAttributes(ctx, vendorId, {
@@ -203,6 +242,7 @@ export async function createAttribute(
     label,
     value,
     slug,
+    ...(hex ? { hex } : {}),
     categoryIds,
     mediaStorageId: input.mediaStorageId,
     isActive: true,
@@ -217,6 +257,8 @@ export async function updateAttribute(
   attributeId: Id<"attributes">,
   patch: {
     label?: string;
+    value?: string;
+    hex?: string | null;
     categoryIds?: Id<"categories">[];
     mediaStorageId?: Id<"_storage"> | null;
     isActive?: boolean;
@@ -226,14 +268,55 @@ export async function updateAttribute(
   if (!row || row.vendorId !== vendorId) {
     throw appError("NOT_FOUND", "That attribute doesn't exist.");
   }
+  const type = await assertOwnedAttributeType(ctx, vendorId, row.attributeTypeId);
   const next: Partial<Doc<"attributes">> = { updatedAt: Date.now() };
   if (patch.label !== undefined) {
     const label = patch.label.trim();
     if (label.length < 1 || label.length > 60) {
       throw appError("INVALID_INPUT", "Attribute label must be 1–60 characters.");
     }
+    const slug = attributeSlug(label) || (patch.value !== undefined ? attributeSlug(patch.value) : row.value);
+    if (slug !== row.slug) {
+      const slugClash = await ctx.db
+        .query("attributes")
+        .withIndex("by_attributeTypeId_and_slug", (q) =>
+          q.eq("attributeTypeId", row.attributeTypeId).eq("slug", slug),
+        )
+        .unique();
+      if (slugClash && slugClash._id !== attributeId && slugClash.vendorId === vendorId) {
+        throw appError("CONFLICT", "An attribute with that slug already exists on this type.");
+      }
+    }
     next.label = label;
-    next.slug = attributeSlug(label);
+    next.slug = slug;
+  }
+  if (patch.value !== undefined) {
+    const rawValue = patch.value.trim();
+    if (!rawValue) {
+      throw appError("INVALID_INPUT", "Attribute value is required.");
+    }
+    const value = attributeSlug(rawValue);
+    if (!value) throw appError("INVALID_INPUT", "Attribute needs a valid value.");
+    if (value !== row.value) {
+      const valueClash = await ctx.db
+        .query("attributes")
+        .withIndex("by_attributeTypeId_and_value", (q) =>
+          q.eq("attributeTypeId", row.attributeTypeId).eq("value", value),
+        )
+        .unique();
+      if (valueClash && valueClash._id !== attributeId && valueClash.vendorId === vendorId) {
+        throw appError("CONFLICT", "That attribute value already exists on this type.");
+      }
+    }
+    next.value = value;
+  }
+  if (patch.hex !== undefined) {
+    if (patch.hex === null || patch.hex === "") {
+      next.hex = undefined;
+    } else {
+      const hex = resolveHexForType(type.slug, patch.hex, { required: true });
+      next.hex = hex;
+    }
   }
   if (patch.categoryIds !== undefined) {
     await assertOwnedCategories(ctx, vendorId, patch.categoryIds);
@@ -292,10 +375,12 @@ export async function seedAttributeCatalog(
           q.eq("attributeTypeId", typeId).eq("value", value.value),
         )
         .unique();
+      const hex = value.hex ? normalizeAttributeHex(value.hex) ?? undefined : undefined;
       if (existingAttr && existingAttr.vendorId === vendorId) {
         await ctx.db.patch(existingAttr._id, {
           label: value.label,
           slug: attributeSlug(value.label),
+          ...(hex ? { hex } : {}),
           isActive: true,
           updatedAt: Date.now(),
         });
@@ -306,6 +391,7 @@ export async function seedAttributeCatalog(
           label: value.label,
           value: value.value,
           slug: attributeSlug(value.label),
+          ...(hex ? { hex } : {}),
           categoryIds: [],
           isActive: true,
           createdAt: Date.now(),

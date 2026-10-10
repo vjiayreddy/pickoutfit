@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalMutation } from "../_generated/server";
 import { upsertBrand } from "../model/brands";
-import { buildProductSearchText } from "../model/products";
+import { resolveProductSearchText } from "../model/products";
 
 /**
  * One-off: create vendor brand rows from free-text `products.brand`
@@ -32,10 +32,11 @@ export const run = internalMutation({
       await ctx.db.patch(product._id, {
         brandId,
         brand: brand?.name ?? name,
-        searchText: buildProductSearchText({
+        searchText: await resolveProductSearchText(ctx, {
           name: product.name,
           brand: brand?.name ?? name,
           category: product.category,
+          categoryPath: product.categoryPath,
           subcategory: product.subcategory,
           productType: product.productType,
           colours: product.colours,
@@ -43,6 +44,7 @@ export const run = internalMutation({
           material: product.material,
           description: product.description,
           attributes: product.attributes,
+          attributeSelections: product.attributeSelections,
         }),
         updatedAt: Date.now(),
       });

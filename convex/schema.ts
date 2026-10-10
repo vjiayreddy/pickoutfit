@@ -9,7 +9,9 @@ import {
   vOfferKind,
   vOrderLineStatus,
   vOrderStatus,
+  vOtherDetail,
   vProductAttribute,
+  vProductAttributeSelection,
   vProductCategory,
   vProductImageKind,
   vProductInfoSection,
@@ -528,6 +530,8 @@ export default defineSchema({
     label: v.string(),
     value: v.string(),
     slug: v.string(),
+    /** Hex swatch for colour attributes, e.g. `#1151ff`. */
+    hex: v.optional(v.string()),
     categoryIds: v.array(v.id("categories")),
     mediaStorageId: v.optional(v.id("_storage")),
     isActive: v.boolean(),
@@ -540,8 +544,8 @@ export default defineSchema({
     .index("by_attributeTypeId_and_value", ["attributeTypeId", "value"]),
 
   /**
-   * Admin recipe: attributeType + categories + selected attributes.
-   * Upsert syncs a linked `variantTypes` row and its `variantOptions`.
+   * Vendor Variants: attributeType + categories + selected attributes.
+   * Products enable these dimensions via `variantCategoryIds`; SKUs pick `attributeIds`.
    */
   variantCategories: defineTable({
     vendorId: v.id("vendors"),
@@ -556,47 +560,6 @@ export default defineSchema({
     .index("by_vendorId", ["vendorId"])
     .index("by_vendorId_and_slug", ["vendorId", "slug"])
     .index("by_vendorId_and_attributeTypeId", ["vendorId", "attributeTypeId"]),
-
-  /**
-   * Per-store option dimensions (Size, Colour, etc.).
-   * Products opt in via `variantTypeIds`. `vendorId` optional for legacy rows.
-   * When created from a `variantCategories` recipe, `variantCategoryId` is set.
-   */
-  variantTypes: defineTable({
-    vendorId: v.optional(v.id("vendors")),
-    label: v.string(),
-    slug: v.string(),
-    sortOrder: v.number(),
-    isActive: v.boolean(),
-    attributeTypeId: v.optional(v.id("attributeTypes")),
-    categoryIds: v.optional(v.array(v.id("categories"))),
-    variantCategoryId: v.optional(v.id("variantCategories")),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_vendorId", ["vendorId"])
-    .index("by_vendorId_and_slug", ["vendorId", "slug"])
-    .index("by_vendorId_and_sortOrder", ["vendorId", "sortOrder"])
-    .index("by_variantCategoryId", ["variantCategoryId"])
-    .index("by_attributeTypeId", ["attributeTypeId"]),
-
-  /**
-   * Values on a dimension (Payload `variantOptions`): S/M/L, Black/Navy, etc.
-   * Recipe-synced options also keep `attributeId` back to the catalog attribute.
-   */
-  variantOptions: defineTable({
-    variantTypeId: v.id("variantTypes"),
-    label: v.string(),
-    value: v.string(),
-    sortOrder: v.number(),
-    isActive: v.boolean(),
-    attributeId: v.optional(v.id("attributes")),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_variantTypeId_and_sortOrder", ["variantTypeId", "sortOrder"])
-    .index("by_variantTypeId_and_value", ["variantTypeId", "value"])
-    .index("by_variantTypeId_and_attributeId", ["variantTypeId", "attributeId"]),
 
   /**
    * Per-store fashion brands (Nike, Louis Philippe, …).
@@ -617,7 +580,9 @@ export default defineSchema({
 
   /**
    * Marketplace catalog. One row per sellable product, owned by a vendor.
-   * Typed fashion columns below remain optional for legacy rows; new writes prefer `attributes`.
+   * Defaults: sku, name, slug, description, price, categoryId/path, brand, status, aiRecommend.
+   * Traits → attributeSelections; inventory → productVariants (always ≥1); sales → discounts table.
+   * Typed fashion columns remain optional for legacy rows.
    */
   products: defineTable({
     vendorId: v.optional(v.id("vendors")),
@@ -626,8 +591,10 @@ export default defineSchema({
     slug: v.optional(v.string()),
     source: v.optional(vProductSource),
     category: vProductCategory,
-    /** Nested taxonomy leaf (or any node). Optional until products are backfilled. */
+    /** Nested taxonomy leaf. Optional until products are backfilled. */
     categoryId: v.optional(v.id("categories")),
+    /** Denormalized categories.path for ancestor/prefix filters. */
+    categoryPath: v.optional(v.string()),
     presentation: vPresentation,
     name: v.string(),
     /** Assigned once at create. Absent on rows saved before SKUs existed. */
@@ -637,15 +604,19 @@ export default defineSchema({
     /** Denormalized display name from `brands.name` (kept for search + legacy UI). */
     brand: v.optional(v.string()),
     description: v.optional(v.string()),
-    /** Dynamic short traits (color, fit, fabric, custom). */
+    /** @deprecated Prefer attributeSelections. */
     attributes: v.optional(v.array(vProductAttribute)),
+    /** Catalog-backed multi-select traits (one type → many values). */
+    attributeSelections: v.optional(v.array(vProductAttributeSelection)),
     /** Dynamic PDP accordion sections (wash care, FAQ, …). */
     infoSections: v.optional(v.array(vProductInfoSection)),
+    /** Simple PDP key/values (care, country of origin…). */
+    otherDetails: v.optional(v.array(vOtherDetail)),
     /** @deprecated Prefer attributes[product_type] / attributes[subcategory]. */
     subcategory: v.optional(v.string()),
     /** @deprecated Prefer attributes[product_type]. */
     productType: v.optional(v.string()),
-    /** @deprecated Prefer attributes. */
+    /** @deprecated Prefer attributes / attributeSelections. */
     colours: v.optional(vColours),
     pattern: v.optional(v.string()),
     material: v.optional(v.string()),
@@ -656,10 +627,11 @@ export default defineSchema({
     ageGroup: v.optional(vAgeGroup),
     occasion: v.optional(vOccasion),
     priceInr: v.number(),
-    /** MRP shown struck through when higher than `priceInr`. */
+    /** @deprecated Prefer discounts table for promotional pricing. */
     compareAtPriceInr: v.optional(v.number()),
     hasVariants: v.optional(v.boolean()),
-    variantTypeIds: v.optional(v.array(v.id("variantTypes"))),
+    /** Enabled Variants (dimensions) for this product. */
+    variantCategoryIds: v.optional(v.array(v.id("variantCategories"))),
     /** @deprecated Prefer productImages. */
     storageId: v.optional(v.id("_storage")),
     /** @deprecated Prefer productImages. */
@@ -682,6 +654,7 @@ export default defineSchema({
   })
     .index("by_category_and_presentation", ["category", "presentation"])
     .index("by_categoryId", ["categoryId"])
+    .index("by_categoryPath", ["categoryPath"])
     .index("by_brandId", ["brandId"])
     .index("by_vendorId_and_brandId", ["vendorId", "brandId"])
     .index("by_createdAt", ["createdAt"])
@@ -726,15 +699,15 @@ export default defineSchema({
     .index("by_storageId", ["storageId"]),
 
   /**
-   * Sellable SKUs (Payload `variants`).
-   * Prefer `optionIds` (one option per enabled type); `size`/`colour` stay for cart labels + legacy rows.
+   * Sellable SKUs.
+   * Prefer `attributeIds` (one attribute per enabled Variant); `size`/`colour` stay for cart labels + legacy rows.
    */
   productVariants: defineTable({
     productId: v.id("products"),
     vendorId: v.id("vendors"),
     sku: v.string(),
-    /** Selected `variantOptions` for this SKU (Payload `variants.options`). */
-    optionIds: v.optional(v.array(v.id("variantOptions"))),
+    /** Selected attribute values for this SKU (one per enabled Variant). */
+    attributeIds: v.optional(v.array(v.id("attributes"))),
     size: v.optional(v.string()),
     colour: v.optional(vVariantColour),
     /** Unset means the product price. */
@@ -860,6 +833,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_userId", ["userId"])
+    .index("by_userId_and_createdAt", ["userId", "createdAt"])
     .index("by_status_and_createdAt", ["status", "createdAt"])
     .index("by_createdAt", ["createdAt"]),
 
@@ -892,6 +866,7 @@ export default defineSchema({
     trackingNumber: v.optional(v.string()),
     status: vShipmentStatus,
     shippedAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
@@ -909,6 +884,7 @@ export default defineSchema({
     createdAt: v.number(),
     resolvedAt: v.optional(v.number()),
   })
+    .index("by_orderId", ["orderId"])
     .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
     .index("by_orderItemId", ["orderItemId"])
     .index("by_vendorId_and_status_and_createdAt", ["vendorId", "status", "createdAt"]),

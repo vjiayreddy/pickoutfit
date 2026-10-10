@@ -4,7 +4,6 @@ import { useQuery } from "convex/react";
 import {
   ClipboardList,
   FolderTree,
-  GitBranch,
   Layers,
   LayoutDashboard,
   ListTree,
@@ -76,7 +75,6 @@ const NAV_GROUPS = [
       { href: routes.vendorCategories, label: "Categories", icon: FolderTree },
       { href: routes.vendorBrands, label: "Brands", icon: Tag },
       { href: routes.vendorAttributes, label: "Attributes", icon: ListTree },
-      { href: routes.vendorVariantCategories, label: "Variant recipes", icon: GitBranch },
       { href: routes.vendorVariants, label: "Variants", icon: Layers },
       { href: routes.vendorCollections, label: "Collections", icon: Tags },
       { href: routes.vendorDiscounts, label: "Discounts", icon: Percent },
@@ -155,14 +153,19 @@ export function VendorDesk({ children }: { children: ReactNode }) {
     );
   }
 
+  /**
+   * Flush pages own their scroll (grids / product editor).
+   * Import + other padded catalog pages must keep desk-level overflow-y-auto
+   * or long content (e.g. Recent look photos) cannot scroll.
+   */
   const flushPage =
     pathname.startsWith(routes.vendorCategories) ||
     pathname.startsWith(routes.vendorBrands) ||
     pathname.startsWith(routes.vendorAttributes) ||
-    pathname.startsWith(routes.vendorVariantCategories) ||
     pathname.startsWith(routes.vendorVariants) ||
     pathname.startsWith(routes.vendorDiscounts) ||
-    pathname.startsWith(routes.vendorProducts);
+    (pathname.startsWith(routes.vendorProducts) &&
+      !pathname.startsWith(routes.vendorImport));
 
   return (
     <VendorContext value={me}>
@@ -289,17 +292,17 @@ function VendorAppSidebar({
         ))}
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border">
+      <SidebarFooter className="border-t border-sidebar-border p-2">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
               type="button"
               onClick={onSignOut}
               tooltip="Sign out"
-              className="rounded-full"
+              className="w-full justify-start rounded-md"
             >
               <LogOut />
-              <span>Sign out</span>
+              <span className="truncate">Sign out</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
