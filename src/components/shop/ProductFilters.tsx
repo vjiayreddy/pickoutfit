@@ -52,6 +52,8 @@ export type ProductFiltersProps = {
   onAttributeIdsChange: (ids: string[]) => void;
   /** Hide the "Filters" heading (e.g. when a sheet already has a title). */
   hideTitle?: boolean;
+  /** Storefront: only options on live products. Vendor desk: omit/false. */
+  activeOnly?: boolean;
 };
 
 export function ProductFilters({
@@ -61,6 +63,7 @@ export function ProductFilters({
   onCategoryPathChange,
   onAttributeIdsChange,
   hideTitle = false,
+  activeOnly = false,
 }: ProductFiltersProps) {
   const treeQuery = useQuery(api.categories.tree, { vendorId, activeOnly: true });
   const tree = useMemo(
@@ -71,6 +74,7 @@ export function ProductFilters({
   const facets = useQuery(api.variants.facets, {
     vendorId,
     categoryId,
+    activeOnly: activeOnly || undefined,
   });
 
   const ancestry = useMemo(

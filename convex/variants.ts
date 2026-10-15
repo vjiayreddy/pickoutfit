@@ -51,15 +51,18 @@ export const catalog = query({
 
 /**
  * Public PLP facets from variant categories (SKU axes).
- * Options merged by attribute type; scoped by optional taxonomy category.
+ * Options merged by attribute type; scoped by optional taxonomy category;
+ * limited to values present on this vendor's products.
  */
 export const facets = query({
   args: {
     vendorId: v.id("vendors"),
     categoryId: v.optional(v.id("categories")),
+    /** Storefront: true. Vendor desk: false/omit so drafts contribute options. */
+    activeOnly: v.optional(v.boolean()),
   },
   returns: v.array(vAttributeFacetType),
-  handler: async (ctx, { vendorId, categoryId }) => {
+  handler: async (ctx, { vendorId, categoryId, activeOnly }) => {
     await requireUser(ctx);
     const vendor = await ctx.db.get(vendorId);
     if (!vendor || vendor.status === "closed") return [];
@@ -67,7 +70,10 @@ export const facets = query({
       const category = await ctx.db.get(categoryId);
       if (!category || category.vendorId !== vendorId) return [];
     }
-    return listVariantFilterFacets(ctx, vendorId, { categoryId });
+    return listVariantFilterFacets(ctx, vendorId, {
+      categoryId,
+      activeOnly: activeOnly === true,
+    });
   },
 });
 

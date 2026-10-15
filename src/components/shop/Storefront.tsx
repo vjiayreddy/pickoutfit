@@ -68,7 +68,7 @@ export function Storefront({
   );
   const facets = useQuery(
     api.variants.facets,
-    data ? { vendorId: data.vendor._id } : "skip",
+    data ? { vendorId: data.vendor._id, activeOnly: true } : "skip",
   );
   const attributeIds = useMemo(
     () => attributeIdsFromFacetParams(facets ?? [], facetParams),
@@ -223,6 +223,7 @@ export function Storefront({
         vendorId={vendor._id}
         categoryPath={categoryPath}
         attributeIds={attributeIds}
+        activeOnly
         onCategoryPathChange={(path) =>
           navigateFilters({ categoryPath: path, clearFacets: true })
         }

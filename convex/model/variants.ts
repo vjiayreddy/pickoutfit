@@ -2,7 +2,11 @@ import type { Infer } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { appError } from "../lib/errors";
-import { categoryScopeMatches, type CategoryTreeNode } from "../shared/categories";
+import {
+  categoryPathMatchesFilter,
+  categoryScopeMatches,
+  type CategoryTreeNode,
+} from "../shared/categories";
 import type { vVariantOptionRef } from "../shared/products";
 import { COLOUR_HEX } from "../shared/variants";
 import { getTree } from "./categories";
@@ -10,6 +14,9 @@ import { listVariantCategories } from "./variantCategories";
 
 type Ctx = QueryCtx | MutationCtx;
 export type VariantOptionRef = Infer<typeof vVariantOptionRef>;
+
+/** Cap SKU scan for PLP facets so one large catalog cannot blow the query. */
+const FACET_VARIANT_SCAN = 2000;
 
 export type VariantFacetValue = {
   _id: Id<"attributes">;
@@ -48,20 +55,90 @@ export type VariantCatalogRow = {
   }>;
 };
 
+export type ListVariantFilterFacetsOpts = {
+  categoryId?: Id<"categories">;
+  /**
+   * When true, only SKUs on `active` products contribute options (storefront).
+   * When false, draft + active products count (vendor desk).
+   */
+  activeOnly?: boolean;
+};
+
 /**
  * PLP facets from variant categories (SKU axes), not product attributeSelections.
- * Options are merged by attribute type; scoped by selected taxonomy category.
+ * Options are merged by attribute type, scoped by taxonomy category, and limited
+ * to values that appear on this vendor's products (store-wise inventory).
  */
 export async function listVariantFilterFacets(
   ctx: Ctx,
   vendorId: Id<"vendors">,
-  opts: { categoryId?: Id<"categories"> } = {},
+  opts: ListVariantFilterFacetsOpts = {},
 ): Promise<VariantFacetType[]> {
   const catalog = await loadVariantCatalog(ctx, vendorId);
   let tree: CategoryTreeNode[] | null = null;
   if (opts.categoryId) {
     tree = (await getTree(ctx, vendorId, { activeOnly: true })) as CategoryTreeNode[];
   }
+
+  type AllowedOption = VariantFacetValue & { attributeTypeId: Id<"attributeTypes"> };
+  const allowedByAttrId = new Map<string, AllowedOption>();
+  const typeMeta = new Map<
+    string,
+    {
+      _id: Id<"attributeTypes">;
+      label: string;
+      displayLabel: string;
+      slug: string;
+      sortOrder: number;
+    }
+  >();
+
+  for (const recipe of catalog) {
+    if (opts.categoryId && tree) {
+      if (!categoryScopeMatches(opts.categoryId, recipe.categoryIds, tree)) continue;
+    }
+    const type = await ctx.db.get(recipe.attributeTypeId);
+    if (!type || !type.isActive) continue;
+
+    if (!typeMeta.has(type._id)) {
+      typeMeta.set(type._id, {
+        _id: type._id,
+        label: type.label,
+        displayLabel: type.displayLabel || type.label,
+        slug: type.slug,
+        sortOrder: type.sortOrder,
+      });
+    }
+
+    for (const option of recipe.options) {
+      if (!option.isActive) continue;
+      if (allowedByAttrId.has(option.id)) continue;
+      allowedByAttrId.set(option.id, {
+        _id: option.id,
+        attributeTypeId: type._id,
+        label: option.label,
+        value: option.value,
+        slug: option.slug,
+        hex: option.hex,
+        mediaUrl: null,
+      });
+    }
+  }
+
+  if (allowedByAttrId.size === 0) return [];
+
+  let filterPath = "";
+  if (opts.categoryId) {
+    const category = await ctx.db.get(opts.categoryId);
+    if (category?.vendorId === vendorId) {
+      filterPath = category.path;
+    }
+  }
+
+  const usedAttrIds = await collectUsedVariantAttributeIds(ctx, vendorId, {
+    filterPath,
+    activeOnly: opts.activeOnly === true,
+  });
 
   const byType = new Map<
     string,
@@ -75,38 +152,26 @@ export async function listVariantFilterFacets(
     }
   >();
 
-  for (const recipe of catalog) {
-    if (opts.categoryId && tree) {
-      if (!categoryScopeMatches(opts.categoryId, recipe.categoryIds, tree)) continue;
-    }
-    const type = await ctx.db.get(recipe.attributeTypeId);
-    if (!type || !type.isActive) continue;
+  for (const attrId of usedAttrIds) {
+    const option = allowedByAttrId.get(attrId);
+    if (!option) continue;
+    const meta = typeMeta.get(option.attributeTypeId);
+    if (!meta) continue;
 
-    let group = byType.get(recipe.attributeTypeId);
+    let group = byType.get(meta._id);
     if (!group) {
-      group = {
-        _id: type._id,
-        label: type.label,
-        displayLabel: type.displayLabel || type.label,
-        slug: type.slug,
-        sortOrder: type.sortOrder,
-        values: new Map(),
-      };
-      byType.set(recipe.attributeTypeId, group);
+      group = { ...meta, values: new Map() };
+      byType.set(meta._id, group);
     }
-
-    for (const option of recipe.options) {
-      if (!option.isActive) continue;
-      if (group.values.has(option.id)) continue;
-      group.values.set(option.id, {
-        _id: option.id,
-        label: option.label,
-        value: option.value,
-        slug: option.slug,
-        hex: option.hex,
-        mediaUrl: null,
-      });
-    }
+    if (group.values.has(option._id)) continue;
+    group.values.set(option._id, {
+      _id: option._id,
+      label: option.label,
+      value: option.value,
+      slug: option.slug,
+      hex: option.hex,
+      mediaUrl: option.mediaUrl,
+    });
   }
 
   return [...byType.values()]
@@ -120,6 +185,47 @@ export async function listVariantFilterFacets(
     }))
     .filter((group) => group.values.length > 0)
     .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+}
+
+/** Attribute ids present on active SKUs for this vendor (optionally path-scoped). */
+async function collectUsedVariantAttributeIds(
+  ctx: Ctx,
+  vendorId: Id<"vendors">,
+  opts: { filterPath: string; activeOnly: boolean },
+): Promise<Set<string>> {
+  const used = new Set<string>();
+  const productCache = new Map<string, Doc<"products"> | null>();
+  const rows = await ctx.db
+    .query("productVariants")
+    .withIndex("by_vendorId", (q) => q.eq("vendorId", vendorId))
+    .take(FACET_VARIANT_SCAN);
+
+  for (const variant of rows) {
+    if (!variant.active) continue;
+    const attributeIds = variant.attributeIds;
+    if (!attributeIds?.length) continue;
+
+    let product = productCache.get(variant.productId);
+    if (product === undefined) {
+      product = await ctx.db.get(variant.productId);
+      productCache.set(variant.productId, product);
+    }
+    if (!product || product.vendorId !== vendorId) continue;
+    if (product.status === "archived") continue;
+    if (opts.activeOnly && product.status !== "active") continue;
+    if (
+      opts.filterPath &&
+      !categoryPathMatchesFilter(product.categoryPath ?? "", opts.filterPath)
+    ) {
+      continue;
+    }
+
+    for (const id of attributeIds) {
+      used.add(id);
+    }
+  }
+
+  return used;
 }
 
 /** Variants (recipes) + attribute options for the product editor. */

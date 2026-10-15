@@ -116,7 +116,7 @@ describe("attributes + variants", () => {
     ).rejects.toThrow(/already exists/i);
   });
 
-  test("variant facets return options scoped by category ancestry", async () => {
+  test("variant facets return options present on products, scoped by category", async () => {
     const { t, owner, vendorId } = await activeVendor();
     await asUser(t, owner).mutation(api.attributes.seedDefaults, {});
 
@@ -137,8 +137,9 @@ describe("attributes + variants", () => {
       activeOnly: true,
     });
     const optionIds = sizeAttrs.slice(0, 3).map((row) => row._id);
+    const usedOptionIds = optionIds.slice(0, 2);
 
-    await asUser(t, owner).mutation(api.variants.upsert, {
+    const sizeVariantId = await asUser(t, owner).mutation(api.variants.upsert, {
       title: "Topwear Size",
       attributeTypeId: sizeType!._id,
       categoryIds: [topwear!._id],
@@ -146,13 +147,39 @@ describe("attributes + variants", () => {
     });
 
     const shopper = await seedUser(t);
+    // Recipe alone is not enough — no products yet.
+    expect(
+      await asUser(t, shopper).query(api.variants.facets, {
+        vendorId,
+        categoryId: shirts!._id,
+      }),
+    ).toEqual([]);
+
+    await asUser(t, owner).mutation(api.vendorProducts.create, {
+      category: "clothes",
+      presentation: "neutral",
+      name: "Oxford Shirt",
+      description: "Test shirt",
+      priceInr: 1999,
+      imageIds: [],
+      categoryId: shirts!._id,
+      variantCategoryIds: [sizeVariantId],
+      variants: usedOptionIds.map((attributeId) => ({
+        attributeIds: [attributeId],
+        stock: 2,
+        active: true,
+      })),
+    });
+
     const facets = await asUser(t, shopper).query(api.variants.facets, {
       vendorId,
       categoryId: shirts!._id,
     });
     const sizeFacet = facets.find((row) => row._id === sizeType!._id);
     expect(sizeFacet).toBeTruthy();
-    expect(sizeFacet!.values.map((value) => value._id).sort()).toEqual([...optionIds].sort());
+    expect(sizeFacet!.values.map((value) => value._id).sort()).toEqual(
+      [...usedOptionIds].sort(),
+    );
 
     const women = tree.find((node) => node.slug === "women");
     expect(women).toBeTruthy();
