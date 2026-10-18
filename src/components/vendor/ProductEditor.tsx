@@ -535,15 +535,15 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
 
   function setRowOption(rowKey: string, type: CatalogType, optionId: string) {
     if (!catalog) return;
+    // Scope by this dimension's option ids — the same attribute can appear on multiple
+    // recipes (e.g. Size + Men T Shirt Sizes), so catalog-wide lookup is ambiguous.
+    const typeOptionIds = new Set(type.options.map((option) => option.id));
     setDraft((current) => ({
       ...current,
       variants: current.variants.map((row) => {
         if (row.key !== rowKey) return row;
         const known = row.attributeIds.filter((id) => Boolean(optionById(catalog, id)));
-        const withoutType = known.filter((id) => {
-          const option = optionById(catalog, id);
-          return option?.variantCategoryId !== type.id;
-        });
+        const withoutType = known.filter((id) => !typeOptionIds.has(id));
         const attributeIds = optionId ? [...withoutType, optionId] : withoutType;
         return {
           ...row,
@@ -1958,9 +1958,8 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
                       <TableRow key={row.key} className="hover:bg-transparent">
                         {enabledTypes.map((type) => {
                           const selectedId =
-                            row.attributeIds.find(
-                              (id) =>
-                                optionById(catalog ?? [], id)?.variantCategoryId === type.id,
+                            row.attributeIds.find((id) =>
+                              type.options.some((option) => option.id === id),
                             ) ?? "";
                           const selected = selectedId
                             ? type.options.find((option) => option.id === selectedId)
@@ -2147,13 +2146,19 @@ function VariantOptionPicker({
   ariaLabel: string;
   onChange: (optionId: string) => void;
 }) {
+  // Use attribute ids as Combobox values — catalog options also have a `value` field
+  // (slug), and Base UI treats `{ value, label }` objects as a special pair, which
+  // broke selection when the whole option object was passed as the item value.
+  const optionIds = type.options.map((option) => option.id);
+  const selectedId = value?.id ?? null;
+  const labelFor = (id: string) => type.options.find((option) => option.id === id)?.label ?? id;
+
   return (
     <Combobox
-      items={type.options}
-      value={value}
-      onValueChange={(next) => onChange(next?.id ?? "")}
-      itemToStringLabel={(item) => item.label}
-      isItemEqualToValue={(a, b) => a.id === b.id}
+      items={optionIds}
+      value={selectedId}
+      onValueChange={(next) => onChange(next ?? "")}
+      itemToStringLabel={labelFor}
       disabled={disabled}
       autoHighlight
     >
@@ -2182,13 +2187,15 @@ function VariantOptionPicker({
       <ComboboxContent className="rounded-none">
         <ComboboxEmpty>No matches.</ComboboxEmpty>
         <ComboboxList>
-          {(option: CatalogOption) => {
+          {(optionId: string) => {
+            const option = type.options.find((row) => row.id === optionId);
+            if (!option) return null;
             const hex =
               type.attributeTypeSlug === "colour" || type.attributeTypeSlug === "color"
                 ? (option.hex ?? COLOUR_HEX[option.value])
                 : undefined;
             return (
-              <ComboboxItem key={option.id} value={option}>
+              <ComboboxItem key={optionId} value={optionId}>
                 {hex ? (
                   <span
                     aria-hidden
