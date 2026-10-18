@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -13,14 +13,47 @@ import { reportError } from "@/lib/client-errors";
 import { formatInr } from "@/lib/format";
 import { routes } from "@/lib/routes";
 
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => {
+      open: () => void;
+      on: (event: string, handler: (response: unknown) => void) => void;
+    };
+  }
+}
+
+function loadRazorpayScript(): Promise<void> {
+  if (typeof window === "undefined") return Promise.reject(new Error("No window"));
+  if (window.Razorpay) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-razorpay="1"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Razorpay failed to load")), {
+        once: true,
+      });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.dataset.razorpay = "1";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Razorpay failed to load"));
+    document.body.appendChild(script);
+  });
+}
+
 export function CheckoutForm() {
   const me = useQuery(api.users.me);
   const cart = useQuery(api.cart.current);
-  const checkout = useMutation(api.orders.checkout);
+  const paymentsConfigured = useQuery(api.orders.paymentsConfigured);
+  const createIntent = useAction(api.orders.createCheckoutIntent);
+  const confirmCheckout = useAction(api.orders.confirmCheckout);
   const router = useRouter();
   const [pending, setPending] = useState(false);
 
-  if (me === undefined || cart === undefined) {
+  if (me === undefined || cart === undefined || paymentsConfigured === undefined) {
     return <div className="h-48 animate-pulse bg-soft-cloud" />;
   }
   if (!me) return null;
@@ -39,27 +72,75 @@ export function CheckoutForm() {
   async function place(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending) return;
+    if (!paymentsConfigured) {
+      toast.error(
+        "Payments are not configured yet. Set Razorpay keys on the Convex deployment.",
+      );
+      return;
+    }
     const data = new FormData(event.currentTarget);
     const value = (name: string) => {
       const field = data.get(name);
       return typeof field === "string" ? field : "";
     };
+    const input = {
+      name: value("name"),
+      email: value("email"),
+      phone: value("phone"),
+      address: value("address"),
+      city: value("city"),
+      pincode: value("pincode"),
+    };
     setPending(true);
     try {
-      const result = await checkout({
-        name: value("name"),
-        email: value("email"),
-        phone: value("phone"),
-        address: value("address"),
-        city: value("city"),
-        pincode: value("pincode"),
+      const intent = await createIntent(input);
+      await loadRazorpayScript();
+      if (!window.Razorpay) throw new Error("Razorpay Checkout is unavailable.");
+
+      await new Promise<void>((resolve, reject) => {
+        const rzp = new window.Razorpay!({
+          key: intent.keyId,
+          amount: Math.round(intent.amountInr * 100),
+          currency: "INR",
+          name: "WardrobeAI",
+          description: "Order payment",
+          order_id: intent.razorpayOrderId,
+          prefill: {
+            name: intent.name,
+            email: intent.email,
+            contact: intent.phone,
+          },
+          handler: async (response: unknown) => {
+            try {
+              const payment = response as {
+                razorpay_order_id: string;
+                razorpay_payment_id: string;
+                razorpay_signature: string;
+              };
+              const result = await confirmCheckout({
+                intentId: intent.intentId,
+                razorpayOrderId: payment.razorpay_order_id,
+                razorpayPaymentId: payment.razorpay_payment_id,
+                razorpaySignature: payment.razorpay_signature,
+              });
+              if (result.droppedNames.length > 0) {
+                toast.message(`Removed unavailable items: ${result.droppedNames.join(", ")}`);
+              }
+              router.push(`${routes.checkoutComplete}?order=${result.orderId}`);
+              resolve();
+            } catch (error) {
+              reject(error);
+            }
+          },
+          modal: {
+            ondismiss: () => reject(new Error("Payment cancelled.")),
+          },
+        });
+        rzp.open();
       });
-      if (result.droppedNames.length > 0) {
-        toast.message(`Removed unavailable items: ${result.droppedNames.join(", ")}`);
-      }
-      router.push(`${routes.checkoutComplete}?order=${result.orderId}`);
     } catch (error) {
-      toast.error(reportError(error).message);
+      const message = reportError(error).message;
+      if (!/cancelled/i.test(message)) toast.error(message);
     } finally {
       setPending(false);
     }
@@ -70,8 +151,13 @@ export function CheckoutForm() {
       <div>
         <h1 className="font-display text-4xl uppercase">Checkout</h1>
         <p className="mt-2 text-sm text-mute">
-          This places the order. Payment is not collected yet. Total {formatInr(cart.totalInr)}.
+          Pay securely with Razorpay. Total {formatInr(cart.totalInr)}.
         </p>
+        {!paymentsConfigured ? (
+          <p className="mt-2 text-sm text-sale">
+            Payments are not configured on this environment yet.
+          </p>
+        ) : null}
       </div>
       <Field label="Name" name="name" defaultValue={me.name ?? ""} required />
       <Field label="Email" name="email" type="email" defaultValue={me.email ?? ""} required />
@@ -87,8 +173,8 @@ export function CheckoutForm() {
       </label>
       <Field label="City" name="city" required />
       <Field label="PIN code" name="pincode" inputMode="numeric" required />
-      <Button type="submit" disabled={pending}>
-        {pending ? "Placing order…" : "Place order"}
+      <Button type="submit" disabled={pending || !paymentsConfigured}>
+        {pending ? "Opening payment…" : `Pay ${formatInr(cart.totalInr)}`}
       </Button>
     </form>
   );
@@ -125,7 +211,9 @@ export function OrderConfirmation({ orderId }: { orderId: string }) {
       <h1 className="font-display text-4xl uppercase">Order placed</h1>
       <p className="text-sm capitalize text-mute">Status: {order.status}</p>
       <p className="text-sm text-mute">
-        Payment is not collected yet. You can track this order anytime from Orders.
+        {order.paymentStatus === "paid" || order.paymentStatus === null
+          ? "Payment received."
+          : `Payment: ${order.paymentStatus}`}
       </p>
       <p className="text-sm font-medium">Total {formatInr(order.totalInr)}</p>
       <ul className="space-y-1 text-sm">

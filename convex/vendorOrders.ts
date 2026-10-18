@@ -12,6 +12,11 @@ import {
 } from "./model/orders";
 import { adjustStock } from "./model/products";
 import {
+  adjustSettlementForReturn,
+  ensureSettlementForShipment,
+} from "./model/settlements";
+import { isOrderPaid } from "./shared/payments";
+import {
   vOrderLineStatus,
   vReturnView,
   vShipmentView,
@@ -19,6 +24,15 @@ import {
   vVendorOrderListItem,
   type OrderLineStatus,
 } from "./shared/products";
+
+async function assertOrderPaid(ctx: MutationCtx, orderId: Id<"orders">) {
+  const order = await ctx.db.get(orderId);
+  if (!order) throw appError("NOT_FOUND", "That order doesn't exist.");
+  if (!isOrderPaid(order)) {
+    throw appError("CONFLICT", "This order hasn't been paid yet.");
+  }
+  return order;
+}
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -263,6 +277,7 @@ export const cancelLines = mutation({
       if (!item.variantId) {
         throw appError("CONFLICT", `"${item.name}" has no variant to restock.`);
       }
+      if (!orderId) await assertOrderPaid(ctx, item.orderId);
       orderId = item.orderId;
       await ctx.db.patch(item._id, { lineStatus: "cancelled" });
       await adjustStock(ctx, vendor, item.variantId, item.quantity, "order_cancel", {
@@ -303,6 +318,7 @@ export const shipLines = mutation({
       if (orderId && item.orderId !== orderId) {
         throw appError("INVALID_INPUT", "Ship lines from a single order at a time.");
       }
+      if (!orderId) await assertOrderPaid(ctx, item.orderId);
       orderId = item.orderId;
       await ctx.db.patch(item._id, { lineStatus: "shipped" });
       shippedIds.push(item._id);
@@ -339,7 +355,10 @@ export const markDelivered = mutation({
     if (shipment.status !== "shipped") {
       throw appError("CONFLICT", "Only shipped packages can be marked delivered.");
     }
-    await ctx.db.patch(shipment._id, { status: "delivered", deliveredAt: Date.now() });
+    const deliveredAt = Date.now();
+    await ctx.db.patch(shipment._id, { status: "delivered", deliveredAt });
+    const updated = await ctx.db.get(shipment._id);
+    if (updated) await ensureSettlementForShipment(ctx, vendor, updated);
     return null;
   },
 });
@@ -443,6 +462,7 @@ export const resolveReturn = mutation({
       restocked: true,
       resolvedAt: now,
     });
+    await adjustSettlementForReturn(ctx, item, row.quantity);
     await recomputeOrderStatus(ctx, item.orderId);
     return null;
   },

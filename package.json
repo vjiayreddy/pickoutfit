@@ -39,6 +39,7 @@
     "nuqs": "^2.10.2",
     "openai": "^7.21.0",
     "pngjs": "^7.0.0",
+    "razorpay": "^2.9.8",
     "react": "19.2.8",
     "react-day-picker": "^10.0.2",
     "react-dom": "19.2.8",

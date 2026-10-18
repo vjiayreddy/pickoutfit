@@ -58,6 +58,11 @@ import {
   vUserRole,
 } from "./shared/validators";
 import {
+  vCheckoutIntentStatus,
+  vPaymentStatus,
+  vSettlementStatus,
+} from "./shared/payments";
+import {
   vListingQuota,
   vPayoutStatus,
   vVendorAddress,
@@ -117,6 +122,8 @@ export default defineSchema({
     plan: vVendorPlanId,
     planStatus: vVendorPlanStatus,
     planPeriodEnd: v.optional(v.number()),
+    razorpayCustomerId: v.optional(v.string()),
+    razorpaySubscriptionId: v.optional(v.string()),
     listingQuota: vListingQuota,
     productCount: v.number(),
     createdAt: v.number(),
@@ -126,6 +133,7 @@ export default defineSchema({
     .index("by_ownerUserId", ["ownerUserId"])
     .index("by_status", ["status"])
     .index("by_planStatus_and_planPeriodEnd", ["planStatus", "planPeriodEnd"])
+    .index("by_razorpaySubscriptionId", ["razorpaySubscriptionId"])
     .index("by_createdAt", ["createdAt"]),
 
   vendorMembers: defineTable({
@@ -830,11 +838,17 @@ export default defineSchema({
     pincode: v.string(),
     status: vOrderStatus,
     totalInr: v.number(),
+    /** Absent on legacy COD rows; treat as paid for fulfillment. */
+    paymentStatus: v.optional(vPaymentStatus),
+    razorpayOrderId: v.optional(v.string()),
+    razorpayPaymentId: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_userId", ["userId"])
     .index("by_userId_and_createdAt", ["userId", "createdAt"])
     .index("by_status_and_createdAt", ["status", "createdAt"])
+    .index("by_razorpayOrderId", ["razorpayOrderId"])
     .index("by_createdAt", ["createdAt"]),
 
   orderItems: defineTable({
@@ -849,6 +863,9 @@ export default defineSchema({
     colour: v.optional(v.string()),
     quantity: v.number(),
     priceInr: v.number(),
+    /** Platform commission snapshotted at payment time. */
+    commissionBps: v.optional(v.number()),
+    settlementId: v.optional(v.id("vendorSettlements")),
     lineStatus: v.optional(vOrderLineStatus),
     /** Copied from the order so vendors can page their lines by time. */
     createdAt: v.optional(v.number()),
@@ -856,6 +873,44 @@ export default defineSchema({
     .index("by_orderId", ["orderId"])
     .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
     .index("by_vendorId_and_lineStatus_and_createdAt", ["vendorId", "lineStatus", "createdAt"]),
+
+  /**
+   * Cart snapshot waiting for Razorpay capture. Stock is reserved only after payment.
+   */
+  checkoutIntents: defineTable({
+    userId: v.id("users"),
+    status: vCheckoutIntentStatus,
+    razorpayOrderId: v.string(),
+    amountInr: v.number(),
+    name: v.string(),
+    email: v.string(),
+    phone: v.string(),
+    address: v.string(),
+    city: v.string(),
+    pincode: v.string(),
+    lines: v.array(
+      v.object({
+        productId: v.id("products"),
+        vendorId: v.id("vendors"),
+        variantId: v.id("productVariants"),
+        name: v.string(),
+        sku: v.string(),
+        size: v.optional(v.string()),
+        colour: v.optional(v.string()),
+        quantity: v.number(),
+        priceInr: v.number(),
+        commissionBps: v.number(),
+      }),
+    ),
+    droppedNames: v.array(v.string()),
+    orderId: v.optional(v.id("orders")),
+    razorpayPaymentId: v.optional(v.string()),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_userId_and_status", ["userId", "status"])
+    .index("by_razorpayOrderId", ["razorpayOrderId"])
+    .index("by_status_and_expiresAt", ["status", "expiresAt"]),
 
   /** Vendor shipment with optional carrier tracking. One shipment can cover several lines. */
   shipments: defineTable({
@@ -871,6 +926,31 @@ export default defineSchema({
   })
     .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
     .index("by_orderId", ["orderId"]),
+
+  /**
+   * Per-shipment payout to a vendor after delivery + holdDays.
+   * Platform collected the full amount at checkout; this is the Route transfer.
+   */
+  vendorSettlements: defineTable({
+    vendorId: v.id("vendors"),
+    shipmentId: v.id("shipments"),
+    orderId: v.id("orders"),
+    orderItemIds: v.array(v.id("orderItems")),
+    grossInr: v.number(),
+    commissionInr: v.number(),
+    netInr: v.number(),
+    status: vSettlementStatus,
+    availableAt: v.number(),
+    razorpayTransferId: v.optional(v.string()),
+    failureReason: v.optional(v.string()),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+    paidAt: v.optional(v.number()),
+  })
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
+    .index("by_shipmentId", ["shipmentId"])
+    .index("by_status_and_availableAt", ["status", "availableAt"])
+    .index("by_razorpayTransferId", ["razorpayTransferId"]),
 
   /** Vendor-ops returns. Accepting restocks via inventory reason `return`. */
   returns: defineTable({

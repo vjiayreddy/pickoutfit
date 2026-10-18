@@ -45,3 +45,8 @@ export function isStripeCheckoutConfigured(): boolean {
       optionalEnv("STRIPE_PRICE_PLUS"),
   );
 }
+
+/** True when marketplace Razorpay checkout / Route can run. Webhook secret is separate. */
+export function isRazorpayConfigured(): boolean {
+  return Boolean(optionalEnv("RAZORPAY_KEY_ID") && optionalEnv("RAZORPAY_KEY_SECRET"));
+}

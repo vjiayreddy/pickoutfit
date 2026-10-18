@@ -2,6 +2,7 @@ import { registerRoutes } from "@convex-dev/stripe";
 import { httpRouter } from "convex/server";
 import { components, internal } from "./_generated/api";
 import { authComponent, createAuth } from "./auth";
+import { httpHandler as razorpayWebhook } from "./razorpayWebhook";
 
 const http = httpRouter();
 
@@ -29,6 +30,12 @@ registerRoutes(http, components.stripe, {
       await reconcileAuthId(ctx, authId);
     },
   },
+});
+
+http.route({
+  path: "/razorpay/webhook",
+  method: "POST",
+  handler: razorpayWebhook,
 });
 
 async function reconcileAuthId(

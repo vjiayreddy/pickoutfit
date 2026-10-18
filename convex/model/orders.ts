@@ -2,6 +2,10 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { appError } from "../lib/errors";
 import {
+  CHECKOUT_INTENT_TTL_MS,
+  type PaymentStatus,
+} from "../shared/payments";
+import {
   ORDER_SAMPLE_CAP,
   type OrderLineStatus,
   type OrderStatus,
@@ -157,6 +161,7 @@ export async function toOrderView(ctx: Ctx, order: Doc<"orders">) {
     city: order.city,
     pincode: order.pincode,
     status: order.status,
+    paymentStatus: order.paymentStatus ?? null,
     totalInr: order.totalInr,
     createdAt: order.createdAt,
     items: items.map(toOrderItemView),
@@ -277,6 +282,7 @@ export async function toBuyerOrderDetail(ctx: Ctx, order: Doc<"orders">) {
     city: order.city,
     pincode: order.pincode,
     status: order.status,
+    paymentStatus: order.paymentStatus ?? null,
     totalInr: order.totalInr,
     createdAt: order.createdAt,
     items: items.map(toOrderItemView),
@@ -307,7 +313,34 @@ export async function listOrdersForUser(ctx: QueryCtx, userId: Id<"users">) {
   return rows;
 }
 
-export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: CheckoutInput) {
+export type CheckoutLineSnapshot = {
+  productId: Id<"products">;
+  vendorId: Id<"vendors">;
+  variantId: Id<"productVariants">;
+  name: string;
+  sku: string;
+  size?: string;
+  colour?: string;
+  quantity: number;
+  priceInr: number;
+  commissionBps: number;
+};
+
+export type PreparedCheckout = {
+  buyer: CheckoutInput;
+  amountInr: number;
+  lines: CheckoutLineSnapshot[];
+  droppedNames: string[];
+  cartId: Id<"carts">;
+  cartLineIds: Id<"cartItems">[];
+};
+
+/** Validate cart + address and build a priced snapshot without reserving stock. */
+export async function prepareCheckout(
+  ctx: MutationCtx,
+  user: Doc<"users">,
+  input: CheckoutInput,
+): Promise<PreparedCheckout> {
   const buyer = cleanCheckout(input);
   const cart = await ctx.db
     .query("carts")
@@ -317,26 +350,31 @@ export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: Ch
   const lines = await cartLines(ctx, cart._id);
   if (lines.length === 0) throw appError("INVALID_INPUT", "Your bag is empty.");
 
-  type Kept = {
-    line: Doc<"cartItems">;
-    product: Doc<"products">;
-    vendor: Doc<"vendors">;
-    variant: Doc<"productVariants">;
-    priceInr: number;
-  };
-  const kept: Kept[] = [];
+  const kept: CheckoutLineSnapshot[] = [];
   const droppedNames: string[] = [];
+  const cartLineIds: Id<"cartItems">[] = [];
   const cache: VendorCache = new Map();
   const now = Date.now();
   for (const line of lines) {
+    cartLineIds.push(line._id);
     const { available, product, vendor, variant } = await resolveCartLine(ctx, line, cache);
     if (!available || !product || !vendor || !variant) {
       droppedNames.push(line.name);
-      await ctx.db.delete(line._id);
       continue;
     }
     const priceInr = await pricedUnitInr(ctx, product, variant, now);
-    kept.push({ line, product, vendor, variant, priceInr });
+    kept.push({
+      productId: product._id,
+      vendorId: vendor._id,
+      variantId: variant._id,
+      name: line.name,
+      sku: variant.sku,
+      ...(variant.size ? { size: variant.size } : {}),
+      ...(variant.colour ? { colour: variant.colour.name } : {}),
+      quantity: line.quantity,
+      priceInr,
+      commissionBps: vendor.commissionBps,
+    });
   }
   if (kept.length === 0) {
     throw appError(
@@ -347,37 +385,190 @@ export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: Ch
     );
   }
 
-  const totalInr = kept.reduce((sum, row) => sum + row.priceInr * row.line.quantity, 0);
+  const amountInr = kept.reduce((sum, row) => sum + row.priceInr * row.quantity, 0);
+  return { buyer, amountInr, lines: kept, droppedNames, cartId: cart._id, cartLineIds };
+}
+
+export async function insertCheckoutIntent(
+  ctx: MutationCtx,
+  user: Doc<"users">,
+  args: {
+    buyer: CheckoutInput;
+    amountInr: number;
+    lines: CheckoutLineSnapshot[];
+    droppedNames: string[];
+    razorpayOrderId: string;
+  },
+) {
+  const now = Date.now();
+  return ctx.db.insert("checkoutIntents", {
+    userId: user._id,
+    status: "open",
+    razorpayOrderId: args.razorpayOrderId,
+    amountInr: args.amountInr,
+    ...args.buyer,
+    lines: args.lines,
+    droppedNames: args.droppedNames,
+    expiresAt: now + CHECKOUT_INTENT_TTL_MS,
+    createdAt: now,
+  });
+}
+
+async function writeOrderFromLines(
+  ctx: MutationCtx,
+  user: Doc<"users">,
+  buyer: CheckoutInput,
+  lines: CheckoutLineSnapshot[],
+  payment: {
+    paymentStatus: PaymentStatus;
+    razorpayOrderId?: string;
+    razorpayPaymentId?: string;
+    paidAt?: number;
+  },
+) {
+  const now = Date.now();
+  const totalInr = lines.reduce((sum, row) => sum + row.priceInr * row.quantity, 0);
   const orderId = await ctx.db.insert("orders", {
     userId: user._id,
     ...buyer,
     status: "placed",
     totalInr,
+    paymentStatus: payment.paymentStatus,
+    ...(payment.razorpayOrderId ? { razorpayOrderId: payment.razorpayOrderId } : {}),
+    ...(payment.razorpayPaymentId ? { razorpayPaymentId: payment.razorpayPaymentId } : {}),
+    ...(payment.paidAt !== undefined ? { paidAt: payment.paidAt } : {}),
     createdAt: now,
   });
 
-  for (const { line, vendor, variant, priceInr } of kept) {
+  for (const line of lines) {
+    const vendor = await ctx.db.get(line.vendorId);
+    if (!vendor) throw appError("NOT_FOUND", "A store on this order no longer exists.");
+    const variant = await ctx.db.get(line.variantId);
+    if (!variant || variant.stock < line.quantity) {
+      throw appError(
+        "CONFLICT",
+        `"${line.name}" is no longer available in the quantity you selected.`,
+      );
+    }
     const orderItemId = await ctx.db.insert("orderItems", {
       orderId,
       productId: line.productId,
-      vendorId: vendor._id,
-      variantId: variant._id,
+      vendorId: line.vendorId,
+      variantId: line.variantId,
       name: line.name,
-      sku: variant.sku,
-      ...(variant.size ? { size: variant.size } : {}),
-      ...(variant.colour ? { colour: variant.colour.name } : {}),
+      sku: line.sku,
+      ...(line.size ? { size: line.size } : {}),
+      ...(line.colour ? { colour: line.colour } : {}),
       quantity: line.quantity,
-      priceInr,
+      priceInr: line.priceInr,
+      commissionBps: line.commissionBps,
       lineStatus: "placed",
       createdAt: now,
     });
-    await adjustStock(ctx, vendor, variant._id, -line.quantity, "order_reserve", {
+    await adjustStock(ctx, vendor, line.variantId, -line.quantity, "order_reserve", {
       orderItemId,
     });
-    await ctx.db.delete(line._id);
   }
-  await ctx.db.delete(cart._id);
-  return { orderId, droppedNames };
+  return orderId;
+}
+
+/** Fulfill a paid checkout intent: create order, reserve stock, clear cart. Idempotent. */
+export async function fulfillCheckoutIntent(
+  ctx: MutationCtx,
+  intentId: Id<"checkoutIntents">,
+  razorpayPaymentId: string,
+) {
+  const intent = await ctx.db.get(intentId);
+  if (!intent) throw appError("NOT_FOUND", "That checkout session expired.");
+  if (intent.status === "paid" && intent.orderId) {
+    return { orderId: intent.orderId, droppedNames: intent.droppedNames };
+  }
+  if (intent.status !== "open") {
+    throw appError("CONFLICT", "That checkout session is no longer open.");
+  }
+  if (Date.now() > intent.expiresAt) {
+    await ctx.db.patch(intent._id, { status: "expired" });
+    throw appError("CONFLICT", "That checkout session expired. Try again.");
+  }
+
+  const user = await ctx.db.get(intent.userId);
+  if (!user) throw appError("UNAUTHENTICATED", "Sign in to continue.");
+
+  const now = Date.now();
+  const buyer: CheckoutInput = {
+    name: intent.name,
+    email: intent.email,
+    phone: intent.phone,
+    address: intent.address,
+    city: intent.city,
+    pincode: intent.pincode,
+  };
+  const orderId = await writeOrderFromLines(ctx, user, buyer, intent.lines, {
+    paymentStatus: "paid",
+    razorpayOrderId: intent.razorpayOrderId,
+    razorpayPaymentId,
+    paidAt: now,
+  });
+
+  const cart = await ctx.db
+    .query("carts")
+    .withIndex("by_userId", (q) => q.eq("userId", user._id))
+    .unique();
+  if (cart) {
+    const lines = await cartLines(ctx, cart._id);
+    for (const line of lines) await ctx.db.delete(line._id);
+    await ctx.db.delete(cart._id);
+  }
+
+  await ctx.db.patch(intent._id, {
+    status: "paid",
+    orderId,
+    razorpayPaymentId,
+  });
+  return { orderId, droppedNames: intent.droppedNames };
+}
+
+export async function fulfillCheckoutIntentByRazorpayOrder(
+  ctx: MutationCtx,
+  razorpayOrderId: string,
+  razorpayPaymentId: string,
+) {
+  const intent = await ctx.db
+    .query("checkoutIntents")
+    .withIndex("by_razorpayOrderId", (q) => q.eq("razorpayOrderId", razorpayOrderId))
+    .unique();
+  if (!intent) return null;
+  return fulfillCheckoutIntent(ctx, intent._id, razorpayPaymentId);
+}
+
+/**
+ * Direct paid checkout for tests / smoke. Production UI uses Razorpay intent + confirm.
+ */
+export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: CheckoutInput) {
+  const prepared = await prepareCheckout(ctx, user, input);
+  const orderId = await writeOrderFromLines(ctx, user, prepared.buyer, prepared.lines, {
+    paymentStatus: "paid",
+    paidAt: Date.now(),
+  });
+  for (const lineId of prepared.cartLineIds) {
+    const line = await ctx.db.get(lineId);
+    if (line) await ctx.db.delete(line._id);
+  }
+  const cart = await ctx.db.get(prepared.cartId);
+  if (cart) await ctx.db.delete(cart._id);
+  return { orderId, droppedNames: prepared.droppedNames };
+}
+
+export async function expireOpenCheckoutIntents(ctx: MutationCtx) {
+  const now = Date.now();
+  const due = await ctx.db
+    .query("checkoutIntents")
+    .withIndex("by_status_and_expiresAt", (q) => q.eq("status", "open").lte("expiresAt", now))
+    .take(50);
+  for (const intent of due) {
+    await ctx.db.patch(intent._id, { status: "expired" });
+  }
+  return due.length;
 }
 
 export async function listOrders(ctx: QueryCtx) {

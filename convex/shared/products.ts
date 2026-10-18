@@ -694,6 +694,13 @@ export const vBuyerOrderDetail = v.object({
   city: v.string(),
   pincode: v.string(),
   status: vOrderStatus,
+  paymentStatus: v.union(
+    v.literal("pending"),
+    v.literal("paid"),
+    v.literal("refunded"),
+    v.literal("failed"),
+    v.null(),
+  ),
   totalInr: v.number(),
   createdAt: v.number(),
   items: v.array(vOrderItemView),
