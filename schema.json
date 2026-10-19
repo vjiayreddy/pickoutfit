@@ -1,0 +1,44 @@
+{
+  "sku": "PRODUCT_SKU",
+  "name": "PRODUCT_NAME",
+  "slug": "PRODUCT_SLUG",
+  "description": "PRODUCT_DESCRIPTION",
+  "price": "PRODUCT_PRICE",
+  "categoryId": "CATEGORY_LEAF_ID",
+  "categoryPath": "men/topwear/shirts/formal",
+  "brandId": "BRAND_ID",
+  "status": "draft|active|archived",
+  "aiRecommend": true,
+  "images": [
+    {
+      "url": "IMAGE_URL",
+      "alt": "IMAGE_ALT",
+      "position": 0
+    }
+  ],
+  "attributes": [
+    {
+      "attributeTypeId": "ATTRIBUTE_TYPE_ID",
+      "attributeIds": ["ATTRIBUTE_ID_1", "ATTRIBUTE_ID_2"]
+    }
+  ],
+  "variations": [
+    {
+      "sku": "VARIANT_SKU",
+      "attributeIds": ["SIZE_ATTR_ID", "COLOR_ATTR_ID"],
+      "price": "OPTIONAL_OVERRIDE_PRICE",
+      "stock": 0
+    }
+  ],
+  "createdAt": "ISO_OR_EPOCH_MS",
+  "updatedAt": "ISO_OR_EPOCH_MS",
+  "_notes": {
+    "discount": "Use discounts table — not stored on product",
+    "stock": "Source of truth is variations[].stock; simple products use one default variation",
+    "category": "Select one leaf; filter matches categoryPath prefix (men, men/topwear, …)",
+    "brand": "brandId only — not an attribute",
+    "attributes": "All product traits from attributeTypes/attributes (multi-select)",
+    "variations": "Sellable SKUs; always at least one row for inventory",
+    "infoSections": "PDP accordion blocks only (care/FAQ), not product attributes"
+  }
+}

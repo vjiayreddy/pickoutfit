@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser } from "./lib/auth";
 import { markOutfitSaved, requireOutfit, toOutfitView } from "./model/outfits";
+import { listShopLooksForThread, toShopLookView, vShopLookView } from "./model/shopLooks";
 import {
   createThread,
   linkSession as linkThreadSession,
@@ -132,5 +133,18 @@ export const saveProposal = mutation({
     const outfit = await requireOutfit(ctx, user, outfitId);
     await markOutfitSaved(ctx, outfit);
     return null;
+  },
+});
+
+/** Shop looks the stylist proposed in this thread, newest first. */
+export const shopLooks = query({
+  args: { threadId: v.id("threads") },
+  returns: v.array(vShopLookView),
+  handler: async (ctx, { threadId }) => {
+    const user = await requireUser(ctx);
+    const thread = await ctx.db.get(threadId);
+    if (!thread || thread.userId !== user._id) return [];
+    const rows = await listShopLooksForThread(ctx, thread._id);
+    return Promise.all(rows.map((row) => toShopLookView(ctx, row)));
   },
 });

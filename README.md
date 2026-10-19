@@ -43,10 +43,20 @@ Signed-in users are redirected from `/` to `/wardrobe`. Preview the marketing pa
 | `SITE_URL` | yes | Must match the public site origin |
 | `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` | for pipelines | Detect / extract / render / embed |
 | `AGENT_SERVICE_KEY` | for stylist | Shared with Next `.env.local` |
-| `STRIPE_SECRET_KEY` | billing | Test or live secret |
-| `STRIPE_WEBHOOK_SECRET` | billing | From Stripe webhook endpoint |
-| `STRIPE_PRICE_PRO` / `STRIPE_PRICE_PLUS` | billing | Price IDs from Dashboard |
-| `ALLOW_DEV_SMOKE` | optional | `1` to allow non-admin test plan grants |
+| `STRIPE_SECRET_KEY` | consumer SaaS billing | Test or live secret |
+| `STRIPE_WEBHOOK_SECRET` | consumer SaaS billing | From Stripe webhook endpoint |
+| `STRIPE_PRICE_PRO` / `STRIPE_PRICE_PLUS` | consumer SaaS billing | Price IDs from Dashboard |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | marketplace | Checkout, Route payouts, vendor plans |
+| `RAZORPAY_WEBHOOK_SECRET` | marketplace | Webhook at `https://<deployment>.convex.site/razorpay/webhook` |
+| `ALLOW_DEV_SMOKE` | optional | `1` to allow non-admin test plan grants + direct checkout when Razorpay is configured |
+
+### Next.js marketplace key
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `NEXT_PUBLIC_RAZORPAY_KEY_ID` | marketplace checkout | Same key id as Convex `RAZORPAY_KEY_ID` (public) |
+
+Enable **Razorpay Route** on the account for vendor linked accounts and transfers. Subscribe the webhook to `payment.captured`, account activation events, `transfer.processed` / `transfer.failed`, and subscription events.
 
 See [`.env.example`](.env.example) for copy-paste commands.
 
@@ -62,12 +72,15 @@ There is no self-promote mutation. In the Convex dashboard, open the `users` tab
 4. Open `/share/[token]` for a public render (Pro+ sharing)
 5. Open `/billing` and exercise Checkout / portal in Stripe test mode
 6. Open `/stylist` and ask Eve for a look from seeded pieces
+7. With Razorpay test keys: shop checkout → pay → vendor ship/deliver → payouts settle after hold
+8. Vendor desk: `/vendor/payouts` (Route onboarding) and `/vendor/settings/billing` (Growth/Pro)
 
 ## Production checklist
 
 - [ ] `npx convex deploy` to production
 - [ ] Set prod `SITE_URL`, `BETTER_AUTH_SECRET`, AI keys, `AGENT_SERVICE_KEY`
 - [ ] Stripe Dashboard: products/prices + webhook → live `STRIPE_*` on Convex
+- [ ] Razorpay: Route enabled, live keys + webhook → `/razorpay/webhook`, set `NEXT_PUBLIC_RAZORPAY_KEY_ID`
 - [ ] Confirm Eve agent model is on a paid Gateway tier (not the free-tier placeholder)
 - [ ] Run the smoke path against production
 - [ ] Bootstrap first admin via dashboard `users.role`

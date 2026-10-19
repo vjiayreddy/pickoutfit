@@ -1,50 +1,56 @@
 "use client";
 
 import Link from "next/link";
-import {
-  cloneElement,
-  isValidElement,
-  type ButtonHTMLAttributes,
-  type ReactElement,
-  type ReactNode,
-} from "react";
+import { Button as ButtonPrimitive } from "@base-ui/react/button";
+import { cva, type VariantProps } from "class-variance-authority";
+import type { ReactElement, ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
-type Variant = "default" | "primary" | "outline" | "secondary" | "ghost" | "destructive" | "link";
-type Size = "default" | "xs" | "sm" | "lg" | "icon" | "icon-xs" | "icon-sm" | "icon-lg";
+const buttonVariants = cva(
+  "group/button inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition outline-none select-none active:scale-95 active:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        primary: "bg-primary text-primary-foreground hover:bg-primary/90",
+        outline:
+          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
+        secondary:
+          "bg-secondary text-secondary-foreground hover:bg-hairline/40 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+        ghost:
+          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
+        destructive:
+          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20",
+        link: "bg-transparent text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "h-12 gap-1.5 px-8",
+        xs: "h-7 gap-1 px-3 text-xs [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-10 gap-1.5 px-4 text-sm [&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-12 gap-1.5 px-8 text-base",
+        icon: "size-10 p-0",
+        "icon-xs": "size-7 p-0 [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm": "size-8 p-0",
+        "icon-lg": "size-12 p-0",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  },
+);
 
-const variantClass: Record<Variant, string> = {
-  default: "bg-ink text-canvas hover:bg-ink/90",
-  primary: "bg-ink text-canvas hover:bg-ink/90",
-  outline: "border border-hairline bg-canvas text-ink hover:bg-soft-cloud",
-  secondary: "bg-soft-cloud text-ink hover:bg-hairline/40",
-  ghost: "bg-transparent text-ink hover:bg-soft-cloud",
-  destructive: "bg-sale/10 text-sale hover:bg-sale/20",
-  link: "bg-transparent text-ink underline underline-offset-4",
-};
+export type ButtonProps = ButtonPrimitive.Props &
+  VariantProps<typeof buttonVariants> & {
+    href?: string;
+    /** When false with `render`, clone the element instead of a native button. */
+    nativeButton?: boolean;
+    render?: ReactElement<{ className?: string; children?: ReactNode }>;
+    asChild?: boolean;
+  };
 
-const sizeClass: Record<Size, string> = {
-  default: "h-12 px-8 text-sm",
-  xs: "h-7 px-3 text-xs",
-  sm: "h-10 px-4 text-sm",
-  lg: "h-12 px-8 text-base",
-  icon: "size-10 p-0",
-  "icon-xs": "size-7 p-0",
-  "icon-sm": "size-8 p-0",
-  "icon-lg": "size-12 p-0",
-};
-
-export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: Variant;
-  size?: Size;
-  href?: string;
-  /** When false with `render`, clone the element instead of a native button (Fitcheck/base-ui compat). */
-  nativeButton?: boolean;
-  render?: ReactElement<{ className?: string; children?: ReactNode }>;
-  asChild?: boolean;
-};
-
-export function Button({
+function Button({
   className,
   variant = "default",
   size = "default",
@@ -53,23 +59,24 @@ export function Button({
   render,
   asChild,
   children,
-  type = "button",
   disabled,
   ...props
 }: ButtonProps) {
-  const classes = cn(
-    "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full font-medium transition active:scale-95 active:opacity-50 disabled:pointer-events-none disabled:opacity-50",
-    "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
-    variantClass[variant],
-    sizeClass[size],
-    className,
-  );
+  const classes = cn(buttonVariants({ variant, size }), className);
 
   if (href) {
-    const isExternal = href.startsWith("http://") || href.startsWith("https://") || href.startsWith("blob:");
+    const isExternal =
+      href.startsWith("http://") || href.startsWith("https://") || href.startsWith("blob:");
     if (isExternal) {
       return (
-        <a href={href} className={classes} aria-disabled={disabled || undefined} download target="_blank" rel="noreferrer">
+        <a
+          href={href}
+          className={classes}
+          aria-disabled={disabled || undefined}
+          download
+          target="_blank"
+          rel="noreferrer"
+        >
           {children}
         </a>
       );
@@ -81,16 +88,18 @@ export function Button({
     );
   }
 
-  if ((asChild || nativeButton === false) && render && isValidElement(render)) {
-    return cloneElement(render, {
-      className: cn(classes, render.props.className),
-      children: children ?? render.props.children,
-    });
-  }
-
   return (
-    <button type={type} className={classes} disabled={disabled} {...props}>
+    <ButtonPrimitive
+      data-slot="button"
+      className={classes}
+      disabled={disabled}
+      nativeButton={asChild ? false : nativeButton}
+      render={asChild || render ? render : undefined}
+      {...props}
+    >
       {children}
-    </button>
+    </ButtonPrimitive>
   );
 }
+
+export { Button, buttonVariants };

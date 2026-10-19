@@ -56,7 +56,7 @@ export const GARMENT_CARDS = [
   },
   {
     id: "shoes",
-    label: "Shoes",
+    label: "Footwear",
     src: TRY_ON_ASSETS.shoes,
     width: TRY_ON_DIMENSIONS.shoes.width,
     height: TRY_ON_DIMENSIONS.shoes.height,
@@ -95,7 +95,7 @@ export const TRY_ON_LOOKS = [
     pieces: [
       { id: "shirt", label: "Shirt", src: "/images/try-on/male-shirt.webp", ...MALE_PIECE },
       { id: "trousers", label: "Trousers", src: "/images/try-on/male-trousers.webp", ...MALE_PIECE },
-      { id: "shoes", label: "Shoes", src: "/images/try-on/male-shoes.webp", ...MALE_PIECE },
+      { id: "shoes", label: "Footwear", src: "/images/try-on/male-shoes.webp", ...MALE_PIECE },
     ],
   },
 ] as const;

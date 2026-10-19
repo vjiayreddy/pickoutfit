@@ -3,37 +3,76 @@ import type { ReactNode } from "react";
 import { routes } from "@/lib/routes";
 
 type Mode = "sign-in" | "sign-up";
+type Audience = "shopper" | "vendor" | "platform";
 
 const PANEL: Record<
-  Mode,
-  { image: string; eyebrow: string; headline: string; detail: string }
+  Audience,
+  Record<Mode, { image: string; eyebrow: string; headline: string; detail: string }>
 > = {
-  "sign-in": {
-    image: "/landing/editorial-man.webp",
-    eyebrow: "Welcome back",
-    headline: "Your closet,\nready.",
-    detail: "Outfits, try-ons, and Eve are saved to this account.",
+  shopper: {
+    "sign-in": {
+      image: "/landing/editorial-man.webp",
+      eyebrow: "Welcome back",
+      headline: "Your closet,\nready.",
+      detail: "Outfits, try-ons, and Eve are saved to this account.",
+    },
+    "sign-up": {
+      image: "/landing/editorial-woman.webp",
+      eyebrow: "Free to start",
+      headline: "See it\non you.",
+      detail: "Photograph what you own, build outfits, and preview them before you wear them.",
+    },
   },
-  "sign-up": {
-    image: "/landing/editorial-woman.webp",
-    eyebrow: "Free to start",
-    headline: "See it\non you.",
-    detail: "Photograph what you own, build outfits, and preview them before you wear them.",
+  vendor: {
+    "sign-in": {
+      image: "/landing/editorial-man.webp",
+      eyebrow: "Store desk",
+      headline: "Sell next\nto their closet.",
+      detail: "Manage products, discounts, and collections from one desk.",
+    },
+    "sign-up": {
+      image: "/landing/editorial-woman.webp",
+      eyebrow: "Sell on WardrobeAI",
+      headline: "Open your\nstore.",
+      detail: "List pieces that show up beside what shoppers already own. Free to start.",
+    },
   },
+  platform: {
+    "sign-in": {
+      image: "/landing/editorial-man.webp",
+      eyebrow: "Platform",
+      headline: "Run the\nmarketplace.",
+      detail: "Approve vendors, manage users, and keep the credit meter healthy.",
+    },
+    "sign-up": {
+      image: "/landing/editorial-woman.webp",
+      eyebrow: "Platform",
+      headline: "Invite\nonly.",
+      detail: "Platform accounts are provisioned by the team — use your assigned credentials.",
+    },
+  },
+};
+
+const AUDIENCE_LABEL: Partial<Record<Audience, string>> = {
+  vendor: "Sellers",
+  platform: "Platform",
 };
 
 export function AuthScreen({
   mode,
+  audience = "shopper",
   title,
   subtitle,
   children,
 }: {
   mode: Mode;
+  audience?: Audience;
   title: string;
   subtitle: string;
   children: ReactNode;
 }) {
-  const panel = PANEL[mode];
+  const panel = PANEL[audience][mode];
+  const label = AUDIENCE_LABEL[audience];
 
   return (
     <div className="grid min-h-dvh bg-canvas lg:grid-cols-2">
@@ -63,6 +102,11 @@ export function AuthScreen({
             >
               WardrobeAI
             </Link>
+            {label ? (
+              <span className="ml-3 text-xs font-medium tracking-[0.14em] text-mute uppercase">
+                {label}
+              </span>
+            ) : null}
           </div>
         </header>
 

@@ -612,7 +612,7 @@ export function FashionTryOnHero() {
                     />
                     <GarmentMark
                       piece="shoes"
-                      label="Shoes"
+                      label="Footwear"
                       className="top-[81%] left-[36%] h-[15%] w-[26%]"
                       labelClassName="top-[18%] left-1/2 -translate-x-1/2"
                     />

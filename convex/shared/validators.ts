@@ -21,6 +21,7 @@ import {
   ITEM_STATUSES,
   PRESENTATIONS,
   SEASONS,
+  SLOTS,
 } from "./wardrobe";
 
 type LiteralUnion<T extends readonly string[]> = VUnion<
@@ -38,11 +39,20 @@ export function literals<T extends readonly string[]>(
   return v.union(...members) as unknown as LiteralUnion<T>;
 }
 
+export const USER_ROLES = ["user", "vendor", "admin"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+export const vUserRole = literals(USER_ROLES);
+
+export const UPLOAD_TARGETS = ["wardrobe", "grooming", "vendor_catalog"] as const;
+export type UploadTarget = (typeof UPLOAD_TARGETS)[number];
+export const vUploadTarget = literals(UPLOAD_TARGETS);
+
 export const vCategory = literals(CATEGORIES);
 export const vSeason = literals(SEASONS);
 export const vFormality = literals(FORMALITY);
 export const vFit = literals(FITS);
 export const vPresentation = literals(PRESENTATIONS);
+export const vSlot = literals(SLOTS);
 export const vItemStatus = literals(ITEM_STATUSES);
 
 export const vPlanId = literals(PLAN_IDS);

@@ -1,0 +1,327 @@
+import { v } from "convex/values";
+import { isProductType, type ProductCategory } from "./products";
+
+export const MAX_CATEGORY_DEPTH = 8;
+/** Soft cap per store so one vendor cannot blow the table. */
+export const MAX_CATEGORIES_PER_VENDOR = 500;
+
+export const vCategoryDoc = v.object({
+  _id: v.id("categories"),
+  _creationTime: v.number(),
+  vendorId: v.optional(v.id("vendors")),
+  name: v.string(),
+  slug: v.string(),
+  parentId: v.optional(v.id("categories")),
+  path: v.string(),
+  imageStorageId: v.optional(v.id("_storage")),
+  sortOrder: v.number(),
+  isActive: v.boolean(),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+});
+
+/** Tree node; `children` is recursive so validated as any at the leaves. */
+export const vCategoryTreeNode = v.object({
+  _id: v.id("categories"),
+  name: v.string(),
+  slug: v.string(),
+  parentId: v.union(v.id("categories"), v.null()),
+  path: v.string(),
+  sortOrder: v.number(),
+  isActive: v.boolean(),
+  children: v.array(v.any()),
+});
+
+export type SeedCategoryNode = {
+  name: string;
+  slug: string;
+  children?: SeedCategoryNode[];
+};
+
+const TOPWEAR_MEN: SeedCategoryNode = {
+  name: "Topwear",
+  slug: "topwear",
+  children: [
+    {
+      name: "Shirts",
+      slug: "shirts",
+      children: [
+        { name: "Formal", slug: "formal" },
+        { name: "Casual", slug: "casual" },
+        { name: "Printed", slug: "printed" },
+      ],
+    },
+    { name: "T-Shirts", slug: "t-shirts" },
+    { name: "Polos", slug: "polos" },
+    { name: "Hoodies & Sweatshirts", slug: "hoodies-sweatshirts" },
+    { name: "Sweaters & Knits", slug: "sweaters-knits" },
+  ],
+};
+
+const BOTTOMWEAR_MEN: SeedCategoryNode = {
+  name: "Bottomwear",
+  slug: "bottomwear",
+  children: [
+    { name: "Jeans", slug: "jeans" },
+    { name: "Trousers", slug: "trousers" },
+    { name: "Shorts", slug: "shorts" },
+  ],
+};
+
+const OUTERWEAR: SeedCategoryNode = {
+  name: "Outerwear",
+  slug: "outerwear",
+  children: [
+    { name: "Jackets", slug: "jackets" },
+    { name: "Coats", slug: "coats" },
+    { name: "Blazers", slug: "blazers" },
+  ],
+};
+
+const ACCESSORIES_MEN: SeedCategoryNode = {
+  name: "Accessories",
+  slug: "accessories",
+  children: [
+    { name: "Footwear", slug: "shoes" },
+    { name: "Eyewear", slug: "eyewear" },
+    { name: "Belts", slug: "belts" },
+    { name: "Watches", slug: "watches" },
+  ],
+};
+
+const TOPWEAR_WOMEN: SeedCategoryNode = {
+  name: "Topwear",
+  slug: "topwear",
+  children: [
+    { name: "Tops & Blouses", slug: "tops-blouses" },
+    { name: "T-Shirts", slug: "t-shirts" },
+    { name: "Shirts", slug: "shirts" },
+    { name: "Tunics", slug: "tunics" },
+    { name: "Hoodies & Sweatshirts", slug: "hoodies-sweatshirts" },
+    { name: "Sweaters & Cardigans", slug: "sweaters-cardigans" },
+  ],
+};
+
+const BOTTOMWEAR_WOMEN: SeedCategoryNode = {
+  name: "Bottomwear",
+  slug: "bottomwear",
+  children: [
+    { name: "Jeans", slug: "jeans" },
+    { name: "Trousers", slug: "trousers" },
+    { name: "Skirts", slug: "skirts" },
+    { name: "Shorts", slug: "shorts" },
+  ],
+};
+
+const ACCESSORIES_WOMEN: SeedCategoryNode = {
+  name: "Accessories",
+  slug: "accessories",
+  children: [
+    { name: "Footwear", slug: "shoes" },
+    { name: "Eyewear", slug: "eyewear" },
+    { name: "Bags", slug: "bags" },
+    { name: "Jewelry", slug: "jewelry" },
+  ],
+};
+
+const TOPWEAR_KIDS: SeedCategoryNode = {
+  name: "Topwear",
+  slug: "topwear",
+  children: [
+    { name: "T-Shirts", slug: "t-shirts" },
+    { name: "Shirts", slug: "shirts" },
+    { name: "Hoodies & Sweatshirts", slug: "hoodies-sweatshirts" },
+  ],
+};
+
+const BOTTOMWEAR_KIDS: SeedCategoryNode = {
+  name: "Bottomwear",
+  slug: "bottomwear",
+  children: [
+    { name: "Jeans", slug: "jeans" },
+    { name: "Shorts", slug: "shorts" },
+    { name: "Trousers", slug: "trousers" },
+  ],
+};
+
+/** Default per-store catalog: Men / Women / Kids with wear-type branches. */
+export const SEED_CATEGORY_TREE: SeedCategoryNode[] = [
+  {
+    name: "Men",
+    slug: "men",
+    children: [TOPWEAR_MEN, BOTTOMWEAR_MEN, OUTERWEAR, ACCESSORIES_MEN],
+  },
+  {
+    name: "Women",
+    slug: "women",
+    children: [
+      TOPWEAR_WOMEN,
+      BOTTOMWEAR_WOMEN,
+      OUTERWEAR,
+      { name: "Dresses", slug: "dresses" },
+      ACCESSORIES_WOMEN,
+    ],
+  },
+  {
+    name: "Kids",
+    slug: "kids",
+    children: [
+      TOPWEAR_KIDS,
+      BOTTOMWEAR_KIDS,
+      {
+        name: "Outerwear",
+        slug: "outerwear",
+        children: [{ name: "Jackets", slug: "jackets" }],
+      },
+      {
+        name: "Accessories",
+        slug: "accessories",
+        children: [{ name: "Footwear", slug: "shoes" }],
+      },
+    ],
+  },
+];
+
+export function categorySlug(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+export function joinCategoryPath(parentPath: string | undefined, slug: string): string {
+  return parentPath ? `${parentPath}/${slug}` : slug;
+}
+
+export type CategoryTreeNode = {
+  _id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  path: string;
+  sortOrder: number;
+  isActive: boolean;
+  children: CategoryTreeNode[];
+};
+
+/**
+ * True when `productPath` is the filter path or a descendant
+ * (e.g. filter `men/topwear` matches `men/topwear/shirts/formal`).
+ */
+export function categoryPathMatchesFilter(productPath: string, filterPath: string): boolean {
+  const product = productPath.replace(/^\/+|\/+$/g, "");
+  const filter = filterPath.replace(/^\/+|\/+$/g, "");
+  if (!filter) return true;
+  if (!product) return false;
+  return product === filter || product.startsWith(`${filter}/`);
+}
+
+/** Map a nested path onto the legacy flat product category enum. */
+export function legacyProductCategoryFromPath(
+  path: string,
+): "clothes" | "accessories" | "skincare" | "hair_color" | "eyewear" {
+  const parts = path.split("/");
+  if (parts.includes("skincare")) return "skincare";
+  if (parts.includes("hair_color") || parts.includes("hair-color")) return "hair_color";
+  if (parts.includes("eyewear")) return "eyewear";
+  // Shoes use the clothes productType list even though they sit under Accessories in the tree.
+  if (parts.includes("shoes")) return "clothes";
+  if (parts.includes("accessories") || parts.includes("bags") || parts.includes("jewelry")) {
+    return "accessories";
+  }
+  return "clothes";
+}
+
+/**
+ * Seed / common category slugs → PRODUCT_TYPES enums.
+ * Walk leaf→root so Men/Topwear/Shirts/Formal resolves to `shirt`.
+ */
+const CATEGORY_SLUG_TO_PRODUCT_TYPE: Record<string, string> = {
+  shirts: "shirt",
+  shirt: "shirt",
+  "t-shirts": "t-shirt",
+  "t-shirt": "t-shirt",
+  polos: "polo",
+  polo: "polo",
+  "hoodies-sweatshirts": "hoodie",
+  hoodie: "hoodie",
+  "sweaters-knits": "knit",
+  "sweaters-cardigans": "knit",
+  knit: "knit",
+  "tops-blouses": "shirt",
+  tunics: "shirt",
+  jeans: "jeans",
+  trousers: "trouser",
+  trouser: "trouser",
+  shorts: "shorts",
+  skirts: "skirt",
+  skirt: "skirt",
+  jackets: "jacket",
+  jacket: "jacket",
+  coats: "coat",
+  coat: "coat",
+  blazers: "blazer",
+  blazer: "blazer",
+  dresses: "dress",
+  dress: "dress",
+  shoes: "shoes",
+  belts: "belt",
+  belt: "belt",
+  watches: "watch",
+  watch: "watch",
+  bags: "bag",
+  bag: "bag",
+  jewelry: "jewelry",
+  eyewear: "glasses",
+  glasses: "glasses",
+  sunglasses: "sunglasses",
+};
+
+/** Derive a PRODUCT_TYPES value from a category path, or null if none fits. */
+export function productTypeFromCategoryPath(
+  path: string,
+  legacy?: ProductCategory,
+): string | null {
+  const category = legacy ?? legacyProductCategoryFromPath(path);
+  const parts = path.split("/").filter(Boolean);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const mapped = CATEGORY_SLUG_TO_PRODUCT_TYPE[parts[i]!];
+    if (mapped && isProductType(category, mapped)) return mapped;
+  }
+  return null;
+}
+
+/** Ancestor chain from root to the node with `id`, or null if missing. */
+export function findCategoryAncestry(
+  tree: CategoryTreeNode[],
+  id: string,
+): CategoryTreeNode[] | null {
+  for (const node of tree) {
+    if (node._id === id) return [node];
+    const nested = findCategoryAncestry(node.children, id);
+    if (nested) return [node, ...nested];
+  }
+  return null;
+}
+
+/**
+ * True when a Variant (or attribute) scoped to `scopeCategoryIds` applies to
+ * `productCategoryId`. Empty scope = global. Otherwise the product leaf matches
+ * if it is the scoped node or a descendant (scoped id appears in the ancestry).
+ */
+export function categoryScopeMatches(
+  productCategoryId: string | null | undefined,
+  scopeCategoryIds: readonly string[],
+  tree: CategoryTreeNode[],
+): boolean {
+  if (scopeCategoryIds.length === 0) return true;
+  if (!productCategoryId) return false;
+  if (scopeCategoryIds.includes(productCategoryId)) return true;
+  const ancestry = findCategoryAncestry(tree, productCategoryId);
+  if (!ancestry) return false;
+  const ancestorIds = new Set(ancestry.map((node) => node._id));
+  return scopeCategoryIds.some((id) => ancestorIds.has(id));
+}

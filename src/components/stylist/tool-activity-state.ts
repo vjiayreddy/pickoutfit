@@ -44,11 +44,26 @@ const LABELS: Record<string, { running: string; done: string; failed: string }> 
     done: "Looks put together",
     failed: "Couldn’t finish those looks",
   },
+  search_shop: {
+    running: "Searching the shop",
+    done: "Shop searched",
+    failed: "Couldn’t search the shop",
+  },
+  compose_shop_looks: {
+    running: "Building shop looks",
+    done: "Shop looks ready",
+    failed: "Couldn’t finish those shop looks",
+  },
   start_renders: { running: "Starting your try-on", done: "Try-on started", failed: "Couldn’t start your try-on" },
   save_outfit: { running: "Saving your outfit", done: "Outfit saved", failed: "Couldn’t save your outfit" },
   ask_question: { running: "Using your answer", done: "Answer received", failed: "Couldn’t use that answer" },
 };
 const FALLBACK = { running: "Working on your request", done: "Step completed", failed: "This step didn’t finish" };
+
+/** Cap how many calls we surface per tool so a loop cannot render "521 steps". */
+export const MAX_ACTIVITY_CALLS_PER_TOOL = 4;
+/** Cap total tool parts counted in the activity header. */
+export const MAX_ACTIVITY_TOOLS_DISPLAYED = 24;
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -56,6 +71,13 @@ function record(value: unknown): Record<string, unknown> {
 
 function count(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+/** Prefer the latest state for each toolCallId (streaming can emit duplicates). */
+export function dedupeActivityTools(tools: readonly ActivityTool[]): ActivityTool[] {
+  const byId = new Map<string, ActivityTool>();
+  for (const tool of tools) byId.set(tool.toolCallId, tool);
+  return [...byId.values()];
 }
 
 export function activityState(part: ActivityTool, active: boolean): ActivityState {
@@ -76,7 +98,7 @@ export function activityGroupState(states: readonly ActivityState[]): ActivitySt
 function hasCard(part: ActivityTool): boolean {
   return (
     part.state === "approval-requested" ||
-    (part.state === "output-available" && !part.partial && ["compose_outfits", "start_renders"].includes(part.toolName))
+    (part.state === "output-available" && !part.partial && ["compose_outfits", "compose_shop_looks", "start_renders"].includes(part.toolName))
   );
 }
 
@@ -142,14 +164,17 @@ function wardrobeFilters(parts: ActivityTool[]): string {
 }
 
 export function summarizeActivity(tools: readonly ActivityTool[], active: boolean): ActivityRow[] {
+  const unique = dedupeActivityTools(tools);
   const byName = new Map<string, ActivityTool[]>();
-  for (const tool of tools) {
+  for (const tool of unique) {
     const existing = byName.get(tool.toolName);
     if (existing) existing.push(tool);
     else byName.set(tool.toolName, [tool]);
   }
   return [...byName].map(([toolName, parts]) => {
-    const states = parts.map((part) => activityState(part, active));
+    const totalCalls = parts.length;
+    const shown = parts.slice(-MAX_ACTIVITY_CALLS_PER_TOOL);
+    const states = shown.map((part) => activityState(part, active));
     const state = activityGroupState(states);
     const copy = LABELS[toolName === "eve:load-skill" ? "load_skill" : toolName] ?? FALLBACK;
     const label =
@@ -164,20 +189,28 @@ export function summarizeActivity(tools: readonly ActivityTool[], active: boolea
               : state === "waiting"
                 ? "Waiting for your answer"
                 : copy.running;
-    const last = parts.at(-1);
+    const last = shown.at(-1);
     const failed = states.filter((state) => state === "error").length;
     const cancelled = states.filter((state) => state === "cancelled").length;
+    const stepWord = toolName === "get_wardrobe" ? "searches" : "steps";
+    const stepDetail =
+      totalCalls > MAX_ACTIVITY_CALLS_PER_TOOL
+        ? `${totalCalls} ${stepWord} · showing latest ${MAX_ACTIVITY_CALLS_PER_TOOL}`
+        : totalCalls > 1
+          ? `${totalCalls} ${stepWord}`
+          : "";
     const details = [
-      parts.length > 1 ? `${parts.length} ${toolName === "get_wardrobe" ? "searches" : "steps"}` : "",
-      toolName === "get_wardrobe" ? wardrobeFilters(parts) : "",
+      stepDetail,
+      toolName === "get_wardrobe" ? wardrobeFilters(shown) : "",
       state === "error" ? "The stylist can help you try again." : "",
       failed > 0 && state !== "error" ? `${failed} failed` : "",
       cancelled > 0 && state !== "cancelled" ? `${cancelled} cancelled` : "",
       state === "paused" ? "This step stopped before a result arrived." : "",
       state === "cancelled" ? "This action was not approved." : "",
-      state === "done" && last && parts.length === 1 ? resultDetail(last) : "",
+      state === "done" && last && totalCalls === 1 ? resultDetail(last) : "",
+      totalCalls > 12 ? "Too many repeats — start a new chat if this stalls." : "",
     ].filter(Boolean);
-    return { key: parts[0].toolCallId, toolName, state, label, detail: details.join(" · "), calls: parts.length };
+    return { key: shown[0].toolCallId, toolName, state, label, detail: details.join(" · "), calls: totalCalls };
   });
 }
 
@@ -193,6 +226,7 @@ export function activityRetry(tools: readonly ActivityTool[]): { label: string; 
       "load_skill",
       "eve:load-skill",
       "quote_renders",
+      "search_shop",
     ].includes(part.toolName),
   );
   return readOnly

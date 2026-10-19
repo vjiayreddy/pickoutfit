@@ -1,6 +1,26 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { vProductCategory, vOrderStatus } from "./shared/products";
+import {
+  vAgeGroup,
+  vDiscountKind,
+  vDiscountScope,
+  vInventoryReason,
+  vOccasion,
+  vOfferKind,
+  vOrderLineStatus,
+  vOrderStatus,
+  vOtherDetail,
+  vProductAttribute,
+  vProductAttributeSelection,
+  vProductCategory,
+  vProductImageKind,
+  vProductInfoSection,
+  vProductSource,
+  vProductStatus,
+  vReturnStatus,
+  vShipmentStatus,
+  vVariantColour,
+} from "./shared/products";
 import { vShopOffer } from "./shared/shop";
 import {
   vBeardGoal,
@@ -8,6 +28,8 @@ import {
   vBudget,
   vDetectedItem,
   vFeature,
+  vFit,
+  vFormality,
   vGrooming,
   vHairGoal,
   vHairLength,
@@ -23,13 +45,32 @@ import {
   vRenderKind,
   vRenderQuality,
   vReservation,
+  vSeason,
   vServiceId,
+  vSlot,
   vStyleOrigin,
   vStyleRefServiceId,
   vStyleRefStatus,
+  vColours,
   vTokenUsage,
   vPresentation,
+  vUploadTarget,
+  vUserRole,
 } from "./shared/validators";
+import {
+  vCheckoutIntentStatus,
+  vPaymentStatus,
+  vSettlementStatus,
+} from "./shared/payments";
+import {
+  vListingQuota,
+  vPayoutStatus,
+  vVendorAddress,
+  vVendorPlanId,
+  vVendorPlanStatus,
+  vVendorRole,
+  vVendorStatus,
+} from "./shared/vendors";
 
 export const EMBEDDING_DIMENSIONS = 1536;
 
@@ -39,7 +80,7 @@ export default defineSchema({
     email: v.optional(v.string()),
     name: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
-    role: v.union(v.literal("user"), v.literal("admin")),
+    role: vUserRole,
     plan: vPlanId,
     planPeriodEnd: v.optional(v.number()),
     billingCheckedAt: v.optional(v.number()),
@@ -53,7 +94,58 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_authId", ["authId"])
+    .index("by_createdAt", ["createdAt"])
+    .index("by_role", ["role"]),
+
+  /** A seller on the marketplace. Members sign in with their normal account. */
+  vendors: defineTable({
+    name: v.string(),
+    slug: v.string(),
+    /** Short code used in SKUs, e.g. "V0007". */
+    code: v.string(),
+    ownerUserId: v.id("users"),
+    status: vVendorStatus,
+    description: v.optional(v.string()),
+    supportEmail: v.string(),
+    supportPhone: v.optional(v.string()),
+    logoStorageId: v.optional(v.id("_storage")),
+    bannerStorageId: v.optional(v.id("_storage")),
+    legalName: v.optional(v.string()),
+    gstin: v.optional(v.string()),
+    pan: v.optional(v.string()),
+    address: vVendorAddress,
+    /** Razorpay Route linked account. Set once onboarding is submitted. */
+    payoutAccountId: v.optional(v.string()),
+    payoutStatus: vPayoutStatus,
+    commissionBps: v.number(),
+    holdDays: v.number(),
+    plan: vVendorPlanId,
+    planStatus: vVendorPlanStatus,
+    planPeriodEnd: v.optional(v.number()),
+    razorpayCustomerId: v.optional(v.string()),
+    razorpaySubscriptionId: v.optional(v.string()),
+    listingQuota: vListingQuota,
+    productCount: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_slug", ["slug"])
+    .index("by_ownerUserId", ["ownerUserId"])
+    .index("by_status", ["status"])
+    .index("by_planStatus_and_planPeriodEnd", ["planStatus", "planPeriodEnd"])
+    .index("by_razorpaySubscriptionId", ["razorpaySubscriptionId"])
     .index("by_createdAt", ["createdAt"]),
+
+  vendorMembers: defineTable({
+    vendorId: v.id("vendors"),
+    userId: v.id("users"),
+    role: vVendorRole,
+    invitedBy: v.optional(v.id("users")),
+    createdAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_userId", ["userId"])
+    .index("by_vendorId_and_userId", ["vendorId", "userId"]),
 
   avatars: defineTable({
     userId: v.id("users"),
@@ -73,6 +165,9 @@ export default defineSchema({
     jobId: v.optional(v.id("jobs")),
     /** Unset means wardrobe. A grooming upload skips garment detection. */
     serviceId: v.optional(vServiceId),
+    /** Unset means wardrobe. `vendor_catalog` extractions become product drafts. */
+    target: v.optional(vUploadTarget),
+    vendorId: v.optional(v.id("vendors")),
     detectedCount: v.optional(v.number()),
     candidates: v.optional(v.array(vDetectedItem)),
     selectedIndices: v.optional(v.array(v.number())),
@@ -91,7 +186,8 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"])
-    .index("by_batch", ["batchId"]),
+    .index("by_batch", ["batchId"])
+    .index("by_vendorId", ["vendorId"]),
 
   items: defineTable({
     userId: v.id("users"),
@@ -214,6 +310,8 @@ export default defineSchema({
     type: vJobType,
     /** Unset means wardrobe (ingest or outfit try-on). */
     serviceId: v.optional(vServiceId),
+    /** Set on vendor catalog jobs; the vendor desk lists jobs by this. */
+    vendorId: v.optional(v.id("vendors")),
     status: vJobStatus,
     steps: v.array(vJobStep),
     progress: v.number(),
@@ -233,7 +331,8 @@ export default defineSchema({
     .index("by_user_status", ["userId", "status"])
     .index("by_user", ["userId"])
     .index("by_workflowId", ["workflowId"])
-    .index("by_status", ["status", "createdAt"]),
+    .index("by_status", ["status", "createdAt"])
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"]),
 
   creditLedger: defineTable({
     userId: v.id("users"),
@@ -280,9 +379,41 @@ export default defineSchema({
     .index("by_thread", ["threadId"])
     .index("by_user", ["userId"]),
 
+  /**
+   * Shop looks the stylist proposed from AI-recommended vendor products.
+   * Separate from wardrobe `outfits` so slots hold product ids and priced lines.
+   */
+  shopLooks: defineTable({
+    userId: v.id("users"),
+    threadId: v.id("threads"),
+    name: v.string(),
+    brief: v.string(),
+    reasoning: v.string(),
+    occasion: v.optional(v.string()),
+    lines: v.array(
+      v.object({
+        slot: vSlot,
+        productId: v.id("products"),
+        variantId: v.optional(v.id("productVariants")),
+        priceInr: v.number(),
+        name: v.string(),
+      }),
+    ),
+    totalInr: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_thread", ["threadId"])
+    .index("by_user", ["userId"]),
+
   systemCounters: defineTable({
     dayKey: v.string(),
-    key: v.union(v.literal("credits_reserved"), v.literal("users_total")),
+    key: v.union(
+      v.literal("credits_reserved"),
+      v.literal("users_total"),
+      v.literal("product_sku"),
+      v.literal("vendor_code"),
+      v.literal("order_number"),
+    ),
     value: v.number(),
   }).index("by_day_key", ["dayKey", "key"]),
 
@@ -354,19 +485,314 @@ export default defineSchema({
     .index("by_look", ["lookId"])
     .index("by_styleRef", ["styleRefId"]),
 
-  /** Platform catalog. One row per sellable product, shared across services. */
+  /**
+   * Per-store nested taxonomy (Men → Topwear → Shirts → Formal).
+   * Roots omit `parentId`. `path` is the slug breadcrumb within the store.
+   * `vendorId` is optional only for legacy rows; new writes always set it.
+   */
+  categories: defineTable({
+    vendorId: v.optional(v.id("vendors")),
+    name: v.string(),
+    slug: v.string(),
+    parentId: v.optional(v.id("categories")),
+    path: v.string(),
+    /** Optional cover / icon for the category. */
+    imageStorageId: v.optional(v.id("_storage")),
+    sortOrder: v.number(),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_parentId", ["vendorId", "parentId"])
+    .index("by_vendorId_and_parentId_and_slug", ["vendorId", "parentId", "slug"])
+    .index("by_vendorId_and_path", ["vendorId", "path"])
+    .index("by_parentId", ["parentId"]),
+
+  /**
+   * Per-store fashion attribute kinds (Colour, Size, Fabric, Fit…).
+   * Shared vocabulary for filters, PDP traits, and variant recipes.
+   */
+  attributeTypes: defineTable({
+    vendorId: v.id("vendors"),
+    label: v.string(),
+    displayLabel: v.string(),
+    slug: v.string(),
+    isActive: v.boolean(),
+    isEnableFilter: v.boolean(),
+    sortOrder: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_slug", ["vendorId", "slug"])
+    .index("by_vendorId_and_sortOrder", ["vendorId", "sortOrder"]),
+
+  /**
+   * Concrete attribute values under a type (Navy, Cotton, Slim…),
+   * optionally scoped to product categories.
+   */
+  attributes: defineTable({
+    vendorId: v.id("vendors"),
+    attributeTypeId: v.id("attributeTypes"),
+    label: v.string(),
+    value: v.string(),
+    slug: v.string(),
+    /** Hex swatch for colour attributes, e.g. `#1151ff`. */
+    hex: v.optional(v.string()),
+    categoryIds: v.array(v.id("categories")),
+    mediaStorageId: v.optional(v.id("_storage")),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_attributeTypeId", ["vendorId", "attributeTypeId"])
+    .index("by_attributeTypeId_and_slug", ["attributeTypeId", "slug"])
+    .index("by_attributeTypeId_and_value", ["attributeTypeId", "value"]),
+
+  /**
+   * Vendor Variants: attributeType + categories + selected attributes.
+   * Products enable these dimensions via `variantCategoryIds`; SKUs pick `attributeIds`.
+   */
+  variantCategories: defineTable({
+    vendorId: v.id("vendors"),
+    title: v.string(),
+    slug: v.string(),
+    attributeTypeId: v.id("attributeTypes"),
+    categoryIds: v.array(v.id("categories")),
+    attributeIds: v.array(v.id("attributes")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_slug", ["vendorId", "slug"])
+    .index("by_vendorId_and_attributeTypeId", ["vendorId", "attributeTypeId"]),
+
+  /**
+   * Per-store fashion brands (Nike, Louis Philippe, …).
+   * Slug is lowercased so "Nike" and "nike" collapse to one row.
+   * Products link via `brandId`; denormalized `products.brand` keeps search/display fast.
+   */
+  brands: defineTable({
+    vendorId: v.id("vendors"),
+    name: v.string(),
+    slug: v.string(),
+    logoStorageId: v.optional(v.id("_storage")),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_slug", ["vendorId", "slug"]),
+
+  /**
+   * Marketplace catalog. One row per sellable product, owned by a vendor.
+   * Defaults: sku, name, slug, description, price, categoryId/path, brand, status, aiRecommend.
+   * Traits → attributeSelections; inventory → productVariants (always ≥1); sales → discounts table.
+   * Typed fashion columns remain optional for legacy rows.
+   */
   products: defineTable({
+    vendorId: v.optional(v.id("vendors")),
+    status: v.optional(vProductStatus),
+    /** Unique within the vendor. */
+    slug: v.optional(v.string()),
+    source: v.optional(vProductSource),
     category: vProductCategory,
+    /** Nested taxonomy leaf. Optional until products are backfilled. */
+    categoryId: v.optional(v.id("categories")),
+    /** Denormalized categories.path for ancestor/prefix filters. */
+    categoryPath: v.optional(v.string()),
     presentation: vPresentation,
     name: v.string(),
+    /** Assigned once at create. Absent on rows saved before SKUs existed. */
+    sku: v.optional(v.string()),
+    /** Canonical brand row; prefer this over free-text `brand`. */
+    brandId: v.optional(v.id("brands")),
+    /** Denormalized display name from `brands.name` (kept for search + legacy UI). */
+    brand: v.optional(v.string()),
+    description: v.optional(v.string()),
+    /** @deprecated Prefer attributeSelections. */
+    attributes: v.optional(v.array(vProductAttribute)),
+    /** Catalog-backed multi-select traits (one type → many values). */
+    attributeSelections: v.optional(v.array(vProductAttributeSelection)),
+    /** Dynamic PDP accordion sections (wash care, FAQ, …). */
+    infoSections: v.optional(v.array(vProductInfoSection)),
+    /** Simple PDP key/values (care, country of origin…). */
+    otherDetails: v.optional(v.array(vOtherDetail)),
+    /** @deprecated Prefer attributes[product_type] / attributes[subcategory]. */
+    subcategory: v.optional(v.string()),
+    /** @deprecated Prefer attributes[product_type]. */
+    productType: v.optional(v.string()),
+    /** @deprecated Prefer attributes / attributeSelections. */
+    colours: v.optional(vColours),
+    pattern: v.optional(v.string()),
+    material: v.optional(v.string()),
+    season: v.optional(v.array(vSeason)),
+    formality: v.optional(vFormality),
+    fit: v.optional(vFit),
+    size: v.optional(v.string()),
+    ageGroup: v.optional(vAgeGroup),
+    occasion: v.optional(vOccasion),
     priceInr: v.number(),
+    /** @deprecated Prefer discounts table for promotional pricing. */
+    compareAtPriceInr: v.optional(v.number()),
+    hasVariants: v.optional(v.boolean()),
+    /** Enabled Variants (dimensions) for this product. */
+    variantCategoryIds: v.optional(v.array(v.id("variantCategories"))),
+    /** @deprecated Prefer productImages. */
     storageId: v.optional(v.id("_storage")),
+    /** @deprecated Prefer productImages. */
+    imageIds: v.optional(v.array(v.id("_storage"))),
+    /** @deprecated Prefer status. */
     active: v.boolean(),
+    /** Extraction provenance: the look photo this garment was cut from. */
+    sourceUploadId: v.optional(v.id("uploads")),
+    referenceStorageId: v.optional(v.id("_storage")),
+    sourceBbox: v.optional(v.array(v.number())),
+    cutoutStorageId: v.optional(v.id("_storage")),
+    searchText: v.optional(v.string()),
+    /** When true, stylist may recommend this product from productEmbeddings. */
+    aiRecommend: v.optional(v.boolean()),
+    soldCount: v.optional(v.number()),
+    viewCount: v.optional(v.number()),
+    publishedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_category_and_presentation", ["category", "presentation"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_categoryId", ["categoryId"])
+    .index("by_categoryPath", ["categoryPath"])
+    .index("by_brandId", ["brandId"])
+    .index("by_vendorId_and_brandId", ["vendorId", "brandId"])
+    .index("by_createdAt", ["createdAt"])
+    .index("by_sku", ["sku"])
+    .index("by_vendorId_and_status", ["vendorId", "status"])
+    .index("by_vendorId_and_slug", ["vendorId", "slug"])
+    .index("by_status_and_category_and_presentation", ["status", "category", "presentation"])
+    .index("by_status_and_category_and_subcategory", ["status", "category", "subcategory"])
+    .index("by_sourceUploadId", ["sourceUploadId"])
+    .searchIndex("search_text", {
+      searchField: "searchText",
+      filterFields: ["status", "category", "vendorId"],
+    }),
+
+  /** Style embeddings for AI-recommended catalog products (separate from wardrobe itemEmbeddings). */
+  productEmbeddings: defineTable({
+    productId: v.id("products"),
+    vendorId: v.id("vendors"),
+    embedding: v.array(v.float64()),
+  })
+    .index("by_product", ["productId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: EMBEDDING_DIMENSIONS,
+      filterFields: ["vendorId"],
+    }),
+
+  /** Every photo on a product, in display order. Cutouts come from extraction. */
+  productImages: defineTable({
+    productId: v.id("products"),
+    vendorId: v.id("vendors"),
+    storageId: v.id("_storage"),
+    kind: vProductImageKind,
+    /** Set when the photo belongs to a specific variant (e.g. colourway). */
+    variantId: v.optional(v.id("productVariants")),
+    position: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_productId_and_position", ["productId", "position"])
+    .index("by_variantId_and_position", ["variantId", "position"])
+    .index("by_vendorId", ["vendorId"])
+    .index("by_storageId", ["storageId"]),
+
+  /**
+   * Sellable SKUs.
+   * Prefer `attributeIds` (one attribute per enabled Variant); `size`/`colour` stay for cart labels + legacy rows.
+   */
+  productVariants: defineTable({
+    productId: v.id("products"),
+    vendorId: v.id("vendors"),
+    sku: v.string(),
+    /** Selected attribute values for this SKU (one per enabled Variant). */
+    attributeIds: v.optional(v.array(v.id("attributes"))),
+    size: v.optional(v.string()),
+    colour: v.optional(vVariantColour),
+    /** Unset means the product price. */
+    priceInr: v.optional(v.number()),
+    compareAtPriceInr: v.optional(v.number()),
+    stock: v.number(),
+    active: v.boolean(),
+    position: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_productId_and_position", ["productId", "position"])
+    .index("by_vendorId", ["vendorId"])
+    .index("by_sku", ["sku"]),
+
+  /** Stock audit trail. Every stock change writes one row. */
+  inventoryMovements: defineTable({
+    vendorId: v.id("vendors"),
+    variantId: v.id("productVariants"),
+    delta: v.number(),
+    reason: vInventoryReason,
+    orderItemId: v.optional(v.id("orderItems")),
+    stockAfter: v.number(),
+    actorUserId: v.optional(v.id("users")),
+    createdAt: v.number(),
+  })
+    .index("by_variantId_and_createdAt", ["variantId", "createdAt"])
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"]),
+
+  /**
+   * Vendor promotions / offers. No `code` means the discount applies automatically.
+   * `offerKind` + `badge` support occasion/clearance/flash merchandising.
+   */
+  discounts: defineTable({
+    vendorId: v.id("vendors"),
+    name: v.string(),
+    code: v.optional(v.string()),
+    kind: vDiscountKind,
+    value: v.number(),
+    scope: vDiscountScope,
+    offerKind: v.optional(vOfferKind),
+    badge: v.optional(v.string()),
+    priority: v.optional(v.number()),
+    categories: v.optional(v.array(vProductCategory)),
+    collectionId: v.optional(v.id("collections")),
+    productIds: v.optional(v.array(v.id("products"))),
+    /** When scope is `attribute`, match products.attributes[key] ∈ values. */
+    attributeKey: v.optional(v.string()),
+    attributeValues: v.optional(v.array(v.string())),
+    minOrderInr: v.optional(v.number()),
+    maxUses: v.optional(v.number()),
+    usedCount: v.number(),
+    startsAt: v.number(),
+    endsAt: v.optional(v.number()),
+    active: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId_and_active", ["vendorId", "active"])
+    .index("by_code", ["code"])
+    /** Expire cron: active offers whose endsAt has passed. */
+    .index("by_active_and_endsAt", ["active", "endsAt"]),
+
+  /** Vendor-defined groupings shown on marketplace and storefront. */
+  collections: defineTable({
+    vendorId: v.id("vendors"),
+    name: v.string(),
+    slug: v.string(),
+    description: v.optional(v.string()),
+    coverStorageId: v.optional(v.id("_storage")),
+    productIds: v.array(v.id("products")),
+    active: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendorId", ["vendorId"])
+    .index("by_vendorId_and_slug", ["vendorId", "slug"]),
 
   /** One open bag per user. Checkout deletes it. */
   carts: defineTable({
@@ -377,14 +803,29 @@ export default defineSchema({
   cartItems: defineTable({
     cartId: v.id("carts"),
     userId: v.id("users"),
+    vendorId: v.optional(v.id("vendors")),
     productId: v.id("products"),
+    variantId: v.optional(v.id("productVariants")),
     quantity: v.number(),
     priceInr: v.number(),
     name: v.string(),
+    /** Where the shopper found it, for vendor analytics. */
+    addedFrom: v.optional(
+      v.union(
+        v.literal("similar"),
+        v.literal("outfit"),
+        v.literal("agent"),
+        v.literal("rail"),
+        v.literal("store"),
+      ),
+    ),
+    sourceItemId: v.optional(v.id("items")),
   })
     .index("by_cartId", ["cartId"])
     .index("by_cartId_and_productId", ["cartId", "productId"])
-    .index("by_userId", ["userId"]),
+    .index("by_cartId_and_productId_and_variantId", ["cartId", "productId", "variantId"])
+    .index("by_userId", ["userId"])
+    .index("by_vendorId", ["vendorId"]),
 
   /** Buyer fields are a snapshot so sales history survives account deletion. */
   orders: defineTable({
@@ -397,25 +838,136 @@ export default defineSchema({
     pincode: v.string(),
     status: vOrderStatus,
     totalInr: v.number(),
+    /** Absent on legacy COD rows; treat as paid for fulfillment. */
+    paymentStatus: v.optional(vPaymentStatus),
+    razorpayOrderId: v.optional(v.string()),
+    razorpayPaymentId: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_userId", ["userId"])
+    .index("by_userId_and_createdAt", ["userId", "createdAt"])
     .index("by_status_and_createdAt", ["status", "createdAt"])
+    .index("by_razorpayOrderId", ["razorpayOrderId"])
     .index("by_createdAt", ["createdAt"]),
 
   orderItems: defineTable({
     orderId: v.id("orders"),
     productId: v.optional(v.id("products")),
+    /** Set on new checkouts; absent on legacy rows until backfill. */
+    vendorId: v.optional(v.id("vendors")),
+    variantId: v.optional(v.id("productVariants")),
     name: v.string(),
+    sku: v.optional(v.string()),
+    size: v.optional(v.string()),
+    colour: v.optional(v.string()),
     quantity: v.number(),
     priceInr: v.number(),
-  }).index("by_orderId", ["orderId"]),
+    /** Platform commission snapshotted at payment time. */
+    commissionBps: v.optional(v.number()),
+    settlementId: v.optional(v.id("vendorSettlements")),
+    lineStatus: v.optional(vOrderLineStatus),
+    /** Copied from the order so vendors can page their lines by time. */
+    createdAt: v.optional(v.number()),
+  })
+    .index("by_orderId", ["orderId"])
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
+    .index("by_vendorId_and_lineStatus_and_createdAt", ["vendorId", "lineStatus", "createdAt"]),
 
-  /** Hashed platform-owner session. Not a users row. */
-  ownerSessions: defineTable({
-    tokenHash: v.string(),
+  /**
+   * Cart snapshot waiting for Razorpay capture. Stock is reserved only after payment.
+   */
+  checkoutIntents: defineTable({
+    userId: v.id("users"),
+    status: vCheckoutIntentStatus,
+    razorpayOrderId: v.string(),
+    amountInr: v.number(),
+    name: v.string(),
+    email: v.string(),
+    phone: v.string(),
+    address: v.string(),
+    city: v.string(),
+    pincode: v.string(),
+    lines: v.array(
+      v.object({
+        productId: v.id("products"),
+        vendorId: v.id("vendors"),
+        variantId: v.id("productVariants"),
+        name: v.string(),
+        sku: v.string(),
+        size: v.optional(v.string()),
+        colour: v.optional(v.string()),
+        quantity: v.number(),
+        priceInr: v.number(),
+        commissionBps: v.number(),
+      }),
+    ),
+    droppedNames: v.array(v.string()),
+    orderId: v.optional(v.id("orders")),
+    razorpayPaymentId: v.optional(v.string()),
     expiresAt: v.number(),
-  }).index("by_tokenHash", ["tokenHash"]),
+    createdAt: v.number(),
+  })
+    .index("by_userId_and_status", ["userId", "status"])
+    .index("by_razorpayOrderId", ["razorpayOrderId"])
+    .index("by_status_and_expiresAt", ["status", "expiresAt"]),
+
+  /** Vendor shipment with optional carrier tracking. One shipment can cover several lines. */
+  shipments: defineTable({
+    orderId: v.id("orders"),
+    vendorId: v.id("vendors"),
+    orderItemIds: v.array(v.id("orderItems")),
+    carrier: v.optional(v.string()),
+    trackingNumber: v.optional(v.string()),
+    status: vShipmentStatus,
+    shippedAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
+    .index("by_orderId", ["orderId"]),
+
+  /**
+   * Per-shipment payout to a vendor after delivery + holdDays.
+   * Platform collected the full amount at checkout; this is the Route transfer.
+   */
+  vendorSettlements: defineTable({
+    vendorId: v.id("vendors"),
+    shipmentId: v.id("shipments"),
+    orderId: v.id("orders"),
+    orderItemIds: v.array(v.id("orderItems")),
+    grossInr: v.number(),
+    commissionInr: v.number(),
+    netInr: v.number(),
+    status: vSettlementStatus,
+    availableAt: v.number(),
+    razorpayTransferId: v.optional(v.string()),
+    failureReason: v.optional(v.string()),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+    paidAt: v.optional(v.number()),
+  })
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
+    .index("by_shipmentId", ["shipmentId"])
+    .index("by_status_and_availableAt", ["status", "availableAt"])
+    .index("by_razorpayTransferId", ["razorpayTransferId"]),
+
+  /** Vendor-ops returns. Accepting restocks via inventory reason `return`. */
+  returns: defineTable({
+    orderId: v.id("orders"),
+    orderItemId: v.id("orderItems"),
+    vendorId: v.id("vendors"),
+    quantity: v.number(),
+    reason: v.string(),
+    status: vReturnStatus,
+    restocked: v.boolean(),
+    createdAt: v.number(),
+    resolvedAt: v.optional(v.number()),
+  })
+    .index("by_orderId", ["orderId"])
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
+    .index("by_orderItemId", ["orderItemId"])
+    .index("by_vendorId_and_status_and_createdAt", ["vendorId", "status", "createdAt"]),
 
   /** Running average duration per step prefix ("detect", "extract", "render") for ETAs. */
   stepStats: defineTable({

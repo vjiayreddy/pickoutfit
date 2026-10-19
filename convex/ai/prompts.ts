@@ -1,11 +1,20 @@
 import { LIMITS } from "../shared/credits";
+import { PRODUCT_CATEGORIES } from "../shared/products";
 import {
   BEARD_PHRASES,
   HAIR_PHRASES,
   type BeardStyle,
   type HairStyle,
 } from "../shared/grooming";
-import { CATEGORIES, FORMALITY, SEASONS, type Fit, type Presentation, type Slot } from "../shared/wardrobe";
+import {
+  CATEGORIES,
+  FORMALITY,
+  PRESENTATIONS,
+  SEASONS,
+  type Fit,
+  type Presentation,
+  type Slot,
+} from "../shared/wardrobe";
 
 /**
  * Every prompt the pipeline sends, as pure functions so they can be read, diffed and unit-tested
@@ -219,4 +228,72 @@ export function groomPrompt(input: GroomPromptInput): string {
     "",
     "The result must stay photorealistic and match the original image's lighting and colour grade. Do not crop, zoom, or change the composition.",
   ].join("\n");
+}
+
+/** One catalog photo → the shared product fields. Price is never inferred. */
+export function productDetailsInstructions(): DetectionSpec {
+  const instructions = [
+    "You are writing a shop listing from one product photo.",
+    "",
+    "Describe only the product that fills the frame. If several products are visible, describe the most prominent one. Ignore the background, packaging inserts, and any price tag.",
+    "",
+    "Be literal. Do not invent a brand, ingredients, size, or material you cannot see. Leave brand empty when no brand name is clearly readable.",
+    "",
+    `- category: exactly one of ${PRODUCT_CATEGORIES.join(", ")}. clothes = garments worn on the body. accessories = bags, jewelry, hats, belts, and similar. skincare = creams, serums, cleansers. hair_color = dye, bleach, or colour treatment. eyewear = glasses or sunglasses.`,
+    `- presentation: who wears it. masculine = men, feminine = women, neutral = both or not clearly one wardrobe.`,
+    `- name: a short shoppable name of two to six words, without a price.`,
+    `- product_type: the closest type. Clothes: t-shirt, shirt, polo, knit, hoodie, jacket, coat, suit, blazer, dress, skirt, trouser, jeans, shorts, shoes. Accessories: bag, belt, hat, jewelry, scarf, watch. Skincare: cleanser, serum, moisturiser, sunscreen, toner, mask. Hair colour: dye, bleach, toner. Eyewear: glasses, sunglasses. Use other when none of these fit.`,
+    `- subcategory: a more specific type in one or two words, e.g. "crewneck tee", "vitamin C serum", "round frames".`,
+    `- description: one or two sentences a shopper can read. Say what the product is, its colour, and any pattern or finish that is visible.`,
+    `- colours.primary: the dominant colour as a plain English name. colours.secondary: other clearly visible colours, most prominent first; an empty list when the product is one colour. colours.hex: the dominant colour as #rrggbb.`,
+    `- size: the size only when it is printed on a label or the product, e.g. "M" or "32". Empty when you cannot see a size.`,
+    `- age_group: exactly one of adult, child, all. child only when the product is clearly for a child. all when it is not specific. Otherwise adult.`,
+    `- occasion: exactly one of casual, work, formal, sport. Pick the closest wearing occasion. Use casual when it is ordinary daywear.`,
+  ].join("\n");
+
+  const schema: Record<string, unknown> = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "category",
+      "presentation",
+      "name",
+      "brand",
+      "product_type",
+      "subcategory",
+      "description",
+      "colours",
+      "size",
+      "age_group",
+      "occasion",
+    ],
+    properties: {
+      category: { type: "string", enum: [...PRODUCT_CATEGORIES] },
+      presentation: { type: "string", enum: [...PRESENTATIONS] },
+      name: { type: "string", description: "Short shoppable name, two to six words." },
+      brand: { type: "string", description: "Brand only when the name is clearly readable. Empty otherwise." },
+      product_type: { type: "string", description: "Closest type from the list in the instructions." },
+      subcategory: { type: "string", description: "More specific type, one or two words." },
+      description: { type: "string", description: "One or two sentences about what is visible." },
+      colours: {
+        type: "object",
+        additionalProperties: false,
+        required: ["primary", "secondary", "hex"],
+        properties: {
+          primary: { type: "string", description: "Dominant colour as a plain English name." },
+          secondary: {
+            type: "array",
+            items: { type: "string" },
+            description: "Other visible colours. Empty for a single-colour product.",
+          },
+          hex: { type: "string", description: "Dominant colour as #rrggbb." },
+        },
+      },
+      size: { type: "string", description: "Printed size, or empty when none is visible." },
+      age_group: { type: "string", enum: ["adult", "child", "all"] },
+      occasion: { type: "string", enum: ["casual", "work", "formal", "sport"] },
+    },
+  };
+
+  return { instructions, schema };
 }

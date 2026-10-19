@@ -6,7 +6,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { imageUploadMimeType } from "@/lib/image-upload";
 
-export type UploadTarget = "items" | "avatars";
+export type UploadTarget = "items" | "avatars" | "vendor" | "category" | "brand" | "attribute";
 export type UploadProgress = Record<string, number>;
 export type UploadEntry = { key: string; file: File };
 export type UploadSuccess = {
@@ -123,6 +123,10 @@ async function runPool<T, R>(
 export function useUpload(target: UploadTarget = "items") {
   const generateItemUrl = useMutation(api.uploads.generateUploadUrl);
   const generateAvatarUrl = useMutation(api.avatars.generateUploadUrl);
+  const generateVendorUrl = useMutation(api.vendorProducts.generateUploadUrl);
+  const generateCategoryUrl = useMutation(api.categories.generateUploadUrl);
+  const generateBrandUrl = useMutation(api.brands.generateUploadUrl);
+  const generateAttributeUrl = useMutation(api.attributes.generateUploadUrl);
   const [progress, setProgress] = useState<UploadProgress>({});
   const inFlight = useRef(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -136,7 +140,15 @@ export function useUpload(target: UploadTarget = "items") {
         const url =
           target === "avatars"
             ? await generateAvatarUrl({})
-            : await generateItemUrl({});
+            : target === "vendor"
+              ? await generateVendorUrl({})
+              : target === "category"
+                ? await generateCategoryUrl({})
+                : target === "brand"
+                  ? await generateBrandUrl({})
+                  : target === "attribute"
+                    ? await generateAttributeUrl({})
+                    : await generateItemUrl({});
         return await postFile(url, file, (fraction) =>
           setProgress((current) => ({ ...current, [key]: fraction })),
         );
@@ -145,7 +157,15 @@ export function useUpload(target: UploadTarget = "items") {
         if (inFlight.current === 0) setIsUploading(false);
       }
     },
-    [generateAvatarUrl, generateItemUrl, target],
+    [
+      generateAttributeUrl,
+      generateAvatarUrl,
+      generateBrandUrl,
+      generateCategoryUrl,
+      generateItemUrl,
+      generateVendorUrl,
+      target,
+    ],
   );
 
   const uploadMany = useCallback(

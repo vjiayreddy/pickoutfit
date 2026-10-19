@@ -5,7 +5,7 @@ import OpenAI, { toFile } from "openai";
 import type { ImageEditParamsNonStreaming, ImagesResponse } from "openai/resources/images";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import { internalAction, type ActionCtx } from "../_generated/server";
+import { action, internalAction, type ActionCtx } from "../_generated/server";
 import { optionalEnv, requireEnv } from "../lib/env";
 import { appError, isAppError } from "../lib/errors";
 import { EMBEDDING_DIMENSIONS } from "../schema";
@@ -15,7 +15,9 @@ import { vDetectedItem } from "../shared/validators";
 import { FORMALITY, isCategory, SEASONS, type Formality, type Season, type Slot } from "../shared/wardrobe";
 import { dominantHex } from "./colours";
 import { normalizeImageInput } from "./image_input";
-import { detectionInstructions, extractionPrompt, groomPrompt, renderPrompt } from "./prompts";
+import { parseProductDraft, type ProductDraft } from "./productDraft";
+import { detectionInstructions, extractionPrompt, groomPrompt, productDetailsInstructions, renderPrompt } from "./prompts";
+import { vProductDraft } from "../shared/products";
 
 /**
  * Every OpenAI call the app makes. Actions only: they read and write through `ai/pipeline.ts` so a
@@ -110,6 +112,39 @@ export const detectItems = internalAction({
 });
 
 /**
+ * One catalog photo → name, brand, type, description, colours, shop section, and presentation.
+ * Price is left for the owner to type.
+ */
+export const describeProduct = action({
+  args: { storageId: v.id("_storage") },
+  returns: vProductDraft,
+  handler: async (ctx, args): Promise<ProductDraft> => {
+    await ctx.runQuery(internal.vendors.assertMember, {});
+    const imageUrl = await storageDataUrl(ctx, args.storageId);
+    const { instructions, schema } = productDetailsInstructions();
+    let response;
+    try {
+      response = await openai().responses.create({
+        model: modelId(DETECT_MODEL),
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: instructions },
+              { type: "input_image", image_url: imageUrl, detail: "high" },
+            ],
+          },
+        ],
+        text: { format: { type: "json_schema", name: "product_details", schema, strict: true } },
+      });
+    } catch (error) {
+      throw appError("UPSTREAM_FAILED", errorText(error));
+    }
+    return parseProductDraft(response.output_text);
+  },
+});
+
+/**
  * One item: cut it out of its source photo, store the PNG, read its swatches, embed it and flag it
  * as a duplicate of an existing item when the vectors all but match.
  */
@@ -140,6 +175,55 @@ export const extractItem = internalAction({
     } catch (error) {
       await ctx.runMutation(internal.ai.pipeline.itemFailed, {
         itemId: args.itemId,
+        jobId: args.jobId,
+        stepKey: args.stepKey,
+        error: errorText(error),
+      });
+      throw error;
+    }
+  },
+});
+
+/**
+ * Store version of `extractItem`: cuts one garment out of a vendor's look photo and lands it as
+ * the draft product's cover. No embedding or duplicate check here — that happens on publish.
+ */
+export const extractProductCutout = internalAction({
+  args: { productId: v.id("products"), jobId: v.id("jobs"), stepKey: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    await ctx.runMutation(internal.ai.pipeline.markStep, {
+      jobId: args.jobId,
+      key: args.stepKey,
+      status: "running",
+    });
+    try {
+      const product = await ctx.runQuery(internal.ai.vendorPipeline.productExtractContext, {
+        productId: args.productId,
+      });
+      const photo = await ctx.storage.get(product.photoStorageId);
+      if (!photo) throw appError("NOT_FOUND", "The look photo for this product is gone.");
+
+      const response = await editWithTransparency({
+        image: await toImageFile(photo, "photo"),
+        prompt: extractionPrompt(product.description),
+        size: "1024x1024",
+        quality: "medium",
+      });
+      const { bytes, usage } = decodeImage(response);
+      const storageId = await ctx.storage.store(pngBlob(bytes));
+      await ctx.runMutation(internal.ai.vendorPipeline.productCutoutReady, {
+        productId: args.productId,
+        jobId: args.jobId,
+        stepKey: args.stepKey,
+        storageId,
+        hex: dominantHex(bytes, 3),
+        usage,
+      });
+      return null;
+    } catch (error) {
+      await ctx.runMutation(internal.ai.vendorPipeline.productCutoutFailed, {
+        productId: args.productId,
         jobId: args.jobId,
         stepKey: args.stepKey,
         error: errorText(error),

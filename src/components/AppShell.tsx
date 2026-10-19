@@ -14,14 +14,15 @@ import {
   LayoutGrid,
   LogOut,
   MessageCircle,
+  Package,
   Palette,
   Plus,
   Scissors,
   Settings,
   ShoppingBag,
   Sparkles,
-  Shield,
   Shirt,
+  Store,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { ActivityPopover } from "@/components/layout/ActivityPopover";
@@ -52,9 +53,12 @@ const MAIN_SERVICES = [
   { href: routes.service("skincare"), label: "SkinCare", icon: Droplets, also: [] },
 ] as const;
 
+const SHOP_NAV = { href: routes.shop, label: "Shop", icon: Store } as const;
+
 const PRIMARY_NAV = [
   { href: routes.wardrobe, label: "Wardrobe", icon: Shirt },
   ...WARDROBE_CHILDREN,
+  SHOP_NAV,
   ...MAIN_SERVICES.map(({ href, label, icon }) => ({ href, label, icon })),
   { href: routes.stylist, label: "Stylist", icon: MessageCircle },
 ] as const;
@@ -90,6 +94,9 @@ function parentHref(pathname: string): string {
   if (pathname.startsWith(`${routes.services}/`)) return routes.services;
   if (pathname.startsWith(routes.gridDemo)) return routes.add;
   if (pathname.startsWith(routes.checkout)) return routes.cart;
+  if (pathname.startsWith(`${routes.orders}/`)) return routes.orders;
+  if (/^\/store\/[^/]+\/[^/]+/.test(pathname)) return routes.shop;
+  if (pathname.startsWith("/store/")) return routes.shop;
   return routes.wardrobe;
 }
 
@@ -107,7 +114,9 @@ function fallbackTitle(pathname: string): string {
   if (pathname.startsWith(routes.services)) return "Services";
   if (pathname.startsWith(routes.settings)) return "Settings";
   if (pathname.startsWith(routes.billing)) return "Billing";
-  if (pathname.startsWith(routes.admin)) return "Admin";
+  if (/^\/store\/[^/]+\/[^/]+/.test(pathname)) return "Product";
+  if (pathname.startsWith("/store/")) return "Store";
+  if (pathname.startsWith(routes.orders)) return "Orders";
   if (pathname.startsWith(routes.checkoutComplete)) return "Order";
   if (pathname.startsWith(routes.checkout)) return "Checkout";
   if (pathname.startsWith(routes.cart)) return "Bag";
@@ -182,7 +191,6 @@ function AppFrame({ children }: { children: ReactNode }) {
       {showChrome ? (
         <Sidebar
           pathname={pathname}
-          isAdmin={me?.role === "admin"}
           onSignOut={() => void signOut()}
         />
       ) : null}
@@ -305,11 +313,9 @@ function AppFrame({ children }: { children: ReactNode }) {
 
 function Sidebar({
   pathname,
-  isAdmin,
   onSignOut,
 }: {
   pathname: string;
-  isAdmin: boolean;
   onSignOut: () => void;
 }) {
   return (
@@ -322,6 +328,12 @@ function Sidebar({
       </Link>
       <nav aria-label="Main navigation" className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-4">
         <WardrobeMenu pathname={pathname} />
+        <SidebarLink
+          href={SHOP_NAV.href}
+          label={SHOP_NAV.label}
+          icon={SHOP_NAV.icon}
+          active={isActivePath(pathname, SHOP_NAV.href) || pathname.startsWith("/store/")}
+        />
         {MAIN_SERVICES.map((item) => (
           <SidebarLink
             key={item.href}
@@ -343,19 +355,17 @@ function Sidebar({
       </nav>
       <div className="flex flex-col gap-1 border-t border-hairline px-3 py-4">
         <SidebarLink
+          href={routes.orders}
+          label="Orders"
+          icon={Package}
+          active={isActivePath(pathname, routes.orders)}
+        />
+        <SidebarLink
           href={routes.settings}
           label="Settings"
           icon={Settings}
           active={isActivePath(pathname, routes.settings)}
         />
-        {isAdmin ? (
-          <SidebarLink
-            href={routes.admin}
-            label="Admin"
-            icon={Shield}
-            active={isActivePath(pathname, routes.admin)}
-          />
-        ) : null}
         <button
           type="button"
           onClick={onSignOut}
@@ -511,7 +521,8 @@ function BottomNav({ pathname }: { pathname: string }) {
           const service = MAIN_SERVICES.find((entry) => entry.href === item.href);
           const active =
             isActivePath(pathname, item.href) ||
-            Boolean(service?.also.some((href) => isActivePath(pathname, href)));
+            Boolean(service?.also.some((href) => isActivePath(pathname, href))) ||
+            (item.href === routes.shop && pathname.startsWith("/store/"));
           return (
             <Link
               key={item.href}
