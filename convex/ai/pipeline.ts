@@ -13,9 +13,12 @@ import {
   setItemEmbedding,
 } from "../model/items";
 import { addSteps, appendResult, getJob, setStep } from "../model/jobs";
-import { layeredItems } from "../model/outfits";
 import { markRenderDone, markRenderFailed, setRenderPrompt } from "../model/renders";
 import { bumpDailyStats } from "../model/stats";
+import {
+  garmentLinesFromOutfitSlots,
+  layeredGarments,
+} from "../model/tryOnGarments";
 import { detectUsageToUsd, usageToUsd, LIMITS } from "../shared/credits";
 import { GROOM_STEPS, INGEST_STEPS, RENDER_STEPS } from "../shared/jobs";
 import {
@@ -337,32 +340,43 @@ export const renderContext = internalQuery({
     userId: v.id("users"),
     quality: vRenderQuality,
     avatarStorageId: v.id("_storage"),
-    garments: v.array(v.object({ itemId: v.id("items"), name: v.string(), slot: vSlot, storageId: v.id("_storage") })),
+    garments: v.array(
+      v.object({
+        itemId: v.optional(v.id("items")),
+        productId: v.optional(v.id("products")),
+        name: v.string(),
+        slot: vSlot,
+        storageId: v.id("_storage"),
+      }),
+    ),
     prefs: vPrefs,
   }),
   handler: async (ctx, { renderId }) => {
     const render = await ctx.db.get(renderId);
     if (!render) throw appError("NOT_FOUND", "That render no longer exists.");
-    if (!render.outfitId) {
-      throw appError("INVALID_INPUT", "That render is not an outfit try-on.");
-    }
-    const [avatar, outfit, user] = await Promise.all([
+    const [avatar, user] = await Promise.all([
       ctx.db.get(render.avatarId),
-      ctx.db.get(render.outfitId),
       ctx.db.get(render.userId),
     ]);
     if (!avatar) throw appError("NOT_FOUND", "That avatar no longer exists.");
-    if (!outfit) throw appError("NOT_FOUND", "That outfit no longer exists.");
     if (!user) throw appError("NOT_FOUND", "User not found for this render.");
 
-    const garments = [];
-    for (const { slot, item } of await layeredItems(ctx, outfit.slots)) {
-      const storageId = item.storageId;
-      if (!storageId) continue;
-      garments.push({ itemId: item._id, name: item.name, slot, storageId });
+    let lines = render.garmentLines;
+    if (!lines?.length && render.outfitId) {
+      const outfit = await ctx.db.get(render.outfitId);
+      if (!outfit) throw appError("NOT_FOUND", "That outfit no longer exists.");
+      lines = garmentLinesFromOutfitSlots(outfit.slots);
     }
+    if (!lines?.length) {
+      throw appError("INVALID_INPUT", "That render has no garments to try on.");
+    }
+
+    const garments = await layeredGarments(ctx, lines);
     if (garments.length === 0) {
-      throw appError("INVALID_INPUT", "None of this outfit's items have a cutout yet.");
+      throw appError(
+        "INVALID_INPUT",
+        "None of these garments have a cutout yet.",
+      );
     }
 
     return {

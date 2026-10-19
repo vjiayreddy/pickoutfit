@@ -5,6 +5,7 @@ import { appError } from "./lib/errors";
 import {
   getPublicProduct,
   getPublicProductById,
+  listCatalog,
   listCatalogForWardrobe,
   listMarketplaceLooks as loadMarketplaceLooks,
   listShopCatalog,
@@ -18,6 +19,7 @@ import {
   vProductView,
   vRailProductView,
 } from "./shared/products";
+import { vSlot } from "./shared/validators";
 import { vStorefrontView, vendorSellable } from "./shared/vendors";
 
 const MARKETPLACE_STORE_LIMIT = 48;
@@ -122,6 +124,48 @@ export const storefront = query({
       products,
       liveOffer: banner,
     };
+  },
+});
+
+/**
+ * Try-on eligible catalog products for an outfit-builder slot.
+ * Clothes + accessories categories, filtered to matching tryOnSlot + cutout.
+ */
+export const listForTryOnSlot = query({
+  args: { slot: vSlot },
+  returns: v.array(
+    v.object({
+      id: v.id("products"),
+      name: v.string(),
+      imageUrl: v.union(v.string(), v.null()),
+      vendorName: v.string(),
+      tryOnSlot: vSlot,
+      priceInr: v.number(),
+    }),
+  ),
+  handler: async (ctx, { slot }) => {
+    const user = await requireUser(ctx);
+    const categories =
+      slot === "accessories"
+        ? (["accessories", "eyewear"] as const)
+        : (["clothes"] as const);
+    const pages = await Promise.all(
+      categories.map((category) =>
+        listCatalog(ctx, category, user.prefs.presentation, { limit: 48 }),
+      ),
+    );
+    return pages
+      .flat()
+      .filter((product) => product.canTryOn && product.tryOnSlot === slot)
+      .slice(0, 48)
+      .map((product) => ({
+        id: product.id,
+        name: product.name,
+        imageUrl: product.imageUrl,
+        vendorName: product.vendorName,
+        tryOnSlot: product.tryOnSlot!,
+        priceInr: product.priceInr,
+      }));
   },
 });
 

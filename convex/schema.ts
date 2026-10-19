@@ -30,6 +30,7 @@ import {
   vFeature,
   vFit,
   vFormality,
+  vGarmentLine,
   vGrooming,
   vHairGoal,
   vHairLength,
@@ -270,6 +271,11 @@ export default defineSchema({
     outfitId: v.optional(v.id("outfits")),
     /** Profile-photo try-on. Absent on wardrobe renders. */
     lookId: v.optional(v.id("looks")),
+    /**
+     * Snapshot of garments at job start. Used for catalog / mixed try-ons and
+     * as a stable fallback when the outfit is later edited or deleted.
+     */
+    garmentLines: v.optional(v.array(vGarmentLine)),
     avatarId: v.id("avatars"),
     jobId: v.id("jobs"),
     storageId: v.optional(v.id("_storage")),

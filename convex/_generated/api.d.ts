@@ -71,6 +71,7 @@ import type * as model_shopLooks from "../model/shopLooks.js";
 import type * as model_stats from "../model/stats.js";
 import type * as model_subscriptions from "../model/subscriptions.js";
 import type * as model_threads from "../model/threads.js";
+import type * as model_tryOnGarments from "../model/tryOnGarments.js";
 import type * as model_uploads from "../model/uploads.js";
 import type * as model_users from "../model/users.js";
 import type * as model_variantCategories from "../model/variantCategories.js";
@@ -194,6 +195,7 @@ declare const fullApi: ApiFromModules<{
   "model/stats": typeof model_stats;
   "model/subscriptions": typeof model_subscriptions;
   "model/threads": typeof model_threads;
+  "model/tryOnGarments": typeof model_tryOnGarments;
   "model/uploads": typeof model_uploads;
   "model/users": typeof model_users;
   "model/variantCategories": typeof model_variantCategories;

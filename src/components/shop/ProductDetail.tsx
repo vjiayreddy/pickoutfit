@@ -8,13 +8,16 @@ import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { ATTR, PRODUCT_CATEGORY_LABELS } from "@convex/shared/products";
+import type { GarmentLine } from "@convex/shared/validators";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppHeaderTitle } from "@/components/layout/app-header";
+import { RenderSheet } from "@/components/renders/RenderSheet";
 import { Button } from "@/components/ui/button";
 import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
 import { formatInr } from "@/lib/format";
 import { routes } from "@/lib/routes";
+import { garmentLinesFromProducts } from "@/lib/try-on-garments";
 
 const HIDDEN_ATTR_KEYS = new Set<string>([
   ATTR.colorHex,
@@ -43,6 +46,7 @@ export function ProductDetail({
   const [variantId, setVariantId] = useState<Id<"productVariants"> | null>(null);
   const [pending, setPending] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
+  const [tryOnLines, setTryOnLines] = useState<GarmentLine[] | null>(null);
 
   useEffect(() => {
     setImageIndex(0);
@@ -94,6 +98,8 @@ export function ProductDetail({
     (row) => row.value && !HIDDEN_ATTR_KEYS.has(row.key),
   );
   const infoSections = [...product.infoSections].sort((a, b) => a.position - b.position);
+  const lookTryOnLines = garmentLinesFromProducts([product, ...look]);
+  const singleTryOnLines = garmentLinesFromProducts([product]);
 
   async function addToBag() {
     if (pending || soldOut) return;
@@ -231,14 +237,31 @@ export function ProductDetail({
             </div>
           ) : null}
 
-          <button
-            type="button"
-            disabled={pending || soldOut || (multiVariant && !selectedVariant)}
-            onClick={() => void addToBag()}
-            className="h-12 w-full max-w-sm rounded-full bg-ink px-8 text-base font-medium text-canvas disabled:opacity-50 sm:w-auto"
-          >
-            {pending ? "Adding…" : soldOut ? "Sold out" : "Add to bag"}
-          </button>
+          <div className="flex max-w-sm flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <button
+              type="button"
+              disabled={pending || soldOut || (multiVariant && !selectedVariant)}
+              onClick={() => void addToBag()}
+              className="h-12 w-full rounded-full bg-ink px-8 text-base font-medium text-canvas disabled:opacity-50 sm:w-auto"
+            >
+              {pending ? "Adding…" : soldOut ? "Sold out" : "Add to bag"}
+            </button>
+            {product.canTryOn && singleTryOnLines.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setTryOnLines(singleTryOnLines)}
+                className="h-12 w-full rounded-full bg-soft-cloud px-8 text-base font-medium text-ink sm:w-auto"
+              >
+                Try on
+              </button>
+            ) : null}
+          </div>
+          {!product.canTryOn ? (
+            <p className="text-xs text-mute">
+              Virtual try-on needs a cutout for this piece. Browse other shop items
+              that support it.
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -271,7 +294,18 @@ export function ProductDetail({
 
       {look.length > 0 ? (
         <section className="space-y-4" aria-label="Shop the look">
-          <h2 className="text-lg font-medium tracking-tight">Shop the look</h2>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <h2 className="text-lg font-medium tracking-tight">Shop the look</h2>
+            {lookTryOnLines.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => setTryOnLines(lookTryOnLines)}
+                className="h-10 rounded-full bg-soft-cloud px-5 text-sm font-medium text-ink"
+              >
+                Try this look
+              </button>
+            ) : null}
+          </div>
           <ul className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
             {look.map((sibling) => (
               <li key={sibling.id} className="space-y-2">
@@ -292,6 +326,16 @@ export function ProductDetail({
             ))}
           </ul>
         </section>
+      ) : null}
+
+      {tryOnLines ? (
+        <RenderSheet
+          garmentLines={tryOnLines}
+          open
+          onOpenChange={(open) => {
+            if (!open) setTryOnLines(null);
+          }}
+        />
       ) : null}
     </div>
   );

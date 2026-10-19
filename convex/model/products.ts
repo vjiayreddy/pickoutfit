@@ -41,6 +41,7 @@ import {
   requireActiveVariantCategories,
   resolveAttributeIds,
 } from "./variants";
+import { productTryOnMeta } from "./tryOnGarments";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -520,6 +521,7 @@ export async function toProductView(
     referenceImageUrl: product.referenceStorageId ? await ctx.storage.getUrl(product.referenceStorageId) : null,
     sourceUploadId: product.sourceUploadId ?? null,
     sourceBbox: product.sourceBbox ?? null,
+    ...(await productTryOnMeta(ctx, product)),
     soldCount: product.soldCount ?? 0,
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,

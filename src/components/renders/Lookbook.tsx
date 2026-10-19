@@ -33,7 +33,7 @@ export function Lookbook() {
           Lookbook
         </h1>
         <p className="mt-2 max-w-md text-sm text-mute sm:mt-4 sm:text-base">
-          Your wardrobe, on you. Keep the looks worth coming back to.
+          Wardrobe and shop try-ons, on you. Keep the looks worth coming back to.
         </p>
       </div>
 
@@ -81,14 +81,22 @@ export function Lookbook() {
         <div className="space-y-4 border border-dashed border-hairline px-6 py-16 text-center">
           <p className="text-base font-medium">No try-ons yet.</p>
           <p className="text-sm text-mute">
-            Open an outfit and choose Try on.
+            Open an outfit, or try on a shop product from the store.
           </p>
-          <Link
-            href={routes.outfits}
-            className="inline-flex h-12 items-center rounded-full bg-ink px-8 text-base font-medium text-canvas"
-          >
-            Choose an outfit
-          </Link>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Link
+              href={routes.outfits}
+              className="inline-flex h-12 items-center rounded-full bg-ink px-8 text-base font-medium text-canvas"
+            >
+              Choose an outfit
+            </Link>
+            <Link
+              href={routes.shop}
+              className="inline-flex h-12 items-center rounded-full bg-soft-cloud px-8 text-base font-medium text-ink"
+            >
+              Browse shop
+            </Link>
+          </div>
         </div>
       ) : (
         <>
