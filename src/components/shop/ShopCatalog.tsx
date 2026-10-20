@@ -31,6 +31,12 @@ export function ShopCatalog() {
         <p className="max-w-md text-sm text-mute sm:text-base">
           Shop the look across open stores, or browse a store&apos;s full catalog.
         </p>
+        <Link
+          href={routes.trialRoom}
+          className="inline-flex h-10 items-center rounded-full bg-ink px-5 text-sm font-medium text-canvas"
+        >
+          Trial room
+        </Link>
       </header>
 
       <div className="flex flex-wrap gap-2">

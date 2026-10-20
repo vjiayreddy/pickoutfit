@@ -24,7 +24,7 @@ export default function NewOutfitPage() {
           Build a look.
         </h1>
         <p className="mt-2 max-w-md text-sm text-mute sm:mt-4 sm:text-base">
-          Fill the slots from your wardrobe, then save and try on.
+          Build an outfit from your saved wardrobe pieces, then save and try on.
         </p>
       </div>
       <OutfitForm mode="create" initial={EMPTY_DRAFT} />

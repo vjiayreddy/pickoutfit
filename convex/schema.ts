@@ -800,6 +800,20 @@ export default defineSchema({
     .index("by_vendorId", ["vendorId"])
     .index("by_vendorId_and_slug", ["vendorId", "slug"]),
 
+  /**
+   * Shop Trial Room staging: products the user picked while browsing stores,
+   * assigned to outfit slots before try-on. Not the checkout bag.
+   */
+  trialRoomItems: defineTable({
+    userId: v.id("users"),
+    productId: v.id("products"),
+    slot: vSlot,
+    addedAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_productId", ["userId", "productId"])
+    .index("by_userId_and_slot", ["userId", "slot"]),
+
   /** One open bag per user. Checkout deletes it. */
   carts: defineTable({
     userId: v.id("users"),

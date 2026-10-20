@@ -292,12 +292,12 @@ export function OutfitDetail({ outfitId }: { outfitId: string }) {
           mode="edit"
           outfitId={outfit._id}
           initial={draftFromOutfit(outfit)}
-          onTryOn={() => setSheetOpen(true)}
         />
       </section>
 
       <RenderSheet
         outfitId={outfit._id}
+        lookKind="wardrobe"
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         onStarted={setJobId}

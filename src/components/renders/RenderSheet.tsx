@@ -19,10 +19,14 @@ import { cn } from "@/lib/cn";
 import { pluralize } from "@/lib/format";
 import { routes } from "@/lib/routes";
 
+type LookKind = "wardrobe" | "shop";
+
 type RenderSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onStarted?: (jobId: Id<"jobs">) => void;
+  /** Labels the fitting-room copy; defaults from the source shape. */
+  lookKind?: LookKind;
 } & (
   | { outfitId: Id<"outfits">; garmentLines?: undefined }
   | { garmentLines: GarmentLine[]; outfitId?: undefined }
@@ -37,6 +41,7 @@ export function RenderSheet({
   open,
   onOpenChange,
   onStarted,
+  lookKind,
   ...source
 }: RenderSheetProps) {
   const avatars = useQuery(api.avatars.list, open ? {} : "skip");
@@ -96,6 +101,9 @@ export function RenderSheet({
   const noAvatars = avatars !== undefined && avatars.length === 0;
   const canStart =
     Boolean(avatarId) && !pending && !noAvatars && (quote?.canAfford ?? false);
+  const resolvedLookKind: LookKind =
+    lookKind ??
+    ("garmentLines" in source && source.garmentLines ? "shop" : "wardrobe");
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 sm:items-center">
@@ -115,9 +123,9 @@ export function RenderSheet({
               See it on you.
             </h2>
             <p className="mt-1 text-sm text-mute">
-              {"garmentLines" in source && source.garmentLines
-                ? "Shop pieces, fitted to your reference photo."
-                : "Your outfit, fitted to your reference photo."}
+              {resolvedLookKind === "shop"
+                ? "Shop look, fitted to your reference photo."
+                : "Wardrobe outfit, fitted to your reference photo."}
             </p>
           </div>
           <button

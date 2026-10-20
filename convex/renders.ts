@@ -16,6 +16,7 @@ import {
   startRenderJob,
   toRenderView,
 } from "./model/renders";
+import { getPublicProductById } from "./model/catalog";
 import { lookNameFromGarmentLines } from "./model/tryOnGarments";
 import {
   vBeardStyle,
@@ -24,6 +25,7 @@ import {
   vRenderKind,
   vRenderQuality,
   vServiceId,
+  vSlot,
 } from "./shared/validators";
 import { vItemSummary, vOutfitView, vPaginated, vRenderView } from "./views";
 
@@ -114,6 +116,49 @@ export const get = query({
       render: await toRenderView(ctx, render, outfit?.name),
       outfit: outfit ? await toOutfitView(ctx, outfit) : null,
     };
+  },
+});
+
+/** Shop try-on products + prices for a lookbook render (cart from look). */
+export const shopProducts = query({
+  args: { renderId: v.id("renders") },
+  returns: v.array(
+    v.object({
+      productId: v.id("products"),
+      slot: vSlot,
+      name: v.string(),
+      imageUrl: v.union(v.string(), v.null()),
+      vendorName: v.string(),
+      vendorSlug: v.string(),
+      slug: v.string(),
+      priceInr: v.number(),
+    }),
+  ),
+  handler: async (ctx, { renderId }) => {
+    const user = await requireUser(ctx);
+    const render = await ctx.db.get(renderId);
+    if (!render || render.userId !== user._id) return [];
+    if (render.outfitId || !render.garmentLines?.length) return [];
+    const products = [];
+    for (const line of render.garmentLines) {
+      if (line.source !== "product") continue;
+      try {
+        const product = await getPublicProductById(ctx, line.productId);
+        products.push({
+          productId: product.id,
+          slot: line.slot,
+          name: product.name,
+          imageUrl: product.imageUrl,
+          vendorName: product.vendorName,
+          vendorSlug: product.vendorSlug,
+          slug: product.slug,
+          priceInr: product.priceInr,
+        });
+      } catch {
+        // Skip unpublished lines from older renders.
+      }
+    }
+    return products;
   },
 });
 

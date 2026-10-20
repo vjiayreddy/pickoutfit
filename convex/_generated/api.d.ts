@@ -105,6 +105,7 @@ import type * as shared_wardrobe from "../shared/wardrobe.js";
 import type * as shared_wardrobeMatch from "../shared/wardrobeMatch.js";
 import type * as shop from "../shop.js";
 import type * as threads from "../threads.js";
+import type * as trialRoom from "../trialRoom.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
 import type * as variants from "../variants.js";
@@ -229,6 +230,7 @@ declare const fullApi: ApiFromModules<{
   "shared/wardrobeMatch": typeof shared_wardrobeMatch;
   shop: typeof shop;
   threads: typeof threads;
+  trialRoom: typeof trialRoom;
   uploads: typeof uploads;
   users: typeof users;
   variants: typeof variants;

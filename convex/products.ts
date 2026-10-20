@@ -127,22 +127,22 @@ export const storefront = query({
   },
 });
 
+const vTryOnProduct = v.object({
+  id: v.id("products"),
+  name: v.string(),
+  imageUrl: v.union(v.string(), v.null()),
+  vendorName: v.string(),
+  tryOnSlot: vSlot,
+  priceInr: v.number(),
+});
+
 /**
- * Try-on eligible catalog products for an outfit-builder slot.
+ * Try-on eligible catalog products for a shop-look-builder slot.
  * Clothes + accessories categories, filtered to matching tryOnSlot + cutout.
  */
 export const listForTryOnSlot = query({
   args: { slot: vSlot },
-  returns: v.array(
-    v.object({
-      id: v.id("products"),
-      name: v.string(),
-      imageUrl: v.union(v.string(), v.null()),
-      vendorName: v.string(),
-      tryOnSlot: vSlot,
-      priceInr: v.number(),
-    }),
-  ),
+  returns: v.array(vTryOnProduct),
   handler: async (ctx, { slot }) => {
     const user = await requireUser(ctx);
     const categories =
@@ -166,6 +166,36 @@ export const listForTryOnSlot = query({
         tryOnSlot: product.tryOnSlot!,
         priceInr: product.priceInr,
       }));
+  },
+});
+
+/** Prefill shop look builder from PDP product ids (try-on ready only). */
+export const forTryOnByIds = query({
+  args: { productIds: v.array(v.id("products")) },
+  returns: v.array(vTryOnProduct),
+  handler: async (ctx, { productIds }) => {
+    await requireUser(ctx);
+    const seen = new Set<string>();
+    const results = [];
+    for (const productId of productIds.slice(0, 15)) {
+      if (seen.has(productId)) continue;
+      seen.add(productId);
+      try {
+        const product = await getPublicProductById(ctx, productId);
+        if (!product.canTryOn || !product.tryOnSlot) continue;
+        results.push({
+          id: product.id,
+          name: product.name,
+          imageUrl: product.imageUrl,
+          vendorName: product.vendorName,
+          tryOnSlot: product.tryOnSlot,
+          priceInr: product.priceInr,
+        });
+      } catch {
+        // Skip unavailable / unpublished ids from stale links.
+      }
+    }
+    return results;
   },
 });
 
