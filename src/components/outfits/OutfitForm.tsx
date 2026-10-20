@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import type { GarmentLine } from "@convex/shared/validators";
 import {
   SLOT_CATEGORIES,
   SLOT_LABELS,
@@ -15,6 +16,7 @@ import {
   type Slot,
 } from "@convex/shared/wardrobe";
 import { ItemImage } from "@/components/common/ItemImage";
+import { RenderSheet } from "@/components/renders/RenderSheet";
 import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
 import { formatDate } from "@/lib/format";
@@ -65,7 +67,7 @@ type OutfitFormProps = {
   initial: OutfitDraft;
 } & (
   | { mode: "create" }
-  | { mode: "edit"; outfitId: Id<"outfits">; onTryOn?: () => void }
+  | { mode: "edit"; outfitId: Id<"outfits"> }
 );
 
 export function OutfitForm(props: OutfitFormProps) {
@@ -82,6 +84,7 @@ export function OutfitForm(props: OutfitFormProps) {
   const [useDress, setUseDress] = useState(Boolean(initial.slots.dress));
   const [pickerSlot, setPickerSlot] = useState<Slot | null>(null);
   const [pending, setPending] = useState(false);
+  const [tryOnLines, setTryOnLines] = useState<GarmentLine[] | null>(null);
   const [today] = useState(() => formatDate(Date.now()));
 
   const itemsById = useMemo(
@@ -137,6 +140,31 @@ export function OutfitForm(props: OutfitFormProps) {
         ? { ...current, top: undefined, bottom: undefined }
         : { ...current, dress: undefined },
     );
+  }
+
+  function buildGarmentLines(): GarmentLine[] {
+    const lines: GarmentLine[] = [];
+    const pushItem = (
+      slot: Exclude<Slot, "accessories">,
+      id: Id<"items"> | undefined,
+    ) => {
+      if (id) lines.push({ slot, source: "item", itemId: id });
+    };
+    pushItem("outerwear", slots.outerwear);
+    pushItem("top", slots.top);
+    pushItem("bottom", slots.bottom);
+    pushItem("dress", slots.dress);
+    pushItem("shoes", slots.shoes);
+    for (const itemId of slots.accessories) {
+      lines.push({ slot: "accessories", source: "item", itemId });
+    }
+    return lines;
+  }
+
+  function handleTryOn() {
+    const lines = buildGarmentLines();
+    if (lines.length === 0) return;
+    setTryOnLines(lines);
   }
 
   async function handleSave() {
@@ -221,20 +249,19 @@ export function OutfitForm(props: OutfitFormProps) {
               </span>
               {selected.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
-                  {selected.map(
-                    (item) =>
-                      item && (
-                        <div key={item._id} className="flex items-center gap-2">
-                          <ItemImage
-                            src={item.url}
-                            alt={item.name}
-                            className="size-14 p-1"
-                          />
-                          <span className="max-w-[8rem] truncate text-xs">
-                            {item.name}
-                          </span>
-                        </div>
-                      ),
+                  {selected.map((piece) =>
+                    piece ? (
+                      <div key={piece._id} className="flex items-center gap-2">
+                        <ItemImage
+                          src={piece.url}
+                          alt={piece.name}
+                          className="size-14 p-1"
+                        />
+                        <span className="max-w-[8rem] truncate text-xs">
+                          {piece.name}
+                        </span>
+                      </div>
+                    ) : null,
                   )}
                 </div>
               ) : (
@@ -283,10 +310,10 @@ export function OutfitForm(props: OutfitFormProps) {
           )}
           {props.mode === "create" ? "Save outfit" : "Save changes"}
         </button>
-        {props.mode === "edit" && props.onTryOn ? (
+        {itemCount > 0 ? (
           <button
             type="button"
-            onClick={props.onTryOn}
+            onClick={handleTryOn}
             className="inline-flex h-12 items-center rounded-full bg-soft-cloud px-8 text-base font-medium text-ink"
           >
             Try on
@@ -366,6 +393,17 @@ export function OutfitForm(props: OutfitFormProps) {
           </div>
         </div>
       ) : null}
+
+      {tryOnLines ? (
+        <RenderSheet
+          garmentLines={tryOnLines}
+          lookKind="wardrobe"
+          open
+          onOpenChange={(open) => {
+            if (!open) setTryOnLines(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -408,13 +446,13 @@ function suggestName(
   itemsById: Map<Id<"items">, Item>,
   today: string,
 ): string {
-  const first =
+  const firstItem =
     slots.dress ??
     slots.top ??
     slots.bottom ??
     slots.outerwear ??
     slots.shoes ??
     slots.accessories[0];
-  const item = first ? itemsById.get(first) : undefined;
-  return item ? `${item.name}` : `Outfit · ${today}`;
+  const item = firstItem ? itemsById.get(firstItem) : undefined;
+  return item ? item.name : `Outfit · ${today}`;
 }

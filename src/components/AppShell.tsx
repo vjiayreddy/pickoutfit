@@ -53,12 +53,15 @@ const MAIN_SERVICES = [
   { href: routes.service("skincare"), label: "SkinCare", icon: Droplets, also: [] },
 ] as const;
 
-const SHOP_NAV = { href: routes.shop, label: "Shop", icon: Store } as const;
+const SHOP_CHILDREN = [
+  { href: routes.shop, label: "Marketplace", icon: Store },
+  { href: routes.trialRoom, label: "Trial room", icon: Sparkles },
+] as const;
 
 const PRIMARY_NAV = [
   { href: routes.wardrobe, label: "Wardrobe", icon: Shirt },
   ...WARDROBE_CHILDREN,
-  SHOP_NAV,
+  { href: routes.shop, label: "Shop", icon: Store },
   ...MAIN_SERVICES.map(({ href, label, icon }) => ({ href, label, icon })),
   { href: routes.stylist, label: "Stylist", icon: MessageCircle },
 ] as const;
@@ -68,6 +71,14 @@ function isWardrobeSection(pathname: string): boolean {
     isActivePath(pathname, routes.wardrobe) ||
     WARDROBE_CHILDREN.some((item) => isActivePath(pathname, item.href)) ||
     pathname.startsWith(routes.gridDemo)
+  );
+}
+
+function isShopSection(pathname: string): boolean {
+  return (
+    pathname === routes.shop ||
+    pathname.startsWith(`${routes.shop}/`) ||
+    pathname.startsWith("/store/")
   );
 }
 
@@ -95,6 +106,7 @@ function parentHref(pathname: string): string {
   if (pathname.startsWith(routes.gridDemo)) return routes.add;
   if (pathname.startsWith(routes.checkout)) return routes.cart;
   if (pathname.startsWith(`${routes.orders}/`)) return routes.orders;
+  if (pathname.startsWith(`${routes.shop}/`)) return routes.shop;
   if (/^\/store\/[^/]+\/[^/]+/.test(pathname)) return routes.shop;
   if (pathname.startsWith("/store/")) return routes.shop;
   return routes.wardrobe;
@@ -114,6 +126,9 @@ function fallbackTitle(pathname: string): string {
   if (pathname.startsWith(routes.services)) return "Services";
   if (pathname.startsWith(routes.settings)) return "Settings";
   if (pathname.startsWith(routes.billing)) return "Billing";
+  if (pathname === routes.trialRoom || pathname.startsWith(`${routes.trialRoom}/`)) {
+    return "Trial room";
+  }
   if (/^\/store\/[^/]+\/[^/]+/.test(pathname)) return "Product";
   if (pathname.startsWith("/store/")) return "Store";
   if (pathname.startsWith(routes.orders)) return "Orders";
@@ -160,6 +175,7 @@ function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const me = useQuery(api.users.me);
   const cartCount = useQuery(api.cart.count, me ? {} : "skip");
+  const trialCount = useQuery(api.trialRoom.count, me ? {} : "skip");
   const onboarded = Boolean(me?.onboardedAt);
   const panel = useStylistPanel();
   const headerTitle = useAppHeaderTitle();
@@ -257,18 +273,36 @@ function AppFrame({ children }: { children: ReactNode }) {
                     {me.balance.total} credits
                   </Link>
                   {onboarded ? (
-                    <Link
-                      href={routes.cart}
-                      aria-label={cartCount ? `Bag, ${cartCount} items` : "Bag"}
-                      className="relative flex size-10 items-center justify-center rounded-full bg-soft-cloud"
-                    >
-                      <ShoppingBag className="size-4" aria-hidden />
-                      {cartCount ? (
-                        <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink px-1 text-[9px] font-medium text-canvas">
-                          {cartCount}
-                        </span>
-                      ) : null}
-                    </Link>
+                    <>
+                      <Link
+                        href={routes.trialRoom}
+                        aria-label={
+                          trialCount
+                            ? `Trial room, ${trialCount} pieces`
+                            : "Trial room"
+                        }
+                        className="relative flex size-10 items-center justify-center rounded-full bg-soft-cloud"
+                      >
+                        <Sparkles className="size-4" aria-hidden />
+                        {trialCount ? (
+                          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink px-1 text-[9px] font-medium text-canvas">
+                            {trialCount}
+                          </span>
+                        ) : null}
+                      </Link>
+                      <Link
+                        href={routes.cart}
+                        aria-label={cartCount ? `Bag, ${cartCount} items` : "Bag"}
+                        className="relative flex size-10 items-center justify-center rounded-full bg-soft-cloud"
+                      >
+                        <ShoppingBag className="size-4" aria-hidden />
+                        {cartCount ? (
+                          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink px-1 text-[9px] font-medium text-canvas">
+                            {cartCount}
+                          </span>
+                        ) : null}
+                      </Link>
+                    </>
                   ) : null}
                   {onboarded ? <ActivityPopover /> : null}
                   {showChrome ? null : (
@@ -328,12 +362,7 @@ function Sidebar({
       </Link>
       <nav aria-label="Main navigation" className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-4">
         <WardrobeMenu pathname={pathname} />
-        <SidebarLink
-          href={SHOP_NAV.href}
-          label={SHOP_NAV.label}
-          icon={SHOP_NAV.icon}
-          active={isActivePath(pathname, SHOP_NAV.href) || pathname.startsWith("/store/")}
-        />
+        <ShopMenu pathname={pathname} />
         {MAIN_SERVICES.map((item) => (
           <SidebarLink
             key={item.href}
@@ -403,6 +432,40 @@ function WardrobeMenu({ pathname }: { pathname: string }) {
           label={item.label}
           icon={item.icon}
           active={isActivePath(pathname, item.href)}
+        />
+      ))}
+    </NavGroup>
+  );
+}
+
+function ShopMenu({ pathname }: { pathname: string }) {
+  const inSection = isShopSection(pathname);
+  const [open, setOpen] = useState(inSection);
+
+  useEffect(() => {
+    if (inSection) setOpen(true);
+  }, [inSection]);
+
+  return (
+    <NavGroup
+      label="Shop"
+      href={routes.shop}
+      icon={Store}
+      active={pathname === routes.shop || pathname.startsWith("/store/")}
+      open={open}
+      onToggle={() => setOpen((value) => !value)}
+    >
+      {SHOP_CHILDREN.map((item) => (
+        <SidebarLink
+          key={item.href}
+          href={item.href}
+          label={item.label}
+          icon={item.icon}
+          active={
+            item.href === routes.shop
+              ? pathname === routes.shop
+              : isActivePath(pathname, item.href)
+          }
         />
       ))}
     </NavGroup>
@@ -522,7 +585,7 @@ function BottomNav({ pathname }: { pathname: string }) {
           const active =
             isActivePath(pathname, item.href) ||
             Boolean(service?.also.some((href) => isActivePath(pathname, href))) ||
-            (item.href === routes.shop && pathname.startsWith("/store/"));
+            (item.href === routes.shop && isShopSection(pathname));
           return (
             <Link
               key={item.href}

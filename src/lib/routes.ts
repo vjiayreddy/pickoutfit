@@ -15,6 +15,9 @@ export const routes = {
   outfit: (outfitId: Id<"outfits"> | string) => `/outfits/${outfitId}`,
   lookbook: "/lookbook",
   shop: "/shop",
+  /** @deprecated Use trialRoom — kept for old links. */
+  shopLook: () => "/shop/trial",
+  trialRoom: "/shop/trial",
   services: "/services",
   service: (id: string) => `/services/${id}`,
   share: (token: string) => `/share/${token}`,

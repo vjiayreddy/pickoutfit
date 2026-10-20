@@ -11,6 +11,7 @@ import {
   LIMITS,
   type RenderQuality,
 } from "@convex/shared/credits";
+import type { GarmentLine } from "@convex/shared/validators";
 import { CreditQuote, useCreditQuote } from "@/components/common/CreditQuote";
 import { ItemImage } from "@/components/common/ItemImage";
 import { reportError } from "@/lib/client-errors";
@@ -18,12 +19,18 @@ import { cn } from "@/lib/cn";
 import { pluralize } from "@/lib/format";
 import { routes } from "@/lib/routes";
 
+type LookKind = "wardrobe" | "shop";
+
 type RenderSheetProps = {
-  outfitId: Id<"outfits">;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onStarted?: (jobId: Id<"jobs">) => void;
-};
+  /** Labels the fitting-room copy; defaults from the source shape. */
+  lookKind?: LookKind;
+} & (
+  | { outfitId: Id<"outfits">; garmentLines?: undefined }
+  | { garmentLines: GarmentLine[]; outfitId?: undefined }
+);
 
 const COUNTS = Array.from(
   { length: LIMITS.maxRendersPerRequest },
@@ -31,10 +38,11 @@ const COUNTS = Array.from(
 );
 
 export function RenderSheet({
-  outfitId,
   open,
   onOpenChange,
   onStarted,
+  lookKind,
+  ...source
 }: RenderSheetProps) {
   const avatars = useQuery(api.avatars.list, open ? {} : "skip");
   const me = useQuery(api.users.me, open ? {} : "skip");
@@ -64,12 +72,20 @@ export function RenderSheet({
     if (!avatarId || pending) return;
     setPending(true);
     try {
-      const result = await start({
-        outfitIds: [outfitId],
-        avatarId,
-        count,
-        quality: effectiveQuality,
-      });
+      const result =
+        "garmentLines" in source && source.garmentLines
+          ? await start({
+              garmentLines: source.garmentLines,
+              avatarId,
+              count,
+              quality: effectiveQuality,
+            })
+          : await start({
+              outfitIds: [source.outfitId!],
+              avatarId,
+              count,
+              quality: effectiveQuality,
+            });
       toast.success(
         `Creating ${pluralize(count, "try-on")}. Watch progress in Activity.`,
       );
@@ -85,6 +101,9 @@ export function RenderSheet({
   const noAvatars = avatars !== undefined && avatars.length === 0;
   const canStart =
     Boolean(avatarId) && !pending && !noAvatars && (quote?.canAfford ?? false);
+  const resolvedLookKind: LookKind =
+    lookKind ??
+    ("garmentLines" in source && source.garmentLines ? "shop" : "wardrobe");
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 sm:items-center">
@@ -104,7 +123,9 @@ export function RenderSheet({
               See it on you.
             </h2>
             <p className="mt-1 text-sm text-mute">
-              Your outfit, fitted to your reference photo.
+              {resolvedLookKind === "shop"
+                ? "Shop look, fitted to your reference photo."
+                : "Wardrobe outfit, fitted to your reference photo."}
             </p>
           </div>
           <button

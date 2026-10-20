@@ -16,15 +16,27 @@ import {
   startRenderJob,
   toRenderView,
 } from "./model/renders";
-import { vBeardStyle, vHairStyle, vRenderKind, vRenderQuality, vServiceId } from "./shared/validators";
+import { getPublicProductById } from "./model/catalog";
+import { lookNameFromGarmentLines } from "./model/tryOnGarments";
+import {
+  vBeardStyle,
+  vGarmentLine,
+  vHairStyle,
+  vRenderKind,
+  vRenderQuality,
+  vServiceId,
+  vSlot,
+} from "./shared/validators";
 import { vItemSummary, vOutfitView, vPaginated, vRenderView } from "./views";
 
 /**
  * Validates → reserve → create pending renders → start workflow.
+ * Pass either `outfitIds` (wardrobe) or `garmentLines` (catalog / mixed / single piece).
  */
 export const start = mutation({
   args: {
-    outfitIds: v.array(v.id("outfits")),
+    outfitIds: v.optional(v.array(v.id("outfits"))),
+    garmentLines: v.optional(v.array(vGarmentLine)),
     avatarId: v.optional(v.id("avatars")),
     count: v.number(),
     quality: vRenderQuality,
@@ -107,6 +119,49 @@ export const get = query({
   },
 });
 
+/** Shop try-on products + prices for a lookbook render (cart from look). */
+export const shopProducts = query({
+  args: { renderId: v.id("renders") },
+  returns: v.array(
+    v.object({
+      productId: v.id("products"),
+      slot: vSlot,
+      name: v.string(),
+      imageUrl: v.union(v.string(), v.null()),
+      vendorName: v.string(),
+      vendorSlug: v.string(),
+      slug: v.string(),
+      priceInr: v.number(),
+    }),
+  ),
+  handler: async (ctx, { renderId }) => {
+    const user = await requireUser(ctx);
+    const render = await ctx.db.get(renderId);
+    if (!render || render.userId !== user._id) return [];
+    if (render.outfitId || !render.garmentLines?.length) return [];
+    const products = [];
+    for (const line of render.garmentLines) {
+      if (line.source !== "product") continue;
+      try {
+        const product = await getPublicProductById(ctx, line.productId);
+        products.push({
+          productId: product.id,
+          slot: line.slot,
+          name: product.name,
+          imageUrl: product.imageUrl,
+          vendorName: product.vendorName,
+          vendorSlug: product.vendorSlug,
+          slug: product.slug,
+          priceInr: product.priceInr,
+        });
+      } catch {
+        // Skip unpublished lines from older renders.
+      }
+    }
+    return products;
+  },
+});
+
 /** Service pages: newest grooming previews, optionally for one service. */
 export const listByKind = query({
   args: {
@@ -164,6 +219,19 @@ export const regenerate = mutation({
             : undefined,
       });
       return { jobId: result.jobId, renderId: result.renderId };
+    }
+    if (render.garmentLines && render.garmentLines.length > 0) {
+      const result = await startRenderJob(ctx, user, {
+        garmentLines: render.garmentLines,
+        avatarId: render.avatarId,
+        count: 1,
+        quality: render.quality,
+      });
+      const created = result.renderIds[0];
+      if (!created) {
+        throw appError("UPSTREAM_FAILED", "Could not queue the render.");
+      }
+      return { jobId: result.jobId, renderId: created };
     }
     if (!render.outfitId) {
       throw appError("INVALID_INPUT", "That try-on has no outfit to redo.");
@@ -288,9 +356,13 @@ export const getShared = query({
         : render.serviceId === "beard"
           ? "Beard"
           : "Look";
+    const catalogName =
+      !outfit?.name && render.garmentLines?.length
+        ? await lookNameFromGarmentLines(ctx, render.garmentLines)
+        : null;
     return {
       url,
-      outfitName: outfit?.name ?? serviceLabel,
+      outfitName: outfit?.name ?? catalogName ?? serviceLabel,
       items: await Promise.all(
         layered.map(({ item }) => toItemSummary(ctx, item)),
       ),

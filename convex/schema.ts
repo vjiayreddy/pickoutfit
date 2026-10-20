@@ -30,6 +30,7 @@ import {
   vFeature,
   vFit,
   vFormality,
+  vGarmentLine,
   vGrooming,
   vHairGoal,
   vHairLength,
@@ -270,6 +271,11 @@ export default defineSchema({
     outfitId: v.optional(v.id("outfits")),
     /** Profile-photo try-on. Absent on wardrobe renders. */
     lookId: v.optional(v.id("looks")),
+    /**
+     * Snapshot of garments at job start. Used for catalog / mixed try-ons and
+     * as a stable fallback when the outfit is later edited or deleted.
+     */
+    garmentLines: v.optional(v.array(vGarmentLine)),
     avatarId: v.id("avatars"),
     jobId: v.id("jobs"),
     storageId: v.optional(v.id("_storage")),
@@ -793,6 +799,20 @@ export default defineSchema({
   })
     .index("by_vendorId", ["vendorId"])
     .index("by_vendorId_and_slug", ["vendorId", "slug"]),
+
+  /**
+   * Shop Trial Room staging: products the user picked while browsing stores,
+   * assigned to outfit slots before try-on. Not the checkout bag.
+   */
+  trialRoomItems: defineTable({
+    userId: v.id("users"),
+    productId: v.id("products"),
+    slot: vSlot,
+    addedAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_productId", ["userId", "productId"])
+    .index("by_userId_and_slot", ["userId", "slot"]),
 
   /** One open bag per user. Checkout deletes it. */
   carts: defineTable({

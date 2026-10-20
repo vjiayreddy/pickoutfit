@@ -1,4 +1,4 @@
-import { v, type VLiteral, type VUnion } from "convex/values";
+import { v, type Infer, type VLiteral, type VUnion } from "convex/values";
 import { FEATURES, PLAN_IDS, RENDER_QUALITIES } from "./credits";
 import { BEARD_STYLES, HAIR_STYLES, RENDER_KINDS } from "./grooming";
 import { JOB_STATUSES, JOB_TYPES, STEP_STATUSES } from "./jobs";
@@ -127,6 +127,21 @@ export const vOutfitSlots = v.object({
   shoes: v.optional(v.id("items")),
   accessories: v.array(v.id("items")),
 });
+
+/** One garment in a try-on: wardrobe item or published catalog product. */
+export const vGarmentLine = v.union(
+  v.object({
+    slot: vSlot,
+    source: v.literal("item"),
+    itemId: v.id("items"),
+  }),
+  v.object({
+    slot: vSlot,
+    source: v.literal("product"),
+    productId: v.id("products"),
+  }),
+);
+export type GarmentLine = Infer<typeof vGarmentLine>;
 
 /** Attributes produced by detection and editable by the user. Shared by items and the detect action output. */
 export const vItemAttributes = v.object({

@@ -36,6 +36,12 @@ import {
 import { recordAvatarLook } from "./looks";
 import { requireOutfit, validateSlots } from "./outfits";
 import { bumpDailyStats } from "./stats";
+import {
+  garmentLinesFromOutfitSlots,
+  lookNameFromGarmentLines,
+  validateGarmentLines,
+  type GarmentLine,
+} from "./tryOnGarments";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -45,9 +51,14 @@ export async function toRenderView(
   outfitName?: string,
 ): Promise<RenderView> {
   const outfit = render.outfitId ? await ctx.db.get(render.outfitId) : null;
+  const catalogName =
+    !outfitName && !outfit?.name && render.garmentLines?.length
+      ? await lookNameFromGarmentLines(ctx, render.garmentLines)
+      : undefined;
   const name =
     outfitName ??
     outfit?.name ??
+    catalogName ??
     (render.serviceId ? SERVICES[render.serviceId].label : undefined) ??
     "Look";
   const kind = render.kind ?? "try_on";
@@ -169,11 +180,19 @@ export async function removeRender(
 }
 
 export type StartRenderInput = {
-  outfitIds: Id<"outfits">[];
+  /** Wardrobe outfits to render. Mutually exclusive with `garmentLines`. */
+  outfitIds?: Id<"outfits">[];
+  /** Catalog / mixed / ad-hoc garment list. Mutually exclusive with `outfitIds`. */
+  garmentLines?: GarmentLine[];
   avatarId?: Id<"avatars">;
   count: number;
   quality: RenderQuality;
   threadId?: Id<"threads">;
+};
+
+type LookSpec = {
+  outfitId?: Id<"outfits">;
+  garmentLines: GarmentLine[];
 };
 
 /**
@@ -198,17 +217,41 @@ export async function startRenderJob(
       { max: LIMITS.maxRendersPerRequest },
     );
   }
-  const outfitIds = [...new Set(input.outfitIds)];
-  if (outfitIds.length === 0) {
-    throw appError("INVALID_INPUT", "Pick an outfit to render.");
-  }
-  if (outfitIds.length > LIMITS.maxOutfitsPerRenderRequest) {
+
+  const hasOutfits = Boolean(input.outfitIds?.length);
+  const hasLines = Boolean(input.garmentLines?.length);
+  if (hasOutfits === hasLines) {
     throw appError(
       "INVALID_INPUT",
-      `You can render up to ${LIMITS.maxOutfitsPerRenderRequest} outfits at once.`,
-      { max: LIMITS.maxOutfitsPerRenderRequest },
+      hasOutfits
+        ? "Pass either outfits or garment lines, not both."
+        : "Pick an outfit or garments to render.",
     );
   }
+
+  const looks: LookSpec[] = [];
+  if (input.garmentLines?.length) {
+    await validateGarmentLines(ctx, billed, input.garmentLines);
+    looks.push({ garmentLines: input.garmentLines });
+  } else {
+    const outfitIds = [...new Set(input.outfitIds ?? [])];
+    if (outfitIds.length > LIMITS.maxOutfitsPerRenderRequest) {
+      throw appError(
+        "INVALID_INPUT",
+        `You can render up to ${LIMITS.maxOutfitsPerRenderRequest} outfits at once.`,
+        { max: LIMITS.maxOutfitsPerRenderRequest },
+      );
+    }
+    for (const outfitId of outfitIds) {
+      const outfit = await requireOutfit(ctx, billed, outfitId);
+      await validateSlots(ctx, billed, outfit.slots);
+      looks.push({
+        outfitId,
+        garmentLines: garmentLinesFromOutfitSlots(outfit.slots),
+      });
+    }
+  }
+
   if (input.quality === "hq" && !hasCurrentFeature(billed, "hq_renders")) {
     throw appError(
       "FEATURE_LOCKED",
@@ -217,16 +260,17 @@ export async function startRenderJob(
     );
   }
 
-  for (const outfitId of outfitIds) {
-    const outfit = await requireOutfit(ctx, billed, outfitId);
-    await validateSlots(ctx, billed, outfit.slots);
-  }
   const avatar = await resolveAvatar(ctx, billed, input.avatarId);
 
-  const images = count * outfitIds.length;
-  const needed = renderCreditCost(input.quality, count, outfitIds.length);
+  const lookCount = looks.length;
+  const images = count * lookCount;
+  const needed = renderCreditCost(input.quality, count, lookCount);
   await assertBelowJobLimit(ctx, billed._id);
   assertAffordable(billed, needed);
+
+  const outfitIds = looks
+    .map((look) => look.outfitId)
+    .filter((id): id is Id<"outfits"> => Boolean(id));
 
   const steps: StepInput[] = [
     { key: RENDER_STEPS.reserve },
@@ -238,7 +282,7 @@ export async function startRenderJob(
   const jobId = await createJob(ctx, billed, {
     type: "render",
     steps,
-    outfitIds,
+    ...(outfitIds.length > 0 ? { outfitIds } : {}),
   });
 
   const result = await reserve(ctx, billed, needed, jobId);
@@ -250,12 +294,13 @@ export async function startRenderJob(
 
   const now = Date.now();
   const renderIds: Id<"renders">[] = [];
-  for (const outfitId of outfitIds) {
+  for (const look of looks) {
     for (let index = 0; index < count; index += 1) {
       renderIds.push(
         await ctx.db.insert("renders", {
           userId: user._id,
-          outfitId,
+          ...(look.outfitId ? { outfitId: look.outfitId } : {}),
+          garmentLines: look.garmentLines,
           avatarId: avatar._id,
           jobId,
           quality: input.quality,
@@ -280,7 +325,7 @@ export async function startRenderJob(
   );
   await setWorkflowId(ctx, jobId, workflowId);
 
-  if (input.threadId) {
+  if (input.threadId && outfitIds.length > 0) {
     await attachJobToProposals(ctx, user, input.threadId, outfitIds, jobId);
   }
   return { jobId, renderIds };

@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { vColours, vPresentation } from "./validators";
+import { vColours, vPresentation, vSlot } from "./validators";
 
 export const PRODUCT_CATEGORIES = [
   "clothes",
@@ -481,6 +481,10 @@ export const vProductView = v.object({
   referenceImageUrl: v.union(v.string(), v.null()),
   sourceUploadId: v.union(v.id("uploads"), v.null()),
   sourceBbox: v.union(v.array(v.number()), v.null()),
+  /** True when a cutout exists and the product maps to a wardrobe try-on slot. */
+  canTryOn: v.boolean(),
+  /** Wardrobe slot this product fills when tried on; null when ineligible. */
+  tryOnSlot: v.union(vSlot, v.null()),
   soldCount: v.number(),
   createdAt: v.number(),
   updatedAt: v.number(),

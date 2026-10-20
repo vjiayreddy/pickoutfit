@@ -3,13 +3,16 @@
 import { useMutation, useQuery } from "convex/react";
 import { Package, Plus } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { ATTR, PRODUCT_CATEGORY_LABELS } from "@convex/shared/products";
+import type { Slot } from "@convex/shared/wardrobe";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppHeaderTitle } from "@/components/layout/app-header";
+import { AddToTrialRoomSheet } from "@/components/shop/AddToTrialRoomSheet";
 import { Button } from "@/components/ui/button";
 import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
@@ -38,11 +41,15 @@ export function ProductDetail({
   vendorSlug: string;
   productSlug: string;
 }) {
+  const router = useRouter();
   const data = useQuery(api.products.bySlug, { vendorSlug, productSlug });
   const add = useMutation(api.cart.add);
+  const addManyToTrial = useMutation(api.trialRoom.addMany);
   const [variantId, setVariantId] = useState<Id<"productVariants"> | null>(null);
   const [pending, setPending] = useState(false);
+  const [pendingLook, setPendingLook] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
+  const [trialOpen, setTrialOpen] = useState(false);
 
   useEffect(() => {
     setImageIndex(0);
@@ -94,6 +101,35 @@ export function ProductDetail({
     (row) => row.value && !HIDDEN_ATTR_KEYS.has(row.key),
   );
   const infoSections = [...product.infoSections].sort((a, b) => a.position - b.position);
+  const canTryOnSingle = product.canTryOn && Boolean(product.tryOnSlot);
+  const lookTryOnItems = [product, ...look].filter(
+    (row): row is typeof product & { tryOnSlot: Slot } =>
+      Boolean(row.canTryOn && row.tryOnSlot),
+  );
+  const canTryOnLook = lookTryOnItems.length > 1;
+
+  async function addLookToTrialRoom() {
+    if (pendingLook || !canTryOnLook) return;
+    setPendingLook(true);
+    try {
+      const result = await addManyToTrial({
+        items: lookTryOnItems.map((row) => ({
+          productId: row.id,
+          slot: row.tryOnSlot as Slot,
+        })),
+      });
+      toast.success(
+        result.added === 1
+          ? "Added to trial room"
+          : `Added ${result.added} pieces to trial room`,
+      );
+      router.push(routes.trialRoom);
+    } catch (error) {
+      toast.error(reportError(error).message);
+    } finally {
+      setPendingLook(false);
+    }
+  }
 
   async function addToBag() {
     if (pending || soldOut) return;
@@ -231,14 +267,36 @@ export function ProductDetail({
             </div>
           ) : null}
 
-          <button
-            type="button"
-            disabled={pending || soldOut || (multiVariant && !selectedVariant)}
-            onClick={() => void addToBag()}
-            className="h-12 w-full max-w-sm rounded-full bg-ink px-8 text-base font-medium text-canvas disabled:opacity-50 sm:w-auto"
-          >
-            {pending ? "Adding…" : soldOut ? "Sold out" : "Add to bag"}
-          </button>
+          <div className="flex max-w-sm flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <button
+              type="button"
+              disabled={pending || soldOut || (multiVariant && !selectedVariant)}
+              onClick={() => void addToBag()}
+              className="h-12 w-full rounded-full bg-ink px-8 text-base font-medium text-canvas disabled:opacity-50 sm:w-auto"
+            >
+              {pending ? "Adding…" : soldOut ? "Sold out" : "Add to bag"}
+            </button>
+            {canTryOnSingle ? (
+              <button
+                type="button"
+                onClick={() => setTrialOpen(true)}
+                className="h-12 w-full rounded-full bg-soft-cloud px-8 text-base font-medium text-ink sm:w-auto"
+              >
+                Add to trial room
+              </button>
+            ) : null}
+          </div>
+          {!product.canTryOn ? (
+            <p className="text-xs text-mute">
+              Virtual try-on needs a cutout for this piece. Browse other shop items
+              that support it.
+            </p>
+          ) : (
+            <p className="text-xs text-mute">
+              Add pieces to your trial room from any store, then try the full look
+              on you.
+            </p>
+          )}
         </div>
       </div>
 
@@ -271,7 +329,19 @@ export function ProductDetail({
 
       {look.length > 0 ? (
         <section className="space-y-4" aria-label="Shop the look">
-          <h2 className="text-lg font-medium tracking-tight">Shop the look</h2>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <h2 className="text-lg font-medium tracking-tight">Shop the look</h2>
+            {canTryOnLook ? (
+              <button
+                type="button"
+                disabled={pendingLook}
+                onClick={() => void addLookToTrialRoom()}
+                className="h-10 rounded-full bg-soft-cloud px-5 text-sm font-medium text-ink disabled:opacity-50"
+              >
+                {pendingLook ? "Adding…" : "Add look to trial room"}
+              </button>
+            ) : null}
+          </div>
           <ul className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
             {look.map((sibling) => (
               <li key={sibling.id} className="space-y-2">
@@ -292,6 +362,16 @@ export function ProductDetail({
             ))}
           </ul>
         </section>
+      ) : null}
+
+      {canTryOnSingle ? (
+        <AddToTrialRoomSheet
+          open={trialOpen}
+          onOpenChange={setTrialOpen}
+          productId={product.id}
+          suggestedSlot={product.tryOnSlot}
+          productName={product.name}
+        />
       ) : null}
     </div>
   );
