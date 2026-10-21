@@ -142,6 +142,14 @@ export const createCheckoutIntent = action({
       receipt: string;
       lines: Infer<typeof vCheckoutLine>;
       droppedNames: string[];
+      couponSavingsInr: number;
+      coupons: Array<{
+        discountId: Id<"discounts">;
+        vendorId: Id<"vendors">;
+        name: string;
+        code?: string;
+        amountInr: number;
+      }>;
     } = await ctx.runMutation(internal.orders.prepareCheckoutIntent, input);
     const rzOrder = await createRazorpayOrder({
       amountInr: prepared.amountInr,
@@ -156,6 +164,8 @@ export const createCheckoutIntent = action({
         amountInr: prepared.amountInr,
         lines: prepared.lines,
         droppedNames: prepared.droppedNames,
+        couponSavingsInr: prepared.couponSavingsInr,
+        coupons: prepared.coupons,
       },
     );
     return {
@@ -210,6 +220,16 @@ export const prepareCheckoutIntent = internalMutation({
     receipt: v.string(),
     lines: vCheckoutLine,
     droppedNames: v.array(v.string()),
+    couponSavingsInr: v.number(),
+    coupons: v.array(
+      v.object({
+        discountId: v.id("discounts"),
+        vendorId: v.id("vendors"),
+        name: v.string(),
+        code: v.optional(v.string()),
+        amountInr: v.number(),
+      }),
+    ),
   }),
   handler: async (ctx, input) => {
     const user = await requireUser(ctx);
@@ -220,6 +240,8 @@ export const prepareCheckoutIntent = internalMutation({
       receipt: `ci_${user._id.slice(-8)}_${Date.now().toString(36)}`,
       lines: prepared.lines,
       droppedNames: prepared.droppedNames,
+      couponSavingsInr: prepared.couponSavingsInr,
+      coupons: prepared.coupons,
     };
   },
 });
@@ -236,6 +258,18 @@ export const saveCheckoutIntent = internalMutation({
     amountInr: v.number(),
     lines: vCheckoutLine,
     droppedNames: v.array(v.string()),
+    couponSavingsInr: v.optional(v.number()),
+    coupons: v.optional(
+      v.array(
+        v.object({
+          discountId: v.id("discounts"),
+          vendorId: v.id("vendors"),
+          name: v.string(),
+          code: v.optional(v.string()),
+          amountInr: v.number(),
+        }),
+      ),
+    ),
   },
   returns: v.id("checkoutIntents"),
   handler: async (ctx, args) => {
@@ -253,6 +287,8 @@ export const saveCheckoutIntent = internalMutation({
       lines: args.lines,
       droppedNames: args.droppedNames,
       razorpayOrderId: args.razorpayOrderId,
+      coupons: args.coupons,
+      couponSavingsInr: args.couponSavingsInr,
     });
   },
 });

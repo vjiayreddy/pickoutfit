@@ -45,11 +45,19 @@ export function ProductDetail({
 }) {
   const router = useRouter();
   const data = useQuery(api.products.bySlug, { vendorSlug, productSlug });
+  const productId = data?.product?.id;
+  const clipCoupons = useQuery(
+    api.coupons.listForProduct,
+    productId ? { productId } : "skip",
+  );
   const add = useMutation(api.cart.add);
+  const clipCoupon = useMutation(api.coupons.clip);
+  const unclipCoupon = useMutation(api.coupons.unclip);
   const addManyToTrial = useMutation(api.trialRoom.addMany);
   const [variantId, setVariantId] = useState<Id<"productVariants"> | null>(null);
   const [pending, setPending] = useState(false);
   const [pendingLook, setPendingLook] = useState(false);
+  const [pendingClip, setPendingClip] = useState<Id<"discounts"> | null>(null);
   const [imageIndex, setImageIndex] = useState(0);
   const [trialOpen, setTrialOpen] = useState(false);
 
@@ -232,6 +240,44 @@ export function ProductDetail({
                     })}`
                   : ""}
               </p>
+            ) : null}
+            {clipCoupons && clipCoupons.length > 0 ? (
+              <ul className="space-y-2">
+                {clipCoupons.map((coupon) => {
+                  const label =
+                    coupon.badge?.trim() ||
+                    (coupon.kind === "percent"
+                      ? `${Math.round(coupon.value)}% off`
+                      : `₹${Math.round(coupon.value)} off`);
+                  return (
+                    <li key={coupon.id} className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-soft-cloud px-3 py-1 text-xs font-medium">
+                        {label}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={pendingClip === coupon.id}
+                        className="text-xs font-medium underline"
+                        onClick={() => {
+                          setPendingClip(coupon.id);
+                          void (coupon.clipped ? unclipCoupon : clipCoupon)({
+                            discountId: coupon.id,
+                          })
+                            .then(() =>
+                              toast.success(
+                                coupon.clipped ? "Coupon removed from bag." : "Coupon clipped.",
+                              ),
+                            )
+                            .catch((error) => toast.error(reportError(error).message))
+                            .finally(() => setPendingClip(null));
+                        }}
+                      >
+                        {coupon.clipped ? "Remove clip" : "Clip coupon"}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             ) : null}
             {product.subcategory ? <p className="text-sm text-mute">{product.subcategory}</p> : null}
           </div>

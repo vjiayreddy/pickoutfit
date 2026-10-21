@@ -11,6 +11,12 @@ import {
   type OrderStatus,
   type ReturnStatus,
 } from "../shared/products";
+import {
+  applyCouponsToCheckoutLines,
+  clearCartCoupons,
+  redeemCouponsOnOrder,
+  type AppliedCouponSnapshot,
+} from "./coupons";
 import { pricedUnitInr } from "./offers";
 import {
   adjustStock,
@@ -163,6 +169,14 @@ export async function toOrderView(ctx: Ctx, order: Doc<"orders">) {
     status: order.status,
     paymentStatus: order.paymentStatus ?? null,
     totalInr: order.totalInr,
+    couponSavingsInr: order.couponSavingsInr ?? 0,
+    coupons: (order.coupons ?? []).map((coupon) => ({
+      discountId: coupon.discountId,
+      vendorId: coupon.vendorId,
+      name: coupon.name,
+      code: coupon.code ?? null,
+      amountInr: coupon.amountInr,
+    })),
     createdAt: order.createdAt,
     items: items.map(toOrderItemView),
   };
@@ -284,6 +298,14 @@ export async function toBuyerOrderDetail(ctx: Ctx, order: Doc<"orders">) {
     status: order.status,
     paymentStatus: order.paymentStatus ?? null,
     totalInr: order.totalInr,
+    couponSavingsInr: order.couponSavingsInr ?? 0,
+    coupons: (order.coupons ?? []).map((coupon) => ({
+      discountId: coupon.discountId,
+      vendorId: coupon.vendorId,
+      name: coupon.name,
+      code: coupon.code ?? null,
+      amountInr: coupon.amountInr,
+    })),
     createdAt: order.createdAt,
     items: items.map(toOrderItemView),
     shipments: shipments.map(toShipmentView),
@@ -333,6 +355,8 @@ export type PreparedCheckout = {
   droppedNames: string[];
   cartId: Id<"carts">;
   cartLineIds: Id<"cartItems">[];
+  coupons: AppliedCouponSnapshot[];
+  couponSavingsInr: number;
 };
 
 /** Validate cart + address and build a priced snapshot without reserving stock. */
@@ -385,8 +409,18 @@ export async function prepareCheckout(
     );
   }
 
-  const amountInr = kept.reduce((sum, row) => sum + row.priceInr * row.quantity, 0);
-  return { buyer, amountInr, lines: kept, droppedNames, cartId: cart._id, cartLineIds };
+  const priced = await applyCouponsToCheckoutLines(ctx, user._id, cart._id, kept, now);
+  const amountInr = priced.lines.reduce((sum, row) => sum + row.priceInr * row.quantity, 0);
+  return {
+    buyer,
+    amountInr,
+    lines: priced.lines as CheckoutLineSnapshot[],
+    droppedNames,
+    cartId: cart._id,
+    cartLineIds,
+    coupons: priced.coupons,
+    couponSavingsInr: priced.couponSavingsInr,
+  };
 }
 
 export async function insertCheckoutIntent(
@@ -398,6 +432,8 @@ export async function insertCheckoutIntent(
     lines: CheckoutLineSnapshot[];
     droppedNames: string[];
     razorpayOrderId: string;
+    coupons?: AppliedCouponSnapshot[];
+    couponSavingsInr?: number;
   },
 ) {
   const now = Date.now();
@@ -408,6 +444,8 @@ export async function insertCheckoutIntent(
     amountInr: args.amountInr,
     ...args.buyer,
     lines: args.lines,
+    ...(args.coupons && args.coupons.length > 0 ? { coupons: args.coupons } : {}),
+    ...(args.couponSavingsInr ? { couponSavingsInr: args.couponSavingsInr } : {}),
     droppedNames: args.droppedNames,
     expiresAt: now + CHECKOUT_INTENT_TTL_MS,
     createdAt: now,
@@ -425,6 +463,8 @@ async function writeOrderFromLines(
     razorpayPaymentId?: string;
     paidAt?: number;
   },
+  coupons: AppliedCouponSnapshot[] = [],
+  couponSavingsInr = 0,
 ) {
   const now = Date.now();
   const totalInr = lines.reduce((sum, row) => sum + row.priceInr * row.quantity, 0);
@@ -433,6 +473,8 @@ async function writeOrderFromLines(
     ...buyer,
     status: "placed",
     totalInr,
+    ...(couponSavingsInr > 0 ? { couponSavingsInr } : {}),
+    ...(coupons.length > 0 ? { coupons } : {}),
     paymentStatus: payment.paymentStatus,
     ...(payment.razorpayOrderId ? { razorpayOrderId: payment.razorpayOrderId } : {}),
     ...(payment.razorpayPaymentId ? { razorpayPaymentId: payment.razorpayPaymentId } : {}),
@@ -503,18 +545,33 @@ export async function fulfillCheckoutIntent(
     city: intent.city,
     pincode: intent.pincode,
   };
-  const orderId = await writeOrderFromLines(ctx, user, buyer, intent.lines, {
-    paymentStatus: "paid",
-    razorpayOrderId: intent.razorpayOrderId,
-    razorpayPaymentId,
-    paidAt: now,
-  });
+  const coupons = intent.coupons ?? [];
+  const couponSavingsInr = intent.couponSavingsInr ?? 0;
+  const orderId = await writeOrderFromLines(
+    ctx,
+    user,
+    buyer,
+    intent.lines,
+    {
+      paymentStatus: "paid",
+      razorpayOrderId: intent.razorpayOrderId,
+      razorpayPaymentId,
+      paidAt: now,
+    },
+    coupons,
+    couponSavingsInr,
+  );
+
+  if (coupons.length > 0) {
+    await redeemCouponsOnOrder(ctx, { userId: user._id, orderId, coupons });
+  }
 
   const cart = await ctx.db
     .query("carts")
     .withIndex("by_userId", (q) => q.eq("userId", user._id))
     .unique();
   if (cart) {
+    await clearCartCoupons(ctx, cart._id);
     const lines = await cartLines(ctx, cart._id);
     for (const line of lines) await ctx.db.delete(line._id);
     await ctx.db.delete(cart._id);
@@ -546,10 +603,26 @@ export async function fulfillCheckoutIntentByRazorpayOrder(
  */
 export async function placeOrder(ctx: MutationCtx, user: Doc<"users">, input: CheckoutInput) {
   const prepared = await prepareCheckout(ctx, user, input);
-  const orderId = await writeOrderFromLines(ctx, user, prepared.buyer, prepared.lines, {
-    paymentStatus: "paid",
-    paidAt: Date.now(),
-  });
+  const orderId = await writeOrderFromLines(
+    ctx,
+    user,
+    prepared.buyer,
+    prepared.lines,
+    {
+      paymentStatus: "paid",
+      paidAt: Date.now(),
+    },
+    prepared.coupons,
+    prepared.couponSavingsInr,
+  );
+  if (prepared.coupons.length > 0) {
+    await redeemCouponsOnOrder(ctx, {
+      userId: user._id,
+      orderId,
+      coupons: prepared.coupons,
+    });
+  }
+  await clearCartCoupons(ctx, prepared.cartId);
   for (const lineId of prepared.cartLineIds) {
     const line = await ctx.db.get(lineId);
     if (line) await ctx.db.delete(line._id);

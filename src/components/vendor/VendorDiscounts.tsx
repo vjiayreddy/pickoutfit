@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { Percent, Plus, Search, Trash2 } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -11,6 +11,7 @@ import {
   OFFER_KINDS,
   PRODUCT_CATEGORIES,
   PRODUCT_CATEGORY_LABELS,
+  type DiscountRedemption,
   type OfferKind,
   type ProductCategory,
 } from "@convex/shared/products";
@@ -27,11 +28,12 @@ import { formatDate, formatInr } from "@/lib/format";
 
 type DiscountView = FunctionReturnType<typeof api.vendorDiscounts.list>[number];
 
-type Filter = "all" | "on" | "off" | "code" | "auto";
+type Filter = "all" | "on" | "off" | "auto" | "clip" | "code";
 
 type Form = {
   name: string;
   code: string;
+  redemption: DiscountRedemption;
   kind: "percent" | "flat";
   value: string;
   scope: "all" | "category" | "collection" | "products" | "attribute";
@@ -44,10 +46,81 @@ type Form = {
   attributeValues: string;
   minOrderInr: string;
   maxUses: string;
+  maxUsesPerUser: string;
   startsAt: string;
   endsAt: string;
   active: boolean;
 };
+
+function redemptionLabel(redemption: DiscountRedemption): string {
+  if (redemption === "clip") return "Clip coupon";
+  if (redemption === "code") return "Promo code";
+  return "Automatic";
+}
+
+const REDEMPTION_OPTIONS: {
+  id: DiscountRedemption;
+  title: string;
+  description: string;
+}[] = [
+  {
+    id: "auto",
+    title: "Automatic",
+    description: "Sale price shows on product cards and in the bag — no code needed.",
+  },
+  {
+    id: "clip",
+    title: "Clip coupon",
+    description: "Shoppers clip on the product page; discount applies at checkout.",
+  },
+  {
+    id: "code",
+    title: "Promo code",
+    description: "Share a code for checkout. One code per store in a mixed bag.",
+  },
+];
+
+const SCOPE_OPTIONS: { id: Form["scope"]; label: string }[] = [
+  { id: "all", label: "Everything" },
+  { id: "category", label: "Categories" },
+  { id: "collection", label: "Collection" },
+  { id: "products", label: "Products" },
+  { id: "attribute", label: "Attribute" },
+];
+
+function formPreview(form: Form): string {
+  const amount =
+    form.kind === "percent"
+      ? `${form.value || "0"}% off`
+      : form.value
+        ? `${formatInr(Number(form.value) || 0)} off`
+        : "₹0 off";
+  if (form.redemption === "code" && form.code.trim()) {
+    return `${amount} · code ${form.code.trim().toUpperCase()}`;
+  }
+  if (form.badge.trim()) return `${amount} · “${form.badge.trim()}”`;
+  return amount;
+}
+
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-3 border-t border-hairline pt-4 first:border-t-0 first:pt-0">
+      <div className="space-y-0.5">
+        <h3 className="text-sm font-medium text-ink">{title}</h3>
+        {description ? <p className="text-xs text-mute">{description}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 function toLocalInput(ms: number): string {
   const date = new Date(ms);
@@ -59,6 +132,7 @@ function emptyForm(): Form {
   return {
     name: "",
     code: "",
+    redemption: "auto",
     kind: "percent",
     value: "10",
     scope: "all",
@@ -71,6 +145,7 @@ function emptyForm(): Form {
     attributeValues: "",
     minOrderInr: "",
     maxUses: "",
+    maxUsesPerUser: "",
     startsAt: toLocalInput(Date.now()),
     endsAt: "",
     active: true,
@@ -81,6 +156,7 @@ function fromView(discount: DiscountView): Form {
   return {
     name: discount.name,
     code: discount.code ?? "",
+    redemption: discount.redemption,
     kind: discount.kind,
     value: String(discount.value),
     scope: discount.scope,
@@ -93,6 +169,7 @@ function fromView(discount: DiscountView): Form {
     attributeValues: discount.attributeValues.join(", "),
     minOrderInr: discount.minOrderInr ? String(discount.minOrderInr) : "",
     maxUses: discount.maxUses ? String(discount.maxUses) : "",
+    maxUsesPerUser: discount.maxUsesPerUser ? String(discount.maxUsesPerUser) : "",
     startsAt: toLocalInput(discount.startsAt),
     endsAt: discount.endsAt ? toLocalInput(discount.endsAt) : "",
     active: discount.active,
@@ -133,8 +210,9 @@ export function VendorDiscounts() {
       all: rows.length,
       on: rows.filter((d) => d.active).length,
       off: rows.filter((d) => !d.active).length,
-      code: rows.filter((d) => Boolean(d.code)).length,
-      auto: rows.filter((d) => !d.code).length,
+      auto: rows.filter((d) => d.redemption === "auto").length,
+      clip: rows.filter((d) => d.redemption === "clip").length,
+      code: rows.filter((d) => d.redemption === "code").length,
     };
   }, [discounts]);
 
@@ -144,8 +222,9 @@ export function VendorDiscounts() {
     return discounts.filter((discount) => {
       if (filter === "on" && !discount.active) return false;
       if (filter === "off" && discount.active) return false;
-      if (filter === "code" && !discount.code) return false;
-      if (filter === "auto" && discount.code) return false;
+      if (filter === "auto" && discount.redemption !== "auto") return false;
+      if (filter === "clip" && discount.redemption !== "clip") return false;
+      if (filter === "code" && discount.redemption !== "code") return false;
       if (!q) return true;
       return (
         discount.name.toLowerCase().includes(q) ||
@@ -159,8 +238,9 @@ export function VendorDiscounts() {
     { id: "all", label: "All", count: counts.all },
     { id: "on", label: "On", count: counts.on },
     { id: "off", label: "Off", count: counts.off },
-    { id: "code", label: "With code", count: counts.code },
     { id: "auto", label: "Automatic", count: counts.auto },
+    { id: "clip", label: "Clip coupons", count: counts.clip },
+    { id: "code", label: "Promo codes", count: counts.code },
   ];
 
   return (
@@ -224,7 +304,7 @@ export function VendorDiscounts() {
           <EmptyState
             icon={Percent}
             title="No discounts yet"
-            description="Launch an offer with a code, or apply an automatic cut at checkout."
+            description="Create automatic deals, clip coupons for the PDP, or promo codes for checkout."
             action={<Button onClick={() => setEditing("new")}>New discount</Button>}
           />
         </div>
@@ -262,13 +342,13 @@ export function VendorDiscounts() {
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="truncate text-sm font-medium text-ink">{discount.name}</p>
-                    {discount.code ? (
+                    {discount.redemption === "code" && discount.code ? (
                       <span className="rounded-full bg-soft-cloud px-2.5 py-0.5 font-mono text-xs font-medium tracking-wide">
                         {discount.code}
                       </span>
                     ) : (
                       <span className="rounded-full bg-soft-cloud px-2.5 py-0.5 text-xs font-medium text-mute">
-                        Automatic
+                        {redemptionLabel(discount.redemption)}
                       </span>
                     )}
                     <span
@@ -358,16 +438,61 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
   const products = useQuery(api.vendorProducts.list, { paginationOpts: { numItems: 100, cursor: null } });
   const [form, setForm] = useState<Form>(discount ? fromView(discount) : emptyForm());
   const [pending, setPending] = useState(false);
-  const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
+  const [error, setError] = useState<string | null>(null);
+  const [productQuery, setProductQuery] = useState("");
+  const set = <K extends keyof Form>(key: K, value: Form[K]) => {
+    setError(null);
+    setForm((f) => ({ ...f, [key]: value }));
+  };
+
+  const filteredProducts = useMemo(() => {
+    const rows = products?.page ?? [];
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((product) => product.name.toLowerCase().includes(q));
+  }, [products, productQuery]);
+
+  function validate(): string | null {
+    if (!form.name.trim()) return "Give this discount a name.";
+    const value = Number(form.value);
+    if (!Number.isFinite(value) || value <= 0) return "Enter a discount value greater than zero.";
+    if (form.kind === "percent" && value > 90) return "Percent off is capped at 90%.";
+    if (form.redemption === "code" && !form.code.trim()) return "Promo codes need a code shoppers can type.";
+    if (form.scope === "category" && form.categories.length === 0) return "Pick at least one category.";
+    if (form.scope === "collection" && !form.collectionId) return "Choose a collection.";
+    if (form.scope === "products" && form.productIds.length === 0) return "Pick at least one product.";
+    if (form.scope === "attribute") {
+      if (!form.attributeKey.trim()) return "Enter an attribute key.";
+      if (!form.attributeValues.split(",").map((p) => p.trim()).filter(Boolean).length) {
+        return "Enter at least one attribute value.";
+      }
+    }
+    const startsAt = new Date(form.startsAt).getTime();
+    if (!Number.isFinite(startsAt)) return "Pick a valid start time.";
+    if (form.endsAt) {
+      const endsAt = new Date(form.endsAt).getTime();
+      if (!Number.isFinite(endsAt) || endsAt <= startsAt) {
+        return "End time must be after the start time.";
+      }
+    }
+    return null;
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (pending) return;
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     setPending(true);
+    setError(null);
     try {
       const args = {
         name: form.name,
-        code: form.code.trim() || undefined,
+        redemption: form.redemption,
+        code: form.redemption === "code" ? form.code.trim() || undefined : undefined,
         kind: form.kind,
         value: Number(form.value),
         scope: form.scope,
@@ -386,6 +511,10 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
             : undefined,
         minOrderInr: form.minOrderInr ? Number(form.minOrderInr) : undefined,
         maxUses: form.maxUses ? Number(form.maxUses) : undefined,
+        maxUsesPerUser:
+          form.redemption !== "auto" && form.maxUsesPerUser
+            ? Number(form.maxUsesPerUser)
+            : undefined,
         startsAt: new Date(form.startsAt).getTime(),
         endsAt: form.endsAt ? new Date(form.endsAt).getTime() : undefined,
         active: form.active,
@@ -394,8 +523,10 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
       else await create(args);
       toast.success(discount ? "Discount updated." : "Discount created.");
       onClose();
-    } catch (error) {
-      toast.error(reportError(error).message);
+    } catch (err) {
+      const message = reportError(err).message;
+      setError(message);
+      toast.error(message);
     } finally {
       setPending(false);
     }
@@ -403,246 +534,394 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <form onSubmit={submit} className="space-y-4">
-          <DialogHeader>
-            <DialogTitle>{discount ? "Edit discount" : "New discount"}</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-mute">
-            Leave the code blank for an automatic checkout offer. Add a code if shoppers should type it in.
-          </p>
-          <Field label="Name">
-            <Input
-              required
-              autoFocus
-              maxLength={80}
-              value={form.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="Diwali Offer"
-            />
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Promo code" hint="Optional. Blank = automatic.">
-              <Input
-                maxLength={24}
-                value={form.code}
-                onChange={(e) => set("code", e.target.value.toUpperCase())}
-                placeholder="LAUNCH10"
-              />
-            </Field>
-            <Field label={form.kind === "percent" ? "Percent off" : "Amount off (INR)"}>
-              <span className="flex gap-2">
-                <select
-                  value={form.kind}
-                  onChange={(e) => set("kind", e.target.value as Form["kind"])}
-                  className="h-12 shrink-0 rounded-full bg-soft-cloud px-3 text-sm"
-                  aria-label="Discount kind"
-                >
-                  <option value="percent">%</option>
-                  <option value="flat">₹</option>
-                </select>
-                <Input
-                  type="number"
-                  required
-                  min={1}
-                  value={form.value}
-                  onChange={(e) => set("value", e.target.value)}
-                />
-              </span>
-            </Field>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Offer type">
-              <select
-                value={form.offerKind}
-                onChange={(e) => set("offerKind", e.target.value as OfferKind)}
-                className="h-12 w-full rounded-full bg-soft-cloud px-4 text-sm"
-              >
-                {OFFER_KINDS.map((kind) => (
-                  <option key={kind} value={kind}>
-                    {kind.charAt(0).toUpperCase() + kind.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Badge" hint="Shown on product cards when live.">
-              <Input
-                maxLength={40}
-                value={form.badge}
-                onChange={(e) => set("badge", e.target.value)}
-                placeholder="Diwali Sale"
-              />
-            </Field>
-          </div>
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">Applies to</legend>
-            <div className="flex flex-wrap gap-2">
-              {(["all", "category", "collection", "products", "attribute"] as const).map((scope) => (
-                <button
-                  key={scope}
-                  type="button"
-                  onClick={() => set("scope", scope)}
-                  className={cn(
-                    "h-9 rounded-full px-3 text-sm font-medium transition active:scale-95 active:opacity-50",
-                    form.scope === scope
-                      ? "bg-ink text-canvas"
-                      : "bg-canvas text-ink ring-1 ring-inset ring-hairline",
-                  )}
-                >
-                  {
-                    {
-                      all: "Everything",
-                      category: "Categories",
-                      collection: "A collection",
-                      products: "Chosen products",
-                      attribute: "Attribute",
-                    }[scope]
-                  }
-                </button>
-              ))}
+      <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
+        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 space-y-3 border-b border-hairline px-4 pb-4 pt-4 pr-12">
+            <DialogHeader>
+              <DialogTitle>{discount ? "Edit discount" : "New discount"}</DialogTitle>
+            </DialogHeader>
+            <div className="rounded-none bg-soft-cloud px-4 py-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-mute">Preview</p>
+              <p className="mt-1 text-sm font-medium text-ink">{formPreview(form)}</p>
+              <p className="mt-0.5 text-xs text-mute">
+                {REDEMPTION_OPTIONS.find((o) => o.id === form.redemption)?.description}
+              </p>
             </div>
-          </fieldset>
-          {form.scope === "category" ? (
-            <div className="flex flex-wrap gap-2">
-              {PRODUCT_CATEGORIES.map((category) => {
-                const on = form.categories.includes(category);
-                return (
-                  <button
-                    key={category}
-                    type="button"
-                    onClick={() =>
-                      set(
-                        "categories",
-                        on ? form.categories.filter((c) => c !== category) : [...form.categories, category],
-                      )
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-0 overflow-y-auto px-4 py-4">
+            <Section title="Type" description="How shoppers discover and redeem this offer.">
+              <div className="grid gap-2">
+                {REDEMPTION_OPTIONS.map((option) => {
+                  const selected = form.redemption === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => {
+                        setError(null);
+                        setForm((f) => ({
+                          ...f,
+                          redemption: option.id,
+                          code: option.id === "code" ? f.code : "",
+                        }));
+                      }}
+                      className={cn(
+                        "rounded-none px-4 py-3 text-left transition active:scale-[0.99] active:opacity-50",
+                        selected
+                          ? "bg-ink text-canvas"
+                          : "bg-canvas text-ink ring-1 ring-inset ring-hairline",
+                      )}
+                    >
+                      <p className="text-sm font-medium">{option.title}</p>
+                      <p className={cn("mt-0.5 text-xs", selected ? "text-canvas/70" : "text-mute")}>
+                        {option.description}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </Section>
+
+            <Section title="Basics">
+              <div className="space-y-4">
+                <Field label="Internal name">
+                  <Input
+                    required
+                    autoFocus
+                    maxLength={80}
+                    value={form.name}
+                    onChange={(e) => set("name", e.target.value)}
+                    placeholder="Diwali weekend push"
+                  />
+                </Field>
+
+                {form.redemption === "code" ? (
+                  <Field label="Promo code" hint="Letters, numbers, _ and - only. Shown uppercase.">
+                    <Input
+                      required
+                      maxLength={24}
+                      value={form.code}
+                      onChange={(e) => set("code", e.target.value.toUpperCase())}
+                      placeholder="LAUNCH10"
+                      className="font-mono tracking-wide"
+                    />
+                  </Field>
+                ) : null}
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Discount</p>
+                  <div className="flex gap-2">
+                    <div className="flex shrink-0 rounded-full bg-soft-cloud p-1">
+                      {(["percent", "flat"] as const).map((kind) => (
+                        <button
+                          key={kind}
+                          type="button"
+                          onClick={() => set("kind", kind)}
+                          className={cn(
+                            "h-10 min-w-12 rounded-full px-3 text-sm font-medium transition active:scale-95 active:opacity-50",
+                            form.kind === kind ? "bg-ink text-canvas" : "text-mute",
+                          )}
+                        >
+                          {kind === "percent" ? "%" : "₹"}
+                        </button>
+                      ))}
+                    </div>
+                    <Input
+                      type="number"
+                      required
+                      min={1}
+                      max={form.kind === "percent" ? 90 : undefined}
+                      value={form.value}
+                      onChange={(e) => set("value", e.target.value)}
+                      placeholder={form.kind === "percent" ? "10" : "200"}
+                      aria-label={form.kind === "percent" ? "Percent off" : "Amount off in INR"}
+                    />
+                  </div>
+                  <p className="text-xs text-mute">
+                    {form.kind === "percent"
+                      ? "Up to 90% off the sale price of eligible items."
+                      : "Flat INR off the eligible subtotal for this store."}
+                  </p>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Offer style" hint="Merchandising label for reporting.">
+                    <select
+                      value={form.offerKind}
+                      onChange={(e) => set("offerKind", e.target.value as OfferKind)}
+                      className="h-12 w-full rounded-full bg-soft-cloud px-4 text-sm"
+                    >
+                      {OFFER_KINDS.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {kind.charAt(0).toUpperCase() + kind.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field
+                    label="Shopper badge"
+                    hint={
+                      form.redemption === "clip"
+                        ? "Shown next to the clip button."
+                        : form.redemption === "auto"
+                          ? "Shown on product cards when live."
+                          : "Optional label in the bag summary."
                     }
+                  >
+                    <Input
+                      maxLength={40}
+                      value={form.badge}
+                      onChange={(e) => set("badge", e.target.value)}
+                      placeholder={form.redemption === "clip" ? "Clip & save" : "Diwali Sale"}
+                    />
+                  </Field>
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Applies to" description="Only matching items from your store count.">
+              <div className="flex flex-wrap gap-2">
+                {SCOPE_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => set("scope", option.id)}
                     className={cn(
-                      "h-9 rounded-full px-3 text-sm font-medium",
-                      on ? "bg-ink text-canvas" : "bg-soft-cloud text-ink",
+                      "h-9 rounded-full px-3 text-sm font-medium transition active:scale-95 active:opacity-50",
+                      form.scope === option.id
+                        ? "bg-ink text-canvas"
+                        : "bg-canvas text-ink ring-1 ring-inset ring-hairline",
                     )}
                   >
-                    {PRODUCT_CATEGORY_LABELS[category]}
+                    {option.label}
                   </button>
-                );
-              })}
-            </div>
-          ) : null}
-          {form.scope === "collection" ? (
-            <select
-              required
-              value={form.collectionId}
-              onChange={(e) => set("collectionId", e.target.value)}
-              className="h-12 w-full rounded-full bg-soft-cloud px-4 text-sm"
-            >
-              <option value="">Choose a collection</option>
-              {collections?.map((collection) => (
-                <option key={collection.id} value={collection.id}>
-                  {collection.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          {form.scope === "products" ? (
-            <ul className="max-h-48 space-y-1 overflow-y-auto border border-hairline p-2">
-              {products?.page.map((product) => {
-                const on = form.productIds.includes(product.id);
-                return (
-                  <li key={product.id}>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        onChange={() =>
+                ))}
+              </div>
+
+              {form.scope === "category" ? (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {PRODUCT_CATEGORIES.map((category) => {
+                    const on = form.categories.includes(category);
+                    return (
+                      <button
+                        key={category}
+                        type="button"
+                        onClick={() =>
                           set(
-                            "productIds",
+                            "categories",
                             on
-                              ? form.productIds.filter((id) => id !== product.id)
-                              : [...form.productIds, product.id],
+                              ? form.categories.filter((c) => c !== category)
+                              : [...form.categories, category],
                           )
                         }
-                        className="size-4 accent-ink"
-                      />
-                      <span className="truncate">{product.name}</span>
-                      <span className="ml-auto text-xs text-mute">{formatInr(product.priceInr)}</span>
-                    </label>
-                  </li>
-                );
-              })}
-              {products && products.page.length === 0 ? (
-                <li className="p-2 text-sm text-mute">No products yet.</li>
+                        className={cn(
+                          "h-9 rounded-full px-3 text-sm font-medium",
+                          on ? "bg-ink text-canvas" : "bg-soft-cloud text-ink",
+                        )}
+                      >
+                        {PRODUCT_CATEGORY_LABELS[category]}
+                      </button>
+                    );
+                  })}
+                </div>
               ) : null}
-            </ul>
-          ) : null}
-          {form.scope === "attribute" ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Attribute key" hint="e.g. occasion, sale">
-                <Input
+
+              {form.scope === "collection" ? (
+                <select
                   required
-                  value={form.attributeKey}
-                  onChange={(e) => set("attributeKey", e.target.value)}
-                  placeholder="occasion"
-                />
-              </Field>
-              <Field label="Values" hint="Comma-separated">
-                <Input
-                  required
-                  value={form.attributeValues}
-                  onChange={(e) => set("attributeValues", e.target.value)}
-                  placeholder="festive, wedding"
-                />
-              </Field>
-            </div>
-          ) : null}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Starts">
-              <Input
-                type="datetime-local"
-                required
-                value={form.startsAt}
-                onChange={(e) => set("startsAt", e.target.value)}
-              />
-            </Field>
-            <Field label="Ends" hint="Optional.">
-              <Input
-                type="datetime-local"
-                value={form.endsAt}
-                onChange={(e) => set("endsAt", e.target.value)}
-              />
-            </Field>
-            <Field label="Minimum order (INR)">
-              <Input
-                type="number"
-                min={0}
-                value={form.minOrderInr}
-                onChange={(e) => set("minOrderInr", e.target.value)}
-              />
-            </Field>
-            <Field label="Max uses">
-              <Input
-                type="number"
-                min={1}
-                value={form.maxUses}
-                onChange={(e) => set("maxUses", e.target.value)}
-              />
-            </Field>
+                  value={form.collectionId}
+                  onChange={(e) => set("collectionId", e.target.value)}
+                  className="mt-1 h-12 w-full rounded-full bg-soft-cloud px-4 text-sm"
+                >
+                  <option value="">Choose a collection</option>
+                  {collections?.map((collection) => (
+                    <option key={collection.id} value={collection.id}>
+                      {collection.name}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+
+              {form.scope === "products" ? (
+                <div className="mt-1 space-y-2">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-mute" />
+                    <Input
+                      value={productQuery}
+                      onChange={(e) => setProductQuery(e.target.value)}
+                      placeholder="Search products…"
+                      className="h-11 rounded-none pl-10 text-sm"
+                      aria-label="Search products"
+                    />
+                  </div>
+                  <p className="text-xs text-mute">
+                    {form.productIds.length} selected
+                    {products?.page.length ? ` · ${products.page.length} shown` : null}
+                  </p>
+                  <ul className="max-h-48 divide-y divide-hairline overflow-y-auto border border-hairline">
+                    {filteredProducts.map((product) => {
+                      const on = form.productIds.includes(product.id);
+                      return (
+                        <li key={product.id}>
+                          <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm hover:bg-soft-cloud/60">
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() =>
+                                set(
+                                  "productIds",
+                                  on
+                                    ? form.productIds.filter((id) => id !== product.id)
+                                    : [...form.productIds, product.id],
+                                )
+                              }
+                              className="size-4 accent-ink"
+                            />
+                            <span className="min-w-0 flex-1 truncate">{product.name}</span>
+                            <span className="shrink-0 text-xs text-mute">
+                              {formatInr(product.priceInr)}
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                    {products && products.page.length === 0 ? (
+                      <li className="px-3 py-4 text-sm text-mute">No products yet.</li>
+                    ) : null}
+                    {products && products.page.length > 0 && filteredProducts.length === 0 ? (
+                      <li className="px-3 py-4 text-sm text-mute">No products match that search.</li>
+                    ) : null}
+                  </ul>
+                </div>
+              ) : null}
+
+              {form.scope === "attribute" ? (
+                <div className="mt-1 grid gap-4 sm:grid-cols-2">
+                  <Field label="Attribute key" hint="Matches products.attributes key, e.g. occasion">
+                    <Input
+                      required
+                      value={form.attributeKey}
+                      onChange={(e) => set("attributeKey", e.target.value)}
+                      placeholder="occasion"
+                    />
+                  </Field>
+                  <Field label="Values" hint="Comma-separated. Any match qualifies.">
+                    <Input
+                      required
+                      value={form.attributeValues}
+                      onChange={(e) => set("attributeValues", e.target.value)}
+                      placeholder="festive, wedding"
+                    />
+                  </Field>
+                </div>
+              ) : null}
+            </Section>
+
+            <Section title="Schedule" description="Live window for this offer.">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Starts">
+                  <Input
+                    type="datetime-local"
+                    required
+                    value={form.startsAt}
+                    onChange={(e) => set("startsAt", e.target.value)}
+                  />
+                </Field>
+                <Field label="Ends" hint="Leave blank for no end date.">
+                  <Input
+                    type="datetime-local"
+                    value={form.endsAt}
+                    onChange={(e) => set("endsAt", e.target.value)}
+                  />
+                </Field>
+              </div>
+            </Section>
+
+            <Section
+              title="Limits"
+              description={
+                form.redemption === "auto"
+                  ? "Optional caps. Blank means unlimited."
+                  : "Optional caps for redemptions. Blank means unlimited."
+              }
+            >
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label="Minimum eligible spend (INR)"
+                  hint="Based on this store’s matching items. Leave blank for none."
+                >
+                  <Input
+                    type="number"
+                    min={0}
+                    value={form.minOrderInr}
+                    onChange={(e) => set("minOrderInr", e.target.value)}
+                    placeholder="No minimum"
+                  />
+                </Field>
+                <Field label="Total redemptions" hint="Across all shoppers. Leave blank for unlimited.">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={form.maxUses}
+                    onChange={(e) => set("maxUses", e.target.value)}
+                    placeholder="Unlimited"
+                  />
+                </Field>
+                {form.redemption !== "auto" ? (
+                  <Field label="Per shopper" hint="How many times one account can redeem.">
+                    <Input
+                      type="number"
+                      min={1}
+                      value={form.maxUsesPerUser}
+                      onChange={(e) => set("maxUsesPerUser", e.target.value)}
+                      placeholder="Unlimited"
+                    />
+                  </Field>
+                ) : null}
+              </div>
+            </Section>
+
+            <Section title="Status">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.active}
+                onClick={() => set("active", !form.active)}
+                className={cn(
+                  "flex h-12 w-full items-center justify-between rounded-full px-4 text-sm font-medium transition active:scale-[0.99] active:opacity-50",
+                  form.active ? "bg-ink text-canvas" : "bg-soft-cloud text-mute",
+                )}
+              >
+                <span>{form.active ? "Active — shoppers can use it" : "Inactive — hidden from shoppers"}</span>
+                <span
+                  className={cn(
+                    "inline-flex h-6 w-11 items-center rounded-full p-0.5 transition",
+                    form.active ? "bg-canvas/25" : "bg-hairline",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "size-5 rounded-full bg-canvas transition",
+                      form.active ? "translate-x-5" : "translate-x-0",
+                    )}
+                  />
+                </span>
+              </button>
+            </Section>
           </div>
-          <label className="flex h-12 items-center justify-between rounded-full bg-soft-cloud px-4 text-sm font-medium">
-            Active now
-            <input
-              type="checkbox"
-              checked={form.active}
-              onChange={(e) => set("active", e.target.checked)}
-              className="size-5 accent-ink"
-            />
-          </label>
-          <DialogFooter>
-            <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Save"}
-            </Button>
-          </DialogFooter>
+
+          <div className="shrink-0 space-y-3 border-t border-hairline bg-canvas px-4 py-4">
+            {error ? <p className="text-sm text-sale">{error}</p> : null}
+            <DialogFooter className="gap-2 sm:justify-end">
+              <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={pending}>
+                {pending ? "Saving…" : discount ? "Save changes" : "Create discount"}
+              </Button>
+            </DialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>

@@ -1,5 +1,6 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { discountRedemption } from "../shared/coupons";
 import {
   applyDiscount,
   attributeValue,
@@ -47,10 +48,10 @@ type MatchProduct = {
   attributes?: ProductAttribute[] | null;
 };
 
-/** Auto offers only (no code). Code promos stay for checkout entry later. */
+/** Auto offers only. Clip/code coupons apply at checkout via model/coupons. */
 export function isAutoOfferLive(discount: Doc<"discounts">, now: number): boolean {
+  if (discountRedemption(discount) !== "auto") return false;
   if (!discount.active) return false;
-  if (discount.code) return false;
   if (now < discount.startsAt) return false;
   if (discount.endsAt !== undefined && now >= discount.endsAt) return false;
   if (discount.maxUses !== undefined && discount.usedCount >= discount.maxUses) return false;
