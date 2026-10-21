@@ -172,9 +172,23 @@ export const inviteMember = mutation({
     const { user, vendor } = await requireVendor(ctx, { minRole: "owner" });
     assertVendorWritable(vendor);
     const target = email.trim().toLowerCase();
-    // Users are looked up by email through a bounded scan of recent accounts: there is no email index.
-    const candidates = await ctx.db.query("users").withIndex("by_createdAt").order("desc").take(1000);
-    const invitee = candidates.find((candidate) => candidate.email?.toLowerCase() === target);
+    let invitee = await ctx.db
+      .query("users")
+      .withIndex("by_email", (q) => q.eq("email", target))
+      .unique();
+    // Legacy rows may still store mixed-case email before auth normalization.
+    if (!invitee) {
+      const candidates = await ctx.db
+        .query("users")
+        .withIndex("by_createdAt")
+        .order("desc")
+        .take(200);
+      invitee =
+        candidates.find((candidate) => candidate.email?.toLowerCase() === target) ?? null;
+      if (invitee?.email && invitee.email !== target) {
+        await ctx.db.patch(invitee._id, { email: target });
+      }
+    }
     if (!invitee) throw appError("NOT_FOUND", "No account with that email. Ask them to sign up first.");
     const existing = await ctx.db
       .query("vendorMembers")

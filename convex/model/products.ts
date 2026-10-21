@@ -1185,7 +1185,7 @@ export async function addCartLine(
   }
   const product = await ctx.db.get(productId);
   const vendor = product?.vendorId ? await ctx.db.get(product.vendorId) : null;
-  if (!product || !productVisibleTo(user.prefs.presentation, product, vendor)) {
+  if (!product?.vendorId || !productVisibleTo(user.prefs.presentation, product, vendor)) {
     throw appError("NOT_FOUND", "That product is not available.");
   }
   const variants = (await loadVariants(ctx, product._id)).filter((variant) => variant.active);
@@ -1222,7 +1222,7 @@ export async function addCartLine(
     await ctx.db.insert("cartItems", {
       cartId: cart._id,
       userId: user._id,
-      vendorId: product.vendorId,
+      vendorId: product.vendorId!,
       productId,
       ...(variant ? { variantId: variant._id } : {}),
       quantity,
@@ -1259,11 +1259,24 @@ export async function setCartQuantity(
   await ctx.db.patch(line._id, { quantity });
 }
 
-/** Deletes an uploaded photo that never made it onto a product. */
-export async function discardUnusedProductImage(ctx: MutationCtx, storageId: Id<"_storage">) {
+/**
+ * Deletes an uploaded photo that never made it onto a product.
+ * Refuses when another vendor already owns the file via `productImages`.
+ */
+export async function discardUnusedProductImage(
+  ctx: MutationCtx,
+  storageId: Id<"_storage">,
+  vendor: Doc<"vendors">,
+) {
   const used = await ctx.db
     .query("productImages")
     .withIndex("by_storageId", (q) => q.eq("storageId", storageId))
     .first();
-  if (!used) await ctx.storage.delete(storageId);
+  if (used) {
+    if (used.vendorId !== vendor._id) {
+      throw appError("FORBIDDEN", "That photo belongs to another store.");
+    }
+    return;
+  }
+  await ctx.storage.delete(storageId);
 }

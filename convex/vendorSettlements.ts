@@ -7,6 +7,7 @@ import {
   markSettlementFailed,
   markSettlementPaid,
   markSettlementTransferring,
+  reclaimStuckTransferring,
   settlementByTransferId,
 } from "./model/settlements";
 
@@ -72,17 +73,23 @@ export const claimDue = internalMutation({
       shipmentId: string;
     }> = [];
     for (const row of due) {
-      const vendor = await ctx.db.get(row.vendorId);
+      // Re-read so concurrent crons that already claimed this row are skipped (OCC-safe).
+      const fresh = await ctx.db.get(row._id);
+      if (!fresh || fresh.status !== "pending") continue;
+
+      const vendor = await ctx.db.get(fresh.vendorId);
       if (!vendor?.payoutAccountId || vendor.payoutStatus !== "activated") {
-        await markSettlementFailed(ctx, row._id, "Vendor payout account not activated.");
+        await markSettlementFailed(ctx, fresh._id, "Vendor payout account not activated.");
         continue;
       }
+      // Claim before the external Razorpay call so overlapping processDue runs cannot double-pay.
+      await ctx.db.patch(fresh._id, { status: "transferring" });
       out.push({
-        settlementId: row._id,
+        settlementId: fresh._id,
         payoutAccountId: vendor.payoutAccountId,
-        netInr: row.netInr,
-        orderId: row.orderId,
-        shipmentId: row.shipmentId,
+        netInr: fresh.netInr,
+        orderId: fresh.orderId,
+        shipmentId: fresh.shipmentId,
       });
     }
     return out;
@@ -123,6 +130,13 @@ export const markFailed = internalMutation({
     await markSettlementFailed(ctx, settlementId, reason);
     return null;
   },
+});
+
+/** Cron: put claim-without-transfer rows back to pending so processDue can retry. */
+export const reclaimStuck = internalMutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => reclaimStuckTransferring(ctx),
 });
 
 export const reconcileTransfer = internalMutation({

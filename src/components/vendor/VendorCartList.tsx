@@ -1,9 +1,10 @@
 "use client";
 
-import { useQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "convex/react";
 import { Mail, MessageCircle, ShoppingBag } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { EmptyState } from "@/components/common/EmptyState";
+import { Button } from "@/components/ui/button";
 import { formatDate, formatInr } from "@/lib/format";
 
 function whatsappHref(phone: string): string | null {
@@ -26,13 +27,18 @@ function addedFromLabel(addedFrom: string | null): string | null {
 }
 
 export function VendorCartList() {
-  const data = useQuery(api.vendorCarts.list, {});
+  const summary = useQuery(api.vendorCarts.summary, {});
+  const { results, status, loadMore } = usePaginatedQuery(
+    api.vendorCarts.list,
+    {},
+    { initialNumItems: 12 },
+  );
 
-  if (data === undefined) {
+  if (status === "LoadingFirstPage" || summary === undefined) {
     return <div className="h-40 animate-pulse bg-soft-cloud" />;
   }
 
-  if (data.shoppers.length === 0) {
+  if (results.length === 0) {
     return (
       <div className="space-y-6">
         <p className="text-sm text-mute">
@@ -56,13 +62,15 @@ export function VendorCartList() {
           WhatsApp.
         </p>
         <p className="text-sm text-mute">
-          {data.shopperCount} shopper{data.shopperCount === 1 ? "" : "s"} · {data.lineCount} item
-          {data.lineCount === 1 ? "" : "s"}
+          {summary.shopperCount}
+          {summary.capped ? "+" : ""} shopper{summary.shopperCount === 1 ? "" : "s"} ·{" "}
+          {summary.lineCount}
+          {summary.capped ? "+" : ""} item{summary.lineCount === 1 ? "" : "s"}
         </p>
       </div>
 
       <ul className="divide-y divide-hairline border-y border-hairline">
-        {data.shoppers.map((shopper) => {
+        {results.map((shopper) => {
           const wa = shopper.phone ? whatsappHref(shopper.phone) : null;
           return (
             <li key={shopper.userId} className="space-y-4 py-5">
@@ -130,6 +138,12 @@ export function VendorCartList() {
           );
         })}
       </ul>
+
+      {status === "CanLoadMore" ? (
+        <Button variant="secondary" className="w-full sm:w-auto" onClick={() => loadMore(12)}>
+          Load more
+        </Button>
+      ) : null}
     </div>
   );
 }

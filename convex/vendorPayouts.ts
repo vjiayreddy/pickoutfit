@@ -124,8 +124,10 @@ export const setPayoutStatusByAccount = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, { payoutAccountId, payoutStatus }) => {
-    const vendors = await ctx.db.query("vendors").take(500);
-    const match = vendors.find((row) => row.payoutAccountId === payoutAccountId);
+    const match = await ctx.db
+      .query("vendors")
+      .withIndex("by_payoutAccountId", (q) => q.eq("payoutAccountId", payoutAccountId))
+      .unique();
     if (!match) return null;
     await ctx.db.patch(match._id, { payoutStatus, updatedAt: Date.now() });
     return null;

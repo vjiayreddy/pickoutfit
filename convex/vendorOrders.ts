@@ -38,31 +38,31 @@ type Ctx = QueryCtx | MutationCtx;
 
 const LIST_CAP = 500;
 
-async function openReturnCount(
+async function requestedReturnItemIds(
   ctx: Ctx,
   vendorId: Id<"vendors">,
-  orderItemIds: Id<"orderItems">[],
-) {
-  let count = 0;
-  for (const orderItemId of orderItemIds) {
-    const rows = await ctx.db
-      .query("returns")
-      .withIndex("by_orderItemId", (q) => q.eq("orderItemId", orderItemId))
-      .take(20);
-    count += rows.filter((row) => row.vendorId === vendorId && row.status === "requested").length;
-  }
-  return count;
+): Promise<Set<Id<"orderItems">>> {
+  const rows = await ctx.db
+    .query("returns")
+    .withIndex("by_vendorId_and_status_and_createdAt", (q) =>
+      q.eq("vendorId", vendorId).eq("status", "requested"),
+    )
+    .take(LIST_CAP);
+  return new Set(rows.map((row) => row.orderItemId));
 }
 
-async function toListItem(
-  ctx: Ctx,
-  vendorId: Id<"vendors">,
+function toListItem(
   order: Doc<"orders">,
   items: Doc<"orderItems">[],
+  openReturnIds: Set<Id<"orderItems">>,
 ) {
   const counts = { placed: 0, shipped: 0, cancelled: 0, returned: 0 };
   for (const item of items) {
     counts[lineStatusOf(item)] += 1;
+  }
+  let openReturnCount = 0;
+  for (const item of items) {
+    if (openReturnIds.has(item._id)) openReturnCount += 1;
   }
   return {
     orderId: order._id,
@@ -76,11 +76,7 @@ async function toListItem(
     shippedCount: counts.shipped,
     cancelledCount: counts.cancelled,
     returnedCount: counts.returned,
-    openReturnCount: await openReturnCount(
-      ctx,
-      vendorId,
-      items.map((item) => item._id),
-    ),
+    openReturnCount,
   };
 }
 
@@ -126,7 +122,7 @@ async function requireVendorOrderItem(
 
 /**
  * List this vendor's orders. Pagination walks `orderItems` and collapses to one row per
- * order so a multi-line order does not flood the desk.
+ * order, scanning ahead so multi-line orders don't underfill the page.
  */
 export const list = query({
   args: {
@@ -136,35 +132,51 @@ export const list = query({
   returns: paginationResultValidator(vVendorOrderListItem),
   handler: async (ctx, { lineStatus, paginationOpts }) => {
     const { vendor } = await requireVendor(ctx);
-    const result = lineStatus
-      ? await ctx.db
-          .query("orderItems")
-          .withIndex("by_vendorId_and_lineStatus_and_createdAt", (q) =>
-            q.eq("vendorId", vendor._id).eq("lineStatus", lineStatus),
-          )
-          .order("desc")
-          .paginate(paginationOpts)
-      : await ctx.db
-          .query("orderItems")
-          .withIndex("by_vendorId_and_createdAt", (q) => q.eq("vendorId", vendor._id))
-          .order("desc")
-          .paginate(paginationOpts);
-
-    const seen = new Set<Id<"orders">>();
+    const openReturnIds = await requestedReturnItemIds(ctx, vendor._id);
+    const target = paginationOpts.numItems;
     const page = [];
-    for (const item of result.page) {
-      if (!item.vendorId || seen.has(item.orderId)) continue;
-      seen.add(item.orderId);
-      const order = await ctx.db.get(item.orderId);
-      if (!order) continue;
-      const items = await vendorOrderItems(ctx, order._id, vendor._id);
-      const filtered = lineStatus
-        ? items.filter((row) => lineStatusOf(row) === lineStatus)
-        : items;
-      if (filtered.length === 0) continue;
-      page.push(await toListItem(ctx, vendor._id, order, items));
+    const seen = new Set<Id<"orders">>();
+    let cursor = paginationOpts.cursor;
+    let isDone = false;
+    let continueCursor = cursor ?? "";
+    let scans = 0;
+
+    while (page.length < target && !isDone && scans < 8) {
+      scans += 1;
+      const batchSize = Math.min(Math.max(target * 2, target), 100);
+      const result = lineStatus
+        ? await ctx.db
+            .query("orderItems")
+            .withIndex("by_vendorId_and_lineStatus_and_createdAt", (q) =>
+              q.eq("vendorId", vendor._id).eq("lineStatus", lineStatus),
+            )
+            .order("desc")
+            .paginate({ numItems: batchSize, cursor })
+        : await ctx.db
+            .query("orderItems")
+            .withIndex("by_vendorId_and_createdAt", (q) => q.eq("vendorId", vendor._id))
+            .order("desc")
+            .paginate({ numItems: batchSize, cursor });
+
+      for (const item of result.page) {
+        if (page.length >= target) break;
+        if (!item.vendorId || seen.has(item.orderId)) continue;
+        seen.add(item.orderId);
+        const order = await ctx.db.get(item.orderId);
+        if (!order) continue;
+        const items = await vendorOrderItems(ctx, order._id, vendor._id);
+        const filtered = lineStatus
+          ? items.filter((row) => lineStatusOf(row) === lineStatus)
+          : items;
+        if (filtered.length === 0) continue;
+        page.push(toListItem(order, items, openReturnIds));
+      }
+      isDone = result.isDone;
+      continueCursor = result.continueCursor;
+      cursor = result.continueCursor;
     }
-    return { ...result, page };
+
+    return { page, isDone, continueCursor };
   },
 });
 

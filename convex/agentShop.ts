@@ -7,7 +7,7 @@ import { action } from "./_generated/server";
 import { vShopSearchHit, type ShopSearchHit } from "./model/shopLooks";
 
 /**
- * Vector-search AI-recommended catalog products for the stylist.
+ * Hybrid search for the stylist: vector similarity + product `search_text`.
  * Eligibility (aiRecommend, active, vendorSellable, presentation) is applied when hydrating hits.
  */
 export const searchShop = action({
@@ -21,6 +21,7 @@ export const searchShop = action({
   returns: v.array(vShopSearchHit),
   handler: async (ctx, args): Promise<ShopSearchHit[]> => {
     const limit = Math.min(Math.max(args.limit ?? 16, 1), 24);
+    const auth = { serviceKey: args.serviceKey, authId: args.authId };
     const embedding = (await ctx.runAction(internal.ai.productEmbed.embedQuery, {
       text: args.query,
     })) as number[];
@@ -29,12 +30,30 @@ export const searchShop = action({
       limit: Math.min(limit * 2, 48),
     })) as Array<{ _id: Id<"productEmbeddings">; _score: number }>;
     const hits = matches.map((match) => ({ embeddingId: match._id, score: match._score }));
-    return (await ctx.runQuery(internal.productEmbeddings.hydrateShopHits, {
-      serviceKey: args.serviceKey,
-      authId: args.authId,
-      hits,
-      limit,
-      maxPriceInr: args.maxPriceInr,
-    })) as ShopSearchHit[];
+
+    const [vectorHits, textHits] = await Promise.all([
+      ctx.runQuery(internal.productEmbeddings.hydrateShopHits, {
+        ...auth,
+        hits,
+        limit,
+        maxPriceInr: args.maxPriceInr,
+      }) as Promise<ShopSearchHit[]>,
+      ctx.runQuery(internal.productEmbeddings.searchShopText, {
+        ...auth,
+        query: args.query,
+        limit,
+        maxPriceInr: args.maxPriceInr,
+      }) as Promise<ShopSearchHit[]>,
+    ]);
+
+    const byProduct = new Map<string, ShopSearchHit>();
+    for (const hit of vectorHits) byProduct.set(hit.productId, hit);
+    for (const hit of textHits) {
+      const existing = byProduct.get(hit.productId);
+      if (!existing || hit.score > existing.score) byProduct.set(hit.productId, hit);
+    }
+    return [...byProduct.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   },
 });

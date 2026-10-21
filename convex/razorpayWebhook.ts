@@ -86,8 +86,10 @@ export const dispatch = internalMutation({
             : event === "account.rejected"
               ? ("rejected" as const)
               : ("pending" as const);
-        const vendors = await ctx.db.query("vendors").take(500);
-        const match = vendors.find((row) => row.payoutAccountId === accountId);
+        const match = await ctx.db
+          .query("vendors")
+          .withIndex("by_payoutAccountId", (q) => q.eq("payoutAccountId", accountId))
+          .unique();
         if (match) {
           await ctx.db.patch(match._id, { payoutStatus: status, updatedAt: Date.now() });
         }

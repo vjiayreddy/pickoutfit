@@ -75,7 +75,11 @@ export function VendorCollections() {
 function CollectionDialog({ collection, onClose }: { collection: CollectionView | null; onClose: () => void }) {
   const create = useMutation(api.vendorCollections.create);
   const update = useMutation(api.vendorCollections.update);
-  const products = useQuery(api.vendorProducts.list, { paginationOpts: { numItems: 200, cursor: null } });
+  const [productQuery, setProductQuery] = useState("");
+  const products = useQuery(api.vendorProducts.pickerSearch, {
+    q: productQuery.trim() || undefined,
+    limit: 60,
+  });
   const { upload, isUploading } = useUpload("vendor");
   const [name, setName] = useState(collection?.name ?? "");
   const [description, setDescription] = useState(collection?.description ?? "");
@@ -150,8 +154,15 @@ function CollectionDialog({ collection, onClose }: { collection: CollectionView 
           </Field>
           <div className="space-y-2">
             <p className="text-sm font-medium">Products ({productIds.length})</p>
+            <Input
+              value={productQuery}
+              onChange={(e) => setProductQuery(e.target.value)}
+              placeholder="Search products…"
+              className="h-10 rounded-none text-sm"
+              aria-label="Search products"
+            />
             <ul className="max-h-56 space-y-1 overflow-y-auto border border-hairline p-2">
-              {products?.page.map((product) => {
+              {(products ?? []).map((product) => {
                 const on = productIds.includes(product.id);
                 return (
                   <li key={product.id}>
@@ -169,7 +180,11 @@ function CollectionDialog({ collection, onClose }: { collection: CollectionView 
                   </li>
                 );
               })}
-              {products && products.page.length === 0 ? <li className="p-2 text-sm text-mute">Add products first.</li> : null}
+              {products && products.length === 0 ? (
+                <li className="p-2 text-sm text-mute">
+                  {productQuery.trim() ? "No products match that search." : "Add products first."}
+                </li>
+              ) : null}
             </ul>
           </div>
           <DialogFooter>

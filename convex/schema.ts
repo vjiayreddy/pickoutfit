@@ -97,6 +97,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_authId", ["authId"])
+    .index("by_email", ["email"])
     .index("by_createdAt", ["createdAt"])
     .index("by_role", ["role"]),
 
@@ -137,6 +138,7 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_planStatus_and_planPeriodEnd", ["planStatus", "planPeriodEnd"])
     .index("by_razorpaySubscriptionId", ["razorpaySubscriptionId"])
+    .index("by_payoutAccountId", ["payoutAccountId"])
     .index("by_createdAt", ["createdAt"]),
 
   vendorMembers: defineTable({
@@ -949,7 +951,8 @@ export default defineSchema({
     .index("by_vendorId_and_lineStatus_and_createdAt", ["vendorId", "lineStatus", "createdAt"]),
 
   /**
-   * Cart snapshot waiting for Razorpay capture. Stock is reserved only after payment.
+   * Cart snapshot waiting for Razorpay capture.
+   * Stock is held when the intent is created (`stockReserved`) and released on expire/fail.
    */
   checkoutIntents: defineTable({
     userId: v.id("users"),
@@ -989,6 +992,8 @@ export default defineSchema({
       ),
     ),
     droppedNames: v.array(v.string()),
+    /** True when variant stock was decremented for this open intent. */
+    stockReserved: v.optional(v.boolean()),
     orderId: v.optional(v.id("orders")),
     razorpayPaymentId: v.optional(v.string()),
     expiresAt: v.number(),

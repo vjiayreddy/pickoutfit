@@ -164,11 +164,36 @@ export async function listDueSettlements(ctx: MutationCtx, now: number, limit = 
     .take(limit);
 }
 
+/**
+ * Re-open settlements stuck in `transferring` with no Razorpay transfer id
+ * (claim succeeded, external call never recorded). Rows that already have a
+ * transfer id are left for webhook reconcile.
+ */
+export async function reclaimStuckTransferring(ctx: MutationCtx, limit = 50) {
+  const rows = await ctx.db
+    .query("vendorSettlements")
+    .withIndex("by_status_and_availableAt", (q) => q.eq("status", "transferring"))
+    .take(limit);
+  let reclaimed = 0;
+  for (const row of rows) {
+    if (row.razorpayTransferId) continue;
+    await ctx.db.patch(row._id, { status: "pending", failureReason: undefined });
+    reclaimed += 1;
+  }
+  return reclaimed;
+}
+
 export async function markSettlementTransferring(
   ctx: MutationCtx,
   settlementId: Id<"vendorSettlements">,
   transferId: string,
 ) {
+  const row = await ctx.db.get(settlementId);
+  if (!row) throw appError("NOT_FOUND", "Settlement not found.");
+  // Already claimed in claimDue; attach the Razorpay id. Refuse if paid/held.
+  if (row.status === "paid" || row.status === "held") {
+    throw appError("CONFLICT", "Settlement is no longer transferable.");
+  }
   await ctx.db.patch(settlementId, {
     status: "transferring",
     razorpayTransferId: transferId,

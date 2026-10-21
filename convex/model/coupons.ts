@@ -392,11 +392,18 @@ export async function redeemCouponsOnOrder(
   const now = Date.now();
   for (const coupon of args.coupons) {
     const discount = await ctx.db.get(coupon.discountId);
-    if (discount) {
-      await ctx.db.patch(discount._id, {
-        usedCount: discount.usedCount + 1,
-        updatedAt: now,
-      });
+    // Re-check limits at redeem time (OCC retries on concurrent usedCount bumps).
+    // Always write an audit row for the paid snapshot; only bump usedCount when still live.
+    if (discount && isCouponLive(discount, now)) {
+      const perUserOk =
+        discount.maxUsesPerUser === undefined ||
+        (await userRedemptionCount(ctx, args.userId, discount._id)) < discount.maxUsesPerUser;
+      if (perUserOk) {
+        await ctx.db.patch(discount._id, {
+          usedCount: discount.usedCount + 1,
+          updatedAt: now,
+        });
+      }
     }
     await ctx.db.insert("couponRedemptions", {
       discountId: coupon.discountId,

@@ -17,7 +17,12 @@ import {
   redeemCouponsOnOrder,
   type AppliedCouponSnapshot,
 } from "./coupons";
-import { pricedUnitInr } from "./offers";
+import {
+  isAutoOfferLive,
+  loadLiveAutoOffers,
+  pickOfferForProduct,
+  pricedUnitInr,
+} from "./offers";
 import {
   adjustStock,
   cartLines,
@@ -423,6 +428,64 @@ export async function prepareCheckout(
   };
 }
 
+async function reserveCheckoutStock(
+  ctx: MutationCtx,
+  lines: CheckoutLineSnapshot[],
+): Promise<void> {
+  for (const line of lines) {
+    const vendor = await ctx.db.get(line.vendorId);
+    if (!vendor) throw appError("NOT_FOUND", "A store on this order no longer exists.");
+    await adjustStock(ctx, vendor, line.variantId, -line.quantity, "order_reserve");
+  }
+}
+
+async function releaseCheckoutStock(
+  ctx: MutationCtx,
+  lines: CheckoutLineSnapshot[],
+): Promise<void> {
+  for (const line of lines) {
+    const vendor = await ctx.db.get(line.vendorId);
+    if (!vendor) continue;
+    const variant = await ctx.db.get(line.variantId);
+    if (!variant || variant.vendorId !== vendor._id) continue;
+    await adjustStock(ctx, vendor, line.variantId, line.quantity, "order_cancel");
+  }
+}
+
+/** Bump usedCount once per auto offer that applied to any line on this order. */
+async function recordAutoOfferUses(
+  ctx: MutationCtx,
+  lines: CheckoutLineSnapshot[],
+  now: number,
+): Promise<void> {
+  const seen = new Set<Id<"discounts">>();
+  for (const line of lines) {
+    const product = await ctx.db.get(line.productId);
+    if (!product?.vendorId) continue;
+    const variant = await ctx.db.get(line.variantId);
+    const baseList = variant?.priceInr ?? product.priceInr;
+    const offers = await loadLiveAutoOffers(ctx, product.vendorId, now);
+    const offer = await pickOfferForProduct(
+      ctx,
+      {
+        _id: product._id,
+        category: product.category,
+        attributes: product.attributes,
+      },
+      offers,
+      baseList,
+    );
+    if (!offer || seen.has(offer._id)) continue;
+    seen.add(offer._id);
+    const fresh = await ctx.db.get(offer._id);
+    if (!fresh || !isAutoOfferLive(fresh, now)) continue;
+    await ctx.db.patch(fresh._id, {
+      usedCount: fresh.usedCount + 1,
+      updatedAt: now,
+    });
+  }
+}
+
 export async function insertCheckoutIntent(
   ctx: MutationCtx,
   user: Doc<"users">,
@@ -436,6 +499,9 @@ export async function insertCheckoutIntent(
     couponSavingsInr?: number;
   },
 ) {
+  // Hold stock before the shopper pays so capture cannot land on an empty shelf.
+  // (Mutation rollback undoes the hold if insert fails.)
+  await reserveCheckoutStock(ctx, args.lines);
   const now = Date.now();
   return ctx.db.insert("checkoutIntents", {
     userId: user._id,
@@ -447,6 +513,7 @@ export async function insertCheckoutIntent(
     ...(args.coupons && args.coupons.length > 0 ? { coupons: args.coupons } : {}),
     ...(args.couponSavingsInr ? { couponSavingsInr: args.couponSavingsInr } : {}),
     droppedNames: args.droppedNames,
+    stockReserved: true,
     expiresAt: now + CHECKOUT_INTENT_TTL_MS,
     createdAt: now,
   });
@@ -465,6 +532,7 @@ async function writeOrderFromLines(
   },
   coupons: AppliedCouponSnapshot[] = [],
   couponSavingsInr = 0,
+  opts: { stockAlreadyReserved?: boolean } = {},
 ) {
   const now = Date.now();
   const totalInr = lines.reduce((sum, row) => sum + row.priceInr * row.quantity, 0);
@@ -485,12 +553,14 @@ async function writeOrderFromLines(
   for (const line of lines) {
     const vendor = await ctx.db.get(line.vendorId);
     if (!vendor) throw appError("NOT_FOUND", "A store on this order no longer exists.");
-    const variant = await ctx.db.get(line.variantId);
-    if (!variant || variant.stock < line.quantity) {
-      throw appError(
-        "CONFLICT",
-        `"${line.name}" is no longer available in the quantity you selected.`,
-      );
+    if (!opts.stockAlreadyReserved) {
+      const variant = await ctx.db.get(line.variantId);
+      if (!variant || variant.stock < line.quantity) {
+        throw appError(
+          "CONFLICT",
+          `"${line.name}" is no longer available in the quantity you selected.`,
+        );
+      }
     }
     const orderItemId = await ctx.db.insert("orderItems", {
       orderId,
@@ -507,10 +577,13 @@ async function writeOrderFromLines(
       lineStatus: "placed",
       createdAt: now,
     });
-    await adjustStock(ctx, vendor, line.variantId, -line.quantity, "order_reserve", {
-      orderItemId,
-    });
+    if (!opts.stockAlreadyReserved) {
+      await adjustStock(ctx, vendor, line.variantId, -line.quantity, "order_reserve", {
+        orderItemId,
+      });
+    }
   }
+  await recordAutoOfferUses(ctx, lines, now);
   return orderId;
 }
 
@@ -547,6 +620,13 @@ export async function fulfillCheckoutIntent(
   };
   const coupons = intent.coupons ?? [];
   const couponSavingsInr = intent.couponSavingsInr ?? 0;
+  // Legacy open intents (pre-hold) reserve now so capture cannot outrun stock.
+  let stockAlreadyReserved = intent.stockReserved === true;
+  if (!stockAlreadyReserved) {
+    await reserveCheckoutStock(ctx, intent.lines);
+    await ctx.db.patch(intent._id, { stockReserved: true });
+    stockAlreadyReserved = true;
+  }
   const orderId = await writeOrderFromLines(
     ctx,
     user,
@@ -560,6 +640,7 @@ export async function fulfillCheckoutIntent(
     },
     coupons,
     couponSavingsInr,
+    { stockAlreadyReserved },
   );
 
   if (coupons.length > 0) {
@@ -581,6 +662,7 @@ export async function fulfillCheckoutIntent(
     status: "paid",
     orderId,
     razorpayPaymentId,
+    stockReserved: false,
   });
   return { orderId, droppedNames: intent.droppedNames };
 }
@@ -639,7 +721,10 @@ export async function expireOpenCheckoutIntents(ctx: MutationCtx) {
     .withIndex("by_status_and_expiresAt", (q) => q.eq("status", "open").lte("expiresAt", now))
     .take(50);
   for (const intent of due) {
-    await ctx.db.patch(intent._id, { status: "expired" });
+    if (intent.stockReserved) {
+      await releaseCheckoutStock(ctx, intent.lines);
+    }
+    await ctx.db.patch(intent._id, { status: "expired", stockReserved: false });
   }
   return due.length;
 }

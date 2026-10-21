@@ -17,6 +17,14 @@ crons.interval(
   {},
 );
 
+/** Retry settlements claimed for transfer but never given a Razorpay id. */
+crons.interval(
+  "reclaim stuck vendor settlements",
+  { hours: 1 },
+  internal.vendorSettlements.reclaimStuck,
+  {},
+);
+
 /** Cancel past_due vendor plans after grace days. */
 crons.interval("expire past due vendor plans", { hours: 24 }, internal.vendorBilling.expirePastDue, {});
 

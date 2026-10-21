@@ -658,6 +658,17 @@ export const vVendorCartListView = v.object({
   shoppers: v.array(vVendorCartShopperView),
   shopperCount: v.number(),
   lineCount: v.number(),
+  /** True when the line scan hit the desk cap (counts may be incomplete). */
+  capped: v.boolean(),
+});
+
+/** Compact product row for discount/collection pickers. */
+export const vVendorProductPickerItem = v.object({
+  id: v.id("products"),
+  name: v.string(),
+  priceInr: v.number(),
+  imageUrl: v.union(v.string(), v.null()),
+  status: vProductStatus,
 });
 
 export const vOrderItemView = v.object({

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { internalMutation, internalQuery } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import { internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
 import { requireServiceUser } from "./lib/auth";
 import {
   deleteProductEmbedding,
@@ -14,7 +15,7 @@ import {
   vendorFor,
   type VendorCache,
 } from "./model/products";
-import { slotHintForProduct, vShopSearchHit } from "./model/shopLooks";
+import { slotHintForProduct, vShopSearchHit, type ShopSearchHit } from "./model/shopLooks";
 import { vendorSellable } from "./shared/vendors";
 
 export const productForEmbed = internalQuery({
@@ -67,6 +68,42 @@ export const saveEmbedding = internalMutation({
   },
 });
 
+async function toShopSearchHit(
+  ctx: QueryCtx,
+  user: Doc<"users">,
+  product: Doc<"products">,
+  score: number,
+  maxPriceInr: number | undefined,
+  cache: VendorCache,
+  avoid: Set<string>,
+): Promise<ShopSearchHit | null> {
+  if (!product.aiRecommend || !isProductActive(product)) return null;
+  const vendor = await vendorFor(ctx, product.vendorId, cache);
+  if (!vendor || !vendorSellable(vendor)) return null;
+  if (user.prefs.presentation !== "neutral") {
+    if (product.presentation !== user.prefs.presentation && product.presentation !== "neutral") {
+      return null;
+    }
+  }
+  const colours = [product.colours?.primary, ...(product.colours?.secondary ?? [])].filter(
+    (c): c is string => Boolean(c?.trim()),
+  );
+  if (avoid.size > 0 && colours.some((c) => avoid.has(c.toLowerCase()))) return null;
+  const priceInr = await pricedUnitInr(ctx, product, null);
+  if (maxPriceInr !== undefined && priceInr > maxPriceInr) return null;
+  return {
+    productId: product._id,
+    name: product.name,
+    slot: slotHintForProduct(product),
+    category: product.category,
+    colours,
+    priceInr,
+    vendorName: vendor.name,
+    imageUrl: await coverUrl(ctx, product),
+    score,
+  };
+}
+
 /** Turn vector hits into sellable shop cards for the stylist. */
 export const hydrateShopHits = internalQuery({
   args: {
@@ -81,36 +118,56 @@ export const hydrateShopHits = internalQuery({
     const user = await requireServiceUser(ctx, args);
     const avoid = new Set(user.prefs.avoidColours.map((c) => c.trim().toLowerCase()).filter(Boolean));
     const cache: VendorCache = new Map();
-    const out = [];
+    const out: ShopSearchHit[] = [];
 
     for (const hit of args.hits) {
       if (out.length >= args.limit) break;
       const row = await ctx.db.get(hit.embeddingId);
       if (!row) continue;
       const product = await ctx.db.get(row.productId);
-      if (!product || !product.aiRecommend || !isProductActive(product)) continue;
-      const vendor = await vendorFor(ctx, product.vendorId, cache);
-      if (!vendor || !vendorSellable(vendor)) continue;
-      if (user.prefs.presentation !== "neutral") {
-        if (product.presentation !== user.prefs.presentation && product.presentation !== "neutral") continue;
-      }
-      const colours = [product.colours?.primary, ...(product.colours?.secondary ?? [])].filter(
-        (c): c is string => Boolean(c?.trim()),
+      if (!product) continue;
+      const card = await toShopSearchHit(
+        ctx,
+        user,
+        product,
+        hit.score,
+        args.maxPriceInr,
+        cache,
+        avoid,
       );
-      if (avoid.size > 0 && colours.some((c) => avoid.has(c.toLowerCase()))) continue;
-      const priceInr = await pricedUnitInr(ctx, product, null);
-      if (args.maxPriceInr !== undefined && priceInr > args.maxPriceInr) continue;
-      out.push({
-        productId: product._id,
-        name: product.name,
-        slot: slotHintForProduct(product),
-        category: product.category,
-        colours,
-        priceInr,
-        vendorName: vendor.name,
-        imageUrl: await coverUrl(ctx, product),
-        score: hit.score,
-      });
+      if (card) out.push(card);
+    }
+    return out;
+  },
+});
+
+/** Full-text catalog search for the stylist (complements vector search). */
+export const searchShopText = internalQuery({
+  args: {
+    serviceKey: v.string(),
+    authId: v.string(),
+    query: v.string(),
+    limit: v.number(),
+    maxPriceInr: v.optional(v.number()),
+  },
+  returns: v.array(vShopSearchHit),
+  handler: async (ctx, args) => {
+    const user = await requireServiceUser(ctx, args);
+    const term = args.query.trim().toLowerCase();
+    if (!term) return [];
+    const avoid = new Set(user.prefs.avoidColours.map((c) => c.trim().toLowerCase()).filter(Boolean));
+    const cache: VendorCache = new Map();
+    const rows = await ctx.db
+      .query("products")
+      .withSearchIndex("search_text", (q) => q.search("searchText", term).eq("status", "active"))
+      .take(Math.min(Math.max(args.limit * 2, args.limit), 48));
+
+    const out: ShopSearchHit[] = [];
+    for (const product of rows) {
+      if (out.length >= args.limit) break;
+      // Text hits score below typical vector cosine so vectors win on merge ties.
+      const card = await toShopSearchHit(ctx, user, product, 0.35, args.maxPriceInr, cache, avoid);
+      if (card) out.push(card);
     }
     return out;
   },

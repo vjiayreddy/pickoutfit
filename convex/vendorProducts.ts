@@ -5,6 +5,7 @@ import { assertVendorWritable, requireVendor } from "./lib/auth";
 import {
   adjustStock,
   archiveProduct,
+  coverUrl,
   createProduct,
   discardUnusedProductImage,
   publishProduct,
@@ -30,6 +31,7 @@ import {
   vProductStatus,
   vProductView,
   vVariantInput,
+  vVendorProductPickerItem,
 } from "./shared/products";
 import { vColours, vFit, vFormality, vPresentation, vSeason } from "./shared/validators";
 
@@ -79,46 +81,82 @@ export const list = query({
   returns: paginationResultValidator(vProductView),
   handler: async (ctx, { status, categoryPath, attributeIds, paginationOpts }) => {
     const { vendor } = await requireVendor(ctx);
-    const result = status
-      ? await ctx.db
-          .query("products")
-          .withIndex("by_vendorId_and_status", (q) => q.eq("vendorId", vendor._id).eq("status", status))
-          .order("desc")
-          .paginate(paginationOpts)
-      : await ctx.db
-          .query("products")
-          .withIndex("by_vendorId_and_status", (q) => q.eq("vendorId", vendor._id))
-          .order("desc")
-          .paginate(paginationOpts);
-
-    const page = await toProductViews(ctx, result.page);
     const filterPath = categoryPath?.trim() ?? "";
     const ids = attributeIds ?? [];
-    if (!filterPath && ids.length === 0) {
-      return { ...result, page };
-    }
+    const needsFilter = Boolean(filterPath) || ids.length > 0;
 
     const typeById = new Map<string, string>();
-    for (const id of ids) {
-      const row = await ctx.db.get(id);
-      if (row && row.vendorId === vendor._id) {
-        typeById.set(row._id, row.attributeTypeId);
+    if (needsFilter) {
+      for (const id of ids) {
+        const row = await ctx.db.get(id);
+        if (row && row.vendorId === vendor._id) {
+          typeById.set(row._id, row.attributeTypeId);
+        }
       }
     }
     const selectedByType = groupAttributeIdsByType(ids, typeById);
-    const filtered = page.filter((product) =>
-      productMatchesFilters(
-        {
-          categoryPath: product.categoryPath,
-          variants: product.variants.map((variant) => ({
-            active: variant.active,
-            attributeIds: variant.attributeIds,
-          })),
-        },
-        { categoryPath: filterPath || null, selectedByType },
-      ),
-    );
-    return { ...result, page: filtered };
+
+    // When filtering in JS, keep walking pages until we fill numItems (or run out),
+    // so clients don't see sparse / empty pages mid-catalog.
+    const target = paginationOpts.numItems;
+    const maxScans = needsFilter ? 8 : 1;
+    const matched = [];
+    let cursor = paginationOpts.cursor;
+    let isDone = false;
+    let continueCursor = cursor ?? "";
+    let scans = 0;
+
+    while (matched.length < target && !isDone && scans < maxScans) {
+      scans += 1;
+      const batchSize = needsFilter
+        ? Math.min(Math.max(target * 2, target), 100)
+        : target;
+      const result = status
+        ? await ctx.db
+            .query("products")
+            .withIndex("by_vendorId_and_status", (q) =>
+              q.eq("vendorId", vendor._id).eq("status", status),
+            )
+            .order("desc")
+            .paginate({ numItems: batchSize, cursor })
+        : await ctx.db
+            .query("products")
+            .withIndex("by_vendorId_and_status", (q) => q.eq("vendorId", vendor._id))
+            .order("desc")
+            .paginate({ numItems: batchSize, cursor });
+
+      const page = await toProductViews(ctx, result.page);
+      for (const product of page) {
+        if (matched.length >= target) break;
+        if (!needsFilter) {
+          matched.push(product);
+          continue;
+        }
+        if (
+          productMatchesFilters(
+            {
+              categoryPath: product.categoryPath,
+              variants: product.variants.map((variant) => ({
+                active: variant.active,
+                attributeIds: variant.attributeIds,
+              })),
+            },
+            { categoryPath: filterPath || null, selectedByType },
+          )
+        ) {
+          matched.push(product);
+        }
+      }
+      isDone = result.isDone;
+      continueCursor = result.continueCursor;
+      cursor = result.continueCursor;
+    }
+
+    return {
+      page: matched,
+      isDone,
+      continueCursor,
+    };
   },
 });
 
@@ -148,6 +186,51 @@ export const get = query({
     const { vendor } = await requireVendor(ctx);
     const product = await requireVendorProduct(ctx, vendor, productId);
     return toProductView(ctx, product, new Map([[vendor._id, vendor]]));
+  },
+});
+
+/**
+ * Compact product rows for discount/collection pickers.
+ * Empty `q` → recent products; otherwise full-text search within this store.
+ */
+export const pickerSearch = query({
+  args: {
+    q: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(vVendorProductPickerItem),
+  handler: async (ctx, { q: rawQuery, limit }) => {
+    const { vendor } = await requireVendor(ctx);
+    const cap = Math.min(Math.max(limit ?? 40, 1), 80);
+    const term = rawQuery?.trim().toLowerCase() ?? "";
+    const rows =
+      term.length > 0
+        ? await ctx.db
+            .query("products")
+            .withSearchIndex("search_text", (search) =>
+              search.search("searchText", term).eq("vendorId", vendor._id),
+            )
+            .take(cap)
+        : await ctx.db
+            .query("products")
+            .withIndex("by_vendorId_and_status", (idx) => idx.eq("vendorId", vendor._id))
+            .order("desc")
+            .take(cap);
+
+    const out = [];
+    for (const product of rows) {
+      if (product.vendorId !== vendor._id) continue;
+      if (product.status === "archived") continue;
+      out.push({
+        id: product._id,
+        name: product.name,
+        priceInr: product.priceInr,
+        imageUrl: await coverUrl(ctx, product),
+        status: product.status ?? (product.active ? ("active" as const) : ("draft" as const)),
+      });
+      if (out.length >= cap) break;
+    }
+    return out;
   },
 });
 
@@ -230,8 +313,9 @@ export const discardImage = mutation({
   args: { storageId: v.id("_storage") },
   returns: v.null(),
   handler: async (ctx, { storageId }) => {
-    await requireVendor(ctx);
-    await discardUnusedProductImage(ctx, storageId);
+    const { vendor } = await requireVendor(ctx);
+    assertVendorWritable(vendor);
+    await discardUnusedProductImage(ctx, storageId, vendor);
     return null;
   },
 });

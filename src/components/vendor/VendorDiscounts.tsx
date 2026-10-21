@@ -435,22 +435,20 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
   const create = useMutation(api.vendorDiscounts.create);
   const update = useMutation(api.vendorDiscounts.update);
   const collections = useQuery(api.vendorCollections.list, {});
-  const products = useQuery(api.vendorProducts.list, { paginationOpts: { numItems: 100, cursor: null } });
   const [form, setForm] = useState<Form>(discount ? fromView(discount) : emptyForm());
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [productQuery, setProductQuery] = useState("");
+  const products = useQuery(api.vendorProducts.pickerSearch, {
+    q: productQuery.trim() || undefined,
+    limit: 40,
+  });
   const set = <K extends keyof Form>(key: K, value: Form[K]) => {
     setError(null);
     setForm((f) => ({ ...f, [key]: value }));
   };
 
-  const filteredProducts = useMemo(() => {
-    const rows = products?.page ?? [];
-    const q = productQuery.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((product) => product.name.toLowerCase().includes(q));
-  }, [products, productQuery]);
+  const filteredProducts = products ?? [];
 
   function validate(): string | null {
     if (!form.name.trim()) return "Give this discount a name.";
@@ -757,7 +755,7 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
                   </div>
                   <p className="text-xs text-mute">
                     {form.productIds.length} selected
-                    {products?.page.length ? ` · ${products.page.length} shown` : null}
+                    {filteredProducts.length ? ` · ${filteredProducts.length} shown` : null}
                   </p>
                   <ul className="max-h-48 divide-y divide-hairline overflow-y-auto border border-hairline">
                     {filteredProducts.map((product) => {
@@ -786,11 +784,10 @@ function DiscountDialog({ discount, onClose }: { discount: DiscountView | null; 
                         </li>
                       );
                     })}
-                    {products && products.page.length === 0 ? (
-                      <li className="px-3 py-4 text-sm text-mute">No products yet.</li>
-                    ) : null}
-                    {products && products.page.length > 0 && filteredProducts.length === 0 ? (
-                      <li className="px-3 py-4 text-sm text-mute">No products match that search.</li>
+                    {products && products.length === 0 ? (
+                      <li className="px-3 py-4 text-sm text-mute">
+                        {productQuery.trim() ? "No products match that search." : "No products yet."}
+                      </li>
                     ) : null}
                   </ul>
                 </div>

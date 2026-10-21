@@ -37,7 +37,7 @@ export async function seedUser(
   const userId = await t.run(async (ctx) =>
     ctx.db.insert("users", {
       authId,
-      email: overrides.email ?? `user${counter}@example.com`,
+      email: (overrides.email ?? `user${counter}@example.com`).trim().toLowerCase(),
       name: `User ${counter}`,
       role: overrides.role ?? "user",
       plan: "free",

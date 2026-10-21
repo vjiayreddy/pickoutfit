@@ -20,6 +20,8 @@ const CHECKOUT = {
   pincode: "560001",
 };
 
+const PAGE = { paginationOpts: { numItems: 20, cursor: null } };
+
 async function activeStore(t: Harness, profile = VENDOR_PROFILE) {
   const owner = await seedUser(t);
   const vendorId = await asUser(t, owner).mutation(api.vendors.register, profile);
@@ -49,19 +51,18 @@ describe("vendor carts", () => {
 
     await asUser(t, shopper).mutation(api.cart.add, { productId, quantity: 2, addedFrom: "store" });
 
-    const list = await asUser(t, owner).query(api.vendorCarts.list, {});
-    expect(list.shopperCount).toBe(1);
-    expect(list.lineCount).toBe(1);
-    expect(list.shoppers[0].email).toBe("buyer@example.com");
-    expect(list.shoppers[0].phone).toBeNull();
-    expect(list.shoppers[0].lines).toHaveLength(1);
-    expect(list.shoppers[0].lines[0].name).toBe("Linen Overshirt");
-    expect(list.shoppers[0].lines[0].quantity).toBe(2);
-    expect(list.shoppers[0].lines[0].addedFrom).toBe("store");
-    expect(list.shoppers[0].itemCount).toBe(2);
+    const list = await asUser(t, owner).query(api.vendorCarts.list, PAGE);
+    expect(list.page).toHaveLength(1);
+    expect(list.page[0].email).toBe("buyer@example.com");
+    expect(list.page[0].phone).toBeNull();
+    expect(list.page[0].lines).toHaveLength(1);
+    expect(list.page[0].lines[0].name).toBe("Linen Overshirt");
+    expect(list.page[0].lines[0].quantity).toBe(2);
+    expect(list.page[0].lines[0].addedFrom).toBe("store");
+    expect(list.page[0].itemCount).toBe(2);
 
     const counts = await asUser(t, owner).query(api.vendorCarts.counts, {});
-    expect(counts).toEqual({ shoppers: 1, lines: 1 });
+    expect(counts).toEqual({ shoppers: 1, lines: 1, capped: false });
   });
 
   test("does not show another vendor's cart lines", async () => {
@@ -84,13 +85,13 @@ describe("vendor carts", () => {
     await asUser(t, shopper).mutation(api.cart.add, { productId: productA.productId, quantity: 1 });
     await asUser(t, shopper).mutation(api.cart.add, { productId: productB.productId, quantity: 1 });
 
-    const listA = await asUser(t, storeA.owner).query(api.vendorCarts.list, {});
-    const listB = await asUser(t, storeB.owner).query(api.vendorCarts.list, {});
+    const listA = await asUser(t, storeA.owner).query(api.vendorCarts.list, PAGE);
+    const listB = await asUser(t, storeB.owner).query(api.vendorCarts.list, PAGE);
 
-    expect(listA.shoppers).toHaveLength(1);
-    expect(listA.shoppers[0].lines.map((l) => l.name)).toEqual(["Brown Suit"]);
-    expect(listB.shoppers).toHaveLength(1);
-    expect(listB.shoppers[0].lines.map((l) => l.name)).toEqual(["White Shirt"]);
+    expect(listA.page).toHaveLength(1);
+    expect(listA.page[0].lines.map((l) => l.name)).toEqual(["Brown Suit"]);
+    expect(listB.page).toHaveLength(1);
+    expect(listB.page[0].lines.map((l) => l.name)).toEqual(["White Shirt"]);
   });
 
   test("attaches phone from a prior order and clears after checkout", async () => {
@@ -109,14 +110,16 @@ describe("vendor carts", () => {
 
     await asUser(t, shopper).mutation(api.cart.add, { productId: second.productId, quantity: 1 });
 
-    const list = await asUser(t, owner).query(api.vendorCarts.list, {});
-    expect(list.shopperCount).toBe(1);
-    expect(list.shoppers[0].phone).toBe("9876543210");
-    expect(list.shoppers[0].lines.map((l) => l.name)).toEqual(["Second Piece"]);
+    const list = await asUser(t, owner).query(api.vendorCarts.list, PAGE);
+    expect(list.page).toHaveLength(1);
+    expect(list.page[0].phone).toBe("9876543210");
+    expect(list.page[0].lines.map((l) => l.name)).toEqual(["Second Piece"]);
 
     await asUser(t, shopper).mutation(api.orders.checkout, CHECKOUT);
-    const after = await asUser(t, owner).query(api.vendorCarts.list, {});
-    expect(after.shopperCount).toBe(0);
-    expect(after.lineCount).toBe(0);
+    const after = await asUser(t, owner).query(api.vendorCarts.list, PAGE);
+    expect(after.page).toHaveLength(0);
+    const summary = await asUser(t, owner).query(api.vendorCarts.summary, {});
+    expect(summary.shopperCount).toBe(0);
+    expect(summary.lineCount).toBe(0);
   });
 });

@@ -235,4 +235,64 @@ describe("coupons", () => {
     expect(cart.lines[0]?.priceInr).toBe(2249);
     expect(cart.couponSavingsInr).toBe(0);
   });
+
+  test("auto offer usedCount increments on checkout and respects maxUses", async () => {
+    const t = harness();
+    const { owner } = await activeStore(t);
+    const productId = await publishProduct(t, owner);
+    const now = Date.now();
+
+    const discountId = await asUser(t, owner).mutation(api.vendorDiscounts.create, {
+      name: "Flash",
+      redemption: "auto",
+      kind: "percent",
+      value: 10,
+      scope: "all",
+      maxUses: 1,
+      startsAt: now - 1000,
+      active: true,
+    });
+
+    const shopper = await seedUser(t);
+    await asUser(t, shopper).mutation(api.cart.add, { productId, quantity: 1 });
+    await asUser(t, shopper).mutation(api.orders.checkout, CHECKOUT);
+
+    const afterFirst = (await t.run(async (ctx) => ctx.db.get(discountId))) as Doc<"discounts"> | null;
+    expect(afterFirst?.usedCount).toBe(1);
+
+    await asUser(t, shopper).mutation(api.cart.add, { productId, quantity: 1 });
+    const cart = await asUser(t, shopper).query(api.cart.current, {});
+    // Cap exhausted → list price again
+    expect(cart.lines[0]?.priceInr).toBe(2499);
+  });
+
+  test("global maxUses stops further redemptions at checkout apply", async () => {
+    const t = harness();
+    const { owner } = await activeStore(t);
+    const productId = await publishProduct(t, owner);
+    const now = Date.now();
+
+    await asUser(t, owner).mutation(api.vendorDiscounts.create, {
+      name: "One left",
+      redemption: "code",
+      code: "LAST1",
+      kind: "flat",
+      value: 100,
+      scope: "all",
+      maxUses: 1,
+      startsAt: now - 1000,
+      active: true,
+    });
+
+    const first = await seedUser(t, { email: "first@example.com" });
+    await asUser(t, first).mutation(api.cart.add, { productId, quantity: 1 });
+    await asUser(t, first).mutation(api.coupons.applyCode, { code: "LAST1" });
+    await asUser(t, first).mutation(api.orders.checkout, CHECKOUT);
+
+    const second = await seedUser(t, { email: "second@example.com" });
+    await asUser(t, second).mutation(api.cart.add, { productId, quantity: 1 });
+    await expect(
+      asUser(t, second).mutation(api.coupons.applyCode, { code: "LAST1" }),
+    ).rejects.toThrow(/valid|available/i);
+  });
 });

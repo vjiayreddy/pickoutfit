@@ -24,7 +24,7 @@ export const authComponent = createClient<DataModel>(components.betterAuth, {
         const signupCredits = PLANS.free.signupCredits;
         const userId = await ctx.db.insert("users", {
           authId: doc._id,
-          email: doc.email,
+          email: doc.email?.trim().toLowerCase() || undefined,
           name: doc.name,
           imageUrl: doc.image ?? undefined,
           role: "user",
@@ -62,7 +62,7 @@ export const authComponent = createClient<DataModel>(components.betterAuth, {
           .unique();
         if (!user) return;
         await ctx.db.patch(user._id, {
-          email: newDoc.email,
+          email: newDoc.email?.trim().toLowerCase() || undefined,
           name: newDoc.name,
           imageUrl: newDoc.image ?? undefined,
         });
