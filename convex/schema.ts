@@ -21,6 +21,7 @@ import {
   vShipmentStatus,
   vVariantColour,
 } from "./shared/products";
+import { vReviewStatus } from "./shared/reviews";
 import { vShopOffer } from "./shared/shop";
 import {
   vBeardGoal,
@@ -662,6 +663,10 @@ export default defineSchema({
     aiRecommend: v.optional(v.boolean()),
     soldCount: v.optional(v.number()),
     viewCount: v.optional(v.number()),
+    /** Visible reviews only; bumped with ratingSum on review write paths. */
+    reviewCount: v.optional(v.number()),
+    /** Sum of visible ratings; average = ratingSum / reviewCount. */
+    ratingSum: v.optional(v.number()),
     publishedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -988,6 +993,41 @@ export default defineSchema({
     .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
     .index("by_orderItemId", ["orderItemId"])
     .index("by_vendorId_and_status_and_createdAt", ["vendorId", "status", "createdAt"]),
+
+  /**
+   * Verified-purchase product reviews. Auto-published as `visible`; vendors may hide
+   * or leave a single official reply.
+   */
+  productReviews: defineTable({
+    productId: v.id("products"),
+    vendorId: v.id("vendors"),
+    userId: v.id("users"),
+    orderId: v.id("orders"),
+    orderItemId: v.optional(v.id("orderItems")),
+    rating: v.number(),
+    title: v.optional(v.string()),
+    body: v.string(),
+    imageStorageIds: v.optional(v.array(v.id("_storage"))),
+    status: vReviewStatus,
+    vendorReply: v.optional(v.string()),
+    vendorReplyAt: v.optional(v.number()),
+    vendorReplyByUserId: v.optional(v.id("users")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_productId_and_status_and_createdAt", [
+      "productId",
+      "status",
+      "createdAt",
+    ])
+    .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"])
+    .index("by_vendorId_and_status_and_createdAt", [
+      "vendorId",
+      "status",
+      "createdAt",
+    ])
+    .index("by_userId_and_productId", ["userId", "productId"])
+    .index("by_orderId", ["orderId"]),
 
   /** Running average duration per step prefix ("detect", "extract", "render") for ETAs. */
   stepStats: defineTable({

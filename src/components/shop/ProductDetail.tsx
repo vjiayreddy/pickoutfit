@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import { Package, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -13,6 +13,8 @@ import type { Slot } from "@convex/shared/wardrobe";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppHeaderTitle } from "@/components/layout/app-header";
 import { AddToTrialRoomSheet } from "@/components/shop/AddToTrialRoomSheet";
+import { ProductReviews } from "@/components/shop/ProductReviews";
+import { StarRatingDisplay } from "@/components/shop/StarRating";
 import { Button } from "@/components/ui/button";
 import { reportError } from "@/lib/client-errors";
 import { cn } from "@/lib/cn";
@@ -206,6 +208,15 @@ export function ProductDetail({
                 </span>
               ) : null}
             </p>
+            {product.reviewCount > 0 && product.ratingAverage !== null ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm text-mute">
+                <StarRatingDisplay value={product.ratingAverage} />
+                <span className="font-medium text-ink">{product.ratingAverage.toFixed(1)}</span>
+                <span>
+                  ({product.reviewCount} review{product.reviewCount === 1 ? "" : "s"})
+                </span>
+              </div>
+            ) : null}
             {product.offer ? (
               <p className="text-sm font-medium text-sale">
                 {product.offer.badge?.trim() ||
@@ -326,6 +337,15 @@ export function ProductDetail({
           ))}
         </section>
       ) : null}
+
+      <Suspense fallback={<div className="h-40 animate-pulse bg-soft-cloud" />}>
+        <ProductReviews
+          productId={product.id}
+          productName={product.name}
+          reviewCount={product.reviewCount}
+          ratingAverage={product.ratingAverage}
+        />
+      </Suspense>
 
       {look.length > 0 ? (
         <section className="space-y-4" aria-label="Shop the look">

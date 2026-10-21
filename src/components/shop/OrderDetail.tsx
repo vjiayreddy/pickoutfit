@@ -14,6 +14,7 @@ import { routes } from "@/lib/routes";
 
 export function OrderDetail({ orderId }: { orderId: Id<"orders"> }) {
   const order = useQuery(api.orders.getMine, { orderId });
+  const reviewActions = useQuery(api.reviews.actionsForOrder, { orderId });
 
   if (order === undefined) {
     return <div className="h-64 animate-pulse bg-soft-cloud" />;
@@ -66,8 +67,14 @@ export function OrderDetail({ orderId }: { orderId: Id<"orders"> }) {
         <ul className="divide-y divide-hairline border-y border-hairline">
           {order.items.map((item) => {
             const meta = [item.size, item.colour].filter(Boolean).join(" · ");
+            const action = reviewActions?.find((row) => row.orderItemId === item.id);
+            const canLink =
+              action &&
+              action.vendorSlug &&
+              action.productSlug &&
+              (action.eligible || action.existingReviewId);
             return (
-              <li key={item.id} className="space-y-1 py-4">
+              <li key={item.id} className="space-y-2 py-4">
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                   <p className="text-sm font-medium">
                     {item.quantity} × {item.name}
@@ -77,7 +84,17 @@ export function OrderDetail({ orderId }: { orderId: Id<"orders"> }) {
                   </p>
                 </div>
                 {meta ? <p className="text-xs text-mute">{meta}</p> : null}
-                <LineStatusBadge status={item.lineStatus} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <LineStatusBadge status={item.lineStatus} />
+                  {canLink ? (
+                    <Link
+                      href={`${routes.storeProduct(action.vendorSlug!, action.productSlug!)}?review=1`}
+                      className="text-xs font-medium text-ink underline decoration-hairline underline-offset-2"
+                    >
+                      {action.existingReviewId ? "Edit review" : "Write a review"}
+                    </Link>
+                  ) : null}
+                </div>
               </li>
             );
           })}

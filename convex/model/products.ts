@@ -523,6 +523,11 @@ export async function toProductView(
     sourceBbox: product.sourceBbox ?? null,
     ...(await productTryOnMeta(ctx, product)),
     soldCount: product.soldCount ?? 0,
+    reviewCount: product.reviewCount ?? 0,
+    ratingAverage:
+      (product.reviewCount ?? 0) > 0
+        ? Math.round(((product.ratingSum ?? 0) / (product.reviewCount ?? 1)) * 10) / 10
+        : null,
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };

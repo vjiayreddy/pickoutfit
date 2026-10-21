@@ -486,6 +486,9 @@ export const vProductView = v.object({
   /** Wardrobe slot this product fills when tried on; null when ineligible. */
   tryOnSlot: v.union(vSlot, v.null()),
   soldCount: v.number(),
+  reviewCount: v.number(),
+  /** Null when there are no visible reviews. */
+  ratingAverage: v.union(v.number(), v.null()),
   createdAt: v.number(),
   updatedAt: v.number(),
 });
