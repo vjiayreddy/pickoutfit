@@ -47,6 +47,15 @@ export type DiscountKind = (typeof DISCOUNT_KINDS)[number];
 export const DISCOUNT_SCOPES = ["all", "category", "collection", "products", "attribute"] as const;
 export type DiscountScope = (typeof DISCOUNT_SCOPES)[number];
 
+/**
+ * How a discount is redeemed:
+ * - auto — Amazon-style deal; applied in catalog/cart unit price
+ * - clip — Amazon-style coupon; shopper clips on PDP, then applied at checkout
+ * - code — promo code typed at cart/checkout
+ */
+export const DISCOUNT_REDEMPTIONS = ["auto", "clip", "code"] as const;
+export type DiscountRedemption = (typeof DISCOUNT_REDEMPTIONS)[number];
+
 /** Merchandising face for a discount (Diwali, clearance, flash, …). */
 export const OFFER_KINDS = [
   "standard",
@@ -304,6 +313,11 @@ export const vDiscountScope = v.union(
   v.literal("products"),
   v.literal("attribute"),
 );
+export const vDiscountRedemption = v.union(
+  v.literal("auto"),
+  v.literal("clip"),
+  v.literal("code"),
+);
 
 export const vOfferKind = v.union(
   v.literal("standard"),
@@ -510,6 +524,7 @@ export const vDiscountView = v.object({
   id: v.id("discounts"),
   name: v.string(),
   code: v.union(v.string(), v.null()),
+  redemption: vDiscountRedemption,
   kind: vDiscountKind,
   value: v.number(),
   scope: vDiscountScope,
@@ -523,11 +538,36 @@ export const vDiscountView = v.object({
   attributeValues: v.array(v.string()),
   minOrderInr: v.union(v.number(), v.null()),
   maxUses: v.union(v.number(), v.null()),
+  maxUsesPerUser: v.union(v.number(), v.null()),
   usedCount: v.number(),
   startsAt: v.number(),
   endsAt: v.union(v.number(), v.null()),
   active: v.boolean(),
   createdAt: v.number(),
+});
+
+/** Coupon attached to a cart for one vendor (clip or code). */
+export const vCartCouponView = v.object({
+  vendorId: v.id("vendors"),
+  vendorName: v.string(),
+  discountId: v.id("discounts"),
+  name: v.string(),
+  code: v.union(v.string(), v.null()),
+  redemption: v.union(v.literal("clip"), v.literal("code")),
+  kind: vDiscountKind,
+  value: v.number(),
+  savingsInr: v.number(),
+  valid: v.boolean(),
+  message: v.union(v.string(), v.null()),
+});
+
+/** Applied coupon snapshot on an order. */
+export const vOrderCouponView = v.object({
+  discountId: v.id("discounts"),
+  vendorId: v.id("vendors"),
+  name: v.string(),
+  code: v.union(v.string(), v.null()),
+  amountInr: v.number(),
 });
 
 export const vCollectionView = v.object({
@@ -571,7 +611,12 @@ export const vCartLineView = v.object({
 export const vCartView = v.object({
   lines: v.array(vCartLineView),
   itemCount: v.number(),
+  /** Sum of line prices before coupons. */
+  subtotalInr: v.number(),
+  couponSavingsInr: v.number(),
+  /** Payable total after per-vendor coupons. */
   totalInr: v.number(),
+  coupons: v.array(vCartCouponView),
 });
 
 /** One product line inside a vendor's view of a shopper's bag. */
@@ -639,6 +684,8 @@ export const vOrderView = v.object({
   pincode: v.string(),
   status: vOrderStatus,
   totalInr: v.number(),
+  couponSavingsInr: v.number(),
+  coupons: v.array(vOrderCouponView),
   createdAt: v.number(),
   items: v.array(vOrderItemView),
 });
@@ -709,6 +756,8 @@ export const vBuyerOrderDetail = v.object({
     v.null(),
   ),
   totalInr: v.number(),
+  couponSavingsInr: v.number(),
+  coupons: v.array(vOrderCouponView),
   createdAt: v.number(),
   items: v.array(vOrderItemView),
   shipments: v.array(vShipmentView),

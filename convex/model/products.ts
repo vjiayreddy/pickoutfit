@@ -33,6 +33,7 @@ import { MAX_PRODUCT_VARIANTS, VENDOR_PLANS, slugify, vendorSellable } from "../
 import type { Fit, Formality, Presentation, Season } from "../shared/wardrobe";
 import { syncProductEmbeddingSchedule } from "./productEmbeddings";
 import { bumpSystemCounter } from "./stats";
+import { previewCartCoupons } from "./coupons";
 import { pricedUnitInr } from "./offers";
 import { resolveProductBrand } from "./brands";
 import {
@@ -1115,7 +1116,9 @@ export async function toCartView(ctx: Ctx, userId: Id<"users">) {
     .query("carts")
     .withIndex("by_userId", (q) => q.eq("userId", userId))
     .unique();
-  if (!cart) return { lines: [], itemCount: 0, totalInr: 0 };
+  if (!cart) {
+    return { lines: [], itemCount: 0, subtotalInr: 0, couponSavingsInr: 0, totalInr: 0, coupons: [] };
+  }
   const rows = await cartLines(ctx, cart._id);
   const cache: VendorCache = new Map();
   const lines = [];
@@ -1138,10 +1141,28 @@ export async function toCartView(ctx: Ctx, userId: Id<"users">) {
     });
   }
   const availableLines = lines.filter((line) => line.available);
+  const subtotalInr = availableLines.reduce(
+    (sum, line) => sum + line.priceInr * line.quantity,
+    0,
+  );
+  const { coupons, couponSavingsInr } = await previewCartCoupons(
+    ctx,
+    userId,
+    cart._id,
+    availableLines.map((line) => ({
+      productId: line.productId,
+      vendorId: line.vendorId,
+      priceInr: line.priceInr,
+      quantity: line.quantity,
+    })),
+  );
   return {
     lines,
     itemCount: availableLines.reduce((sum, line) => sum + line.quantity, 0),
-    totalInr: availableLines.reduce((sum, line) => sum + line.priceInr * line.quantity, 0),
+    subtotalInr,
+    couponSavingsInr,
+    totalInr: Math.max(0, subtotalInr - couponSavingsInr),
+    coupons,
   };
 }
 

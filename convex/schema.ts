@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import {
   vAgeGroup,
   vDiscountKind,
+  vDiscountRedemption,
   vDiscountScope,
   vInventoryReason,
   vOccasion,
@@ -757,13 +758,15 @@ export default defineSchema({
     .index("by_vendorId_and_createdAt", ["vendorId", "createdAt"]),
 
   /**
-   * Vendor promotions / offers. No `code` means the discount applies automatically.
-   * `offerKind` + `badge` support occasion/clearance/flash merchandising.
+   * Vendor promotions / offers.
+   * `redemption`: auto (catalog deal), clip (Amazon coupon), code (promo code).
+   * Legacy rows without `redemption`: treat as `code` when `code` is set, else `auto`.
    */
   discounts: defineTable({
     vendorId: v.id("vendors"),
     name: v.string(),
     code: v.optional(v.string()),
+    redemption: v.optional(vDiscountRedemption),
     kind: vDiscountKind,
     value: v.number(),
     scope: vDiscountScope,
@@ -778,6 +781,8 @@ export default defineSchema({
     attributeValues: v.optional(v.array(v.string())),
     minOrderInr: v.optional(v.number()),
     maxUses: v.optional(v.number()),
+    /** Cap redemptions per shopper (clip/code). */
+    maxUsesPerUser: v.optional(v.number()),
     usedCount: v.number(),
     startsAt: v.number(),
     endsAt: v.optional(v.number()),
@@ -789,6 +794,37 @@ export default defineSchema({
     .index("by_code", ["code"])
     /** Expire cron: active offers whose endsAt has passed. */
     .index("by_active_and_endsAt", ["active", "endsAt"]),
+
+  /**
+   * Per-vendor coupon on a cart (one clip or code per vendor).
+   * Cleared when the cart is deleted at checkout.
+   */
+  cartCoupons: defineTable({
+    cartId: v.id("carts"),
+    userId: v.id("users"),
+    vendorId: v.id("vendors"),
+    discountId: v.id("discounts"),
+    /** Present when applied via promo code. */
+    code: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_cartId", ["cartId"])
+    .index("by_cartId_and_vendorId", ["cartId", "vendorId"])
+    .index("by_userId", ["userId"]),
+
+  /** Audit row written when a coupon is redeemed on a paid order. */
+  couponRedemptions: defineTable({
+    discountId: v.id("discounts"),
+    vendorId: v.id("vendors"),
+    userId: v.id("users"),
+    orderId: v.id("orders"),
+    amountInr: v.number(),
+    code: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_discountId", ["discountId"])
+    .index("by_userId_and_discountId", ["userId", "discountId"])
+    .index("by_orderId", ["orderId"]),
 
   /** Vendor-defined groupings shown on marketplace and storefront. */
   collections: defineTable({
@@ -863,6 +899,19 @@ export default defineSchema({
     pincode: v.string(),
     status: vOrderStatus,
     totalInr: v.number(),
+    /** Sum of per-vendor coupon savings snapshotted at payment. */
+    couponSavingsInr: v.optional(v.number()),
+    coupons: v.optional(
+      v.array(
+        v.object({
+          discountId: v.id("discounts"),
+          vendorId: v.id("vendors"),
+          name: v.string(),
+          code: v.optional(v.string()),
+          amountInr: v.number(),
+        }),
+      ),
+    ),
     /** Absent on legacy COD rows; treat as paid for fulfillment. */
     paymentStatus: v.optional(vPaymentStatus),
     razorpayOrderId: v.optional(v.string()),
@@ -926,6 +975,18 @@ export default defineSchema({
         priceInr: v.number(),
         commissionBps: v.number(),
       }),
+    ),
+    couponSavingsInr: v.optional(v.number()),
+    coupons: v.optional(
+      v.array(
+        v.object({
+          discountId: v.id("discounts"),
+          vendorId: v.id("vendors"),
+          name: v.string(),
+          code: v.optional(v.string()),
+          amountInr: v.number(),
+        }),
+      ),
     ),
     droppedNames: v.array(v.string()),
     orderId: v.optional(v.id("orders")),

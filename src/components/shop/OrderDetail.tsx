@@ -47,6 +47,14 @@ export function OrderDetail({ orderId }: { orderId: Id<"orders"> }) {
         </div>
         <p className="text-sm text-mute">{formatDate(order.createdAt)}</p>
         <p className="text-lg font-medium">{formatInr(order.totalInr)}</p>
+        {order.couponSavingsInr > 0 ? (
+          <p className="text-sm text-sale">
+            Coupons saved {formatInr(order.couponSavingsInr)}
+            {order.coupons.length > 0
+              ? ` (${order.coupons.map((c) => c.code ?? c.name).join(", ")})`
+              : ""}
+          </p>
+        ) : null}
       </div>
 
       <section className="space-y-2">

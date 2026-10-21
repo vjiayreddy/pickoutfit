@@ -151,8 +151,24 @@ export function CheckoutForm() {
       <div>
         <h1 className="font-display text-4xl uppercase">Checkout</h1>
         <p className="mt-2 text-sm text-mute">
-          Pay securely with Razorpay. Total {formatInr(cart.totalInr)}.
+          Pay securely with Razorpay. Total {formatInr(cart.totalInr)}
+          {cart.couponSavingsInr > 0
+            ? ` (saved ${formatInr(cart.couponSavingsInr)} with coupons)`
+            : ""}
+          .
         </p>
+        {cart.coupons.filter((c) => c.valid).length > 0 ? (
+          <ul className="mt-2 space-y-1 text-xs text-mute">
+            {cart.coupons
+              .filter((c) => c.valid)
+              .map((coupon) => (
+                <li key={`${coupon.vendorId}-${coupon.discountId}`}>
+                  {coupon.vendorName}: {coupon.code ?? coupon.name} (−
+                  {formatInr(coupon.savingsInr)})
+                </li>
+              ))}
+          </ul>
+        ) : null}
         {!paymentsConfigured ? (
           <p className="mt-2 text-sm text-sale">
             Payments are not configured on this environment yet.

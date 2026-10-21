@@ -4,12 +4,15 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import { scheduleOfferExpiry } from "./discountsExpire";
 import { assertVendorWritable, requireVendor } from "./lib/auth";
 import { appError } from "./lib/errors";
+import { discountRedemption, normaliseCouponCode } from "./shared/coupons";
 import {
   vDiscountKind,
+  vDiscountRedemption,
   vDiscountScope,
   vDiscountView,
   vOfferKind,
   vProductCategory,
+  type DiscountRedemption,
   type OfferKind,
 } from "./shared/products";
 import { MAX_VENDOR_DISCOUNTS } from "./shared/vendors";
@@ -17,6 +20,7 @@ import { MAX_VENDOR_DISCOUNTS } from "./shared/vendors";
 const vDiscountFields = {
   name: v.string(),
   code: v.optional(v.string()),
+  redemption: v.optional(vDiscountRedemption),
   kind: vDiscountKind,
   value: v.number(),
   scope: vDiscountScope,
@@ -30,6 +34,7 @@ const vDiscountFields = {
   attributeValues: v.optional(v.array(v.string())),
   minOrderInr: v.optional(v.number()),
   maxUses: v.optional(v.number()),
+  maxUsesPerUser: v.optional(v.number()),
   startsAt: v.number(),
   endsAt: v.optional(v.number()),
   active: v.boolean(),
@@ -38,6 +43,7 @@ const vDiscountFields = {
 type DiscountInput = {
   name: string;
   code?: string;
+  redemption?: DiscountRedemption;
   kind: Doc<"discounts">["kind"];
   value: number;
   scope: Doc<"discounts">["scope"];
@@ -51,15 +57,11 @@ type DiscountInput = {
   attributeValues?: string[];
   minOrderInr?: number;
   maxUses?: number;
+  maxUsesPerUser?: number;
   startsAt: number;
   endsAt?: number;
   active: boolean;
 };
-
-function normaliseCode(code: string | undefined): string | undefined {
-  const clean = code?.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
-  return clean ? clean.slice(0, 24) : undefined;
-}
 
 async function cleanDiscount(ctx: MutationCtx, vendor: Doc<"vendors">, input: DiscountInput, selfId?: Doc<"discounts">["_id"]) {
   const name = input.name.trim().slice(0, 80);
@@ -100,7 +102,19 @@ async function cleanDiscount(ctx: MutationCtx, vendor: Doc<"vendors">, input: Di
       }
     }
   }
-  const code = normaliseCode(input.code);
+  const code = normaliseCouponCode(input.code);
+  let redemption: DiscountRedemption =
+    input.redemption ?? (code ? "code" : "auto");
+  if (redemption === "code" && !code) {
+    throw appError("INVALID_INPUT", "Promo codes need a code shoppers can type.");
+  }
+  if (redemption === "auto" && code) {
+    // Typing a code forces promo-code mode.
+    redemption = "code";
+  }
+  if (redemption === "clip" && code) {
+    throw appError("INVALID_INPUT", "Clip coupons don't use a typed code. Clear the code field.");
+  }
   if (code) {
     const clash = await ctx.db
       .query("discounts")
@@ -122,7 +136,8 @@ async function cleanDiscount(ctx: MutationCtx, vendor: Doc<"vendors">, input: Di
       : undefined;
   return {
     name,
-    code,
+    code: redemption === "code" ? code : undefined,
+    redemption,
     kind: input.kind,
     value: Math.round(input.value * 100) / 100,
     scope: input.scope,
@@ -136,6 +151,10 @@ async function cleanDiscount(ctx: MutationCtx, vendor: Doc<"vendors">, input: Di
     attributeValues,
     minOrderInr: input.minOrderInr && input.minOrderInr > 0 ? Math.round(input.minOrderInr) : undefined,
     maxUses: input.maxUses && input.maxUses > 0 ? Math.round(input.maxUses) : undefined,
+    maxUsesPerUser:
+      input.maxUsesPerUser && input.maxUsesPerUser > 0
+        ? Math.round(input.maxUsesPerUser)
+        : undefined,
     startsAt: input.startsAt,
     endsAt: input.endsAt,
     active: input.active,
@@ -147,6 +166,7 @@ function toView(discount: Doc<"discounts">) {
     id: discount._id,
     name: discount.name,
     code: discount.code ?? null,
+    redemption: discountRedemption(discount),
     kind: discount.kind,
     value: discount.value,
     scope: discount.scope,
@@ -160,6 +180,7 @@ function toView(discount: Doc<"discounts">) {
     attributeValues: discount.attributeValues ?? [],
     minOrderInr: discount.minOrderInr ?? null,
     maxUses: discount.maxUses ?? null,
+    maxUsesPerUser: discount.maxUsesPerUser ?? null,
     usedCount: discount.usedCount,
     startsAt: discount.startsAt,
     endsAt: discount.endsAt ?? null,
