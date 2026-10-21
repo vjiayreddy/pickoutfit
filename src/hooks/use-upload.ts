@@ -6,7 +6,14 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { imageUploadMimeType } from "@/lib/image-upload";
 
-export type UploadTarget = "items" | "avatars" | "vendor" | "category" | "brand" | "attribute";
+export type UploadTarget =
+  | "items"
+  | "avatars"
+  | "vendor"
+  | "category"
+  | "brand"
+  | "attribute"
+  | "review";
 export type UploadProgress = Record<string, number>;
 export type UploadEntry = { key: string; file: File };
 export type UploadSuccess = {
@@ -127,6 +134,7 @@ export function useUpload(target: UploadTarget = "items") {
   const generateCategoryUrl = useMutation(api.categories.generateUploadUrl);
   const generateBrandUrl = useMutation(api.brands.generateUploadUrl);
   const generateAttributeUrl = useMutation(api.attributes.generateUploadUrl);
+  const generateReviewUrl = useMutation(api.reviews.generateUploadUrl);
   const [progress, setProgress] = useState<UploadProgress>({});
   const inFlight = useRef(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -148,7 +156,9 @@ export function useUpload(target: UploadTarget = "items") {
                   ? await generateBrandUrl({})
                   : target === "attribute"
                     ? await generateAttributeUrl({})
-                    : await generateItemUrl({});
+                    : target === "review"
+                      ? await generateReviewUrl({})
+                      : await generateItemUrl({});
         return await postFile(url, file, (fraction) =>
           setProgress((current) => ({ ...current, [key]: fraction })),
         );
@@ -163,6 +173,7 @@ export function useUpload(target: UploadTarget = "items") {
       generateBrandUrl,
       generateCategoryUrl,
       generateItemUrl,
+      generateReviewUrl,
       generateVendorUrl,
       target,
     ],

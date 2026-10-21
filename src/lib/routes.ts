@@ -54,6 +54,7 @@ export const routes = {
   vendorVariants: "/vendor/variants",
   vendorOrders: "/vendor/orders",
   vendorOrder: (id: string) => `/vendor/orders/${id}`,
+  vendorReviews: "/vendor/reviews",
   vendorCarts: "/vendor/carts",
   vendorPayouts: "/vendor/payouts",
   vendorSettings: "/vendor/settings",
