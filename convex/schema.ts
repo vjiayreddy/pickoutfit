@@ -54,11 +54,13 @@ import {
   vStyleOrigin,
   vStyleRefServiceId,
   vStyleRefStatus,
+  vSurfaceVisibility,
   vColours,
   vTokenUsage,
   vPresentation,
   vUploadTarget,
   vUserRole,
+  vPlatformSurfaceId,
 } from "./shared/validators";
 import {
   vCheckoutIntentStatus,
@@ -1101,4 +1103,15 @@ export default defineSchema({
     count: v.number(),
     avgMs: v.number(),
   }).index("by_key", ["key"]),
+
+  /**
+   * Admin overrides for platform surface visibility.
+   * Missing row → use PLATFORM_SURFACES[id].defaultVisibility from code.
+   */
+  platformSurfaceOverrides: defineTable({
+    surfaceId: vPlatformSurfaceId,
+    visibility: vSurfaceVisibility,
+    updatedAt: v.number(),
+    updatedBy: v.optional(v.id("users")),
+  }).index("by_surfaceId", ["surfaceId"]),
 });

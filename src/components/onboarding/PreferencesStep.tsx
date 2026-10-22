@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { ArrowLeft, Check, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
@@ -35,6 +35,7 @@ export function PreferencesStep({
   onContinue: (draft: OnboardingPrefs) => void;
 }) {
   const router = useRouter();
+  const surfaces = useQuery(api.platformSurfaces.listForUser);
   const updatePrefs = useMutation(api.users.updatePrefs);
   const completeOnboarding = useMutation(api.users.completeOnboarding);
   const wantsGrooming = interests.length > 0;
@@ -50,6 +51,18 @@ export function PreferencesStep({
   const [homeCity, setHomeCity] = useState(prefs.homeCity ?? "");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const optionalServices = optionalServicesFor(
+    presentation ?? "neutral",
+    surfaces
+      ? {
+          hairstyle: surfaces.byId.hairstyle,
+          beard: surfaces.byId.beard,
+          skincare: surfaces.byId.skincare,
+          wardrobe: surfaces.byId.wardrobe,
+        }
+      : undefined,
+  );
 
   function addColour() {
     const value = colourDraft.trim().toLowerCase();
@@ -216,31 +229,33 @@ export function PreferencesStep({
           <p className="text-sm text-mute">Optional — for weather-aware styling later.</p>
         </div>
 
-        <fieldset disabled={pending} className="space-y-3 sm:col-span-2">
-          <legend className="text-sm font-medium">What else should we help with?</legend>
-          <p className="text-sm text-mute">
-            Optional. Skip this and you can turn a service on later in settings.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {optionalServicesFor(presentation ?? "neutral").map((service) => {
-              const selected = interests.includes(service.id as GroomingInterest);
-              return (
-                <button
-                  key={service.id}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => toggleInterest(service.id as GroomingInterest)}
-                  className={cn(
-                    "h-10 rounded-full px-4 text-sm font-medium transition",
-                    selected ? "bg-ink text-canvas" : "bg-soft-cloud text-ink",
-                  )}
-                >
-                  {service.label}
-                </button>
-              );
-            })}
-          </div>
-        </fieldset>
+        {optionalServices.length > 0 ? (
+          <fieldset disabled={pending} className="space-y-3 sm:col-span-2">
+            <legend className="text-sm font-medium">What else should we help with?</legend>
+            <p className="text-sm text-mute">
+              Optional. Skip this and you can turn a service on later in settings.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {optionalServices.map((service) => {
+                const selected = interests.includes(service.id as GroomingInterest);
+                return (
+                  <button
+                    key={service.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => toggleInterest(service.id as GroomingInterest)}
+                    className={cn(
+                      "h-10 rounded-full px-4 text-sm font-medium transition",
+                      selected ? "bg-ink text-canvas" : "bg-soft-cloud text-ink",
+                    )}
+                  >
+                    {service.label}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        ) : null}
       </div>
 
       {error ? (

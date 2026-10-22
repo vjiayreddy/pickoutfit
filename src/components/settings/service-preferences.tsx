@@ -47,13 +47,21 @@ type Draft = {
 export function ServicePreferences() {
   const me = useQuery(api.users.me);
   const profiles = useQuery(api.services.listProfiles);
-  if (me === undefined || profiles === undefined) return null;
+  const surfaces = useQuery(api.platformSurfaces.listForUser);
+  if (me === undefined || profiles === undefined || surfaces === undefined) return null;
   if (!me) return null;
+  const visibilityById = {
+    hairstyle: surfaces.byId.hairstyle,
+    beard: surfaces.byId.beard,
+    skincare: surfaces.byId.skincare,
+    wardrobe: surfaces.byId.wardrobe,
+  };
   return (
     <ServiceFields
       key={me.prefs.presentation}
       presentation={me.prefs.presentation}
-      initial={draftFromProfiles(profiles, me.prefs.presentation)}
+      visibilityById={visibilityById}
+      initial={draftFromProfiles(profiles, me.prefs.presentation, visibilityById)}
     />
   );
 }
@@ -69,8 +77,11 @@ function draftFromProfiles(
     beardGoal?: BeardGoal;
   }>,
   presentation: Presentation,
+  visibilityById: Partial<Record<"hairstyle" | "beard" | "skincare" | "wardrobe", "hidden" | "coming_soon" | "live">>,
 ): Draft {
-  const available = new Set(optionalServicesFor(presentation).map((service) => service.id));
+  const available = new Set(
+    optionalServicesFor(presentation, visibilityById).map((service) => service.id),
+  );
   const interests = profiles
     .map((row) => row.serviceId)
     .filter((id): id is Interest => (id === "hairstyle" || id === "beard") && available.has(id));
@@ -94,11 +105,19 @@ function draftFromProfiles(
   };
 }
 
-function ServiceFields({ presentation, initial }: { presentation: Presentation; initial: Draft }) {
+function ServiceFields({
+  presentation,
+  visibilityById,
+  initial,
+}: {
+  presentation: Presentation;
+  visibilityById: Partial<Record<"hairstyle" | "beard" | "skincare" | "wardrobe", "hidden" | "coming_soon" | "live">>;
+  initial: Draft;
+}) {
   const saveProfiles = useMutation(api.services.saveProfiles);
   const [draft, setDraft] = useState(initial);
   const [saving, setSaving] = useState(false);
-  const options = optionalServicesFor(presentation);
+  const options = optionalServicesFor(presentation, visibilityById);
 
   function toggle(id: Interest) {
     setDraft({
@@ -141,6 +160,8 @@ function ServiceFields({ presentation, initial }: { presentation: Presentation; 
       setSaving(false);
     }
   }
+
+  if (options.length === 0) return null;
 
   return (
     <div className="space-y-6 border-t border-hairline pt-6">

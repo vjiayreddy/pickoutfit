@@ -10,6 +10,8 @@ import type {
   HairTexture,
 } from "../shared/services";
 import { isServiceAvailable } from "../shared/services";
+import { getEffectiveVisibility } from "./surfaces";
+import type { PlatformSurfaceId } from "../shared/surfaces";
 
 const PROFILE_SCAN = 8;
 
@@ -63,7 +65,11 @@ export async function replaceGroomingProfiles(
       throw appError("INVALID_INPUT", "Each service can only be saved once.");
     }
     seen.add(profile.serviceId);
-    if (!isServiceAvailable(profile.serviceId, user)) {
+    const visibility = await getEffectiveVisibility(
+      ctx,
+      profile.serviceId as PlatformSurfaceId,
+    );
+    if (!isServiceAvailable(profile.serviceId, user, visibility)) {
       throw appError("INVALID_INPUT", "That service is not available for this wardrobe.");
     }
   }

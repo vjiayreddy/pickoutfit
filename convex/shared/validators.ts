@@ -15,6 +15,11 @@ import {
   STYLE_REF_STATUSES,
 } from "./services";
 import {
+  PLATFORM_SURFACE_IDS,
+  SURFACE_AUDIENCES,
+  SURFACE_VISIBILITIES,
+} from "./surfaces";
+import {
   CATEGORIES,
   FITS,
   FORMALITY,
@@ -63,6 +68,9 @@ export const vHairStyle = literals(HAIR_STYLES);
 export const vBeardStyle = literals(BEARD_STYLES);
 export const vServiceId = literals(SERVICE_IDS);
 export const vStyleRefServiceId = literals(STYLE_REF_SERVICE_IDS);
+export const vPlatformSurfaceId = literals(PLATFORM_SURFACE_IDS);
+export const vSurfaceVisibility = literals(SURFACE_VISIBILITIES);
+export const vSurfaceAudience = literals(SURFACE_AUDIENCES);
 export const vBudgetTier = literals(BUDGET_TIERS);
 export const vBudget = v.object({
   tier: vBudgetTier,

@@ -23,8 +23,10 @@ import {
   Sparkles,
   Shirt,
   Store,
+  type LucideIcon,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
+import type { PlatformSurfaceId } from "@convex/shared/surfaces";
 import { ActivityPopover } from "@/components/layout/ActivityPopover";
 import { AccountMenu } from "@/components/layout/AccountMenu";
 import {
@@ -45,26 +47,106 @@ const WARDROBE_CHILDREN = [
   { href: routes.lookbook, label: "Lookbook", icon: Images },
 ] as const;
 
-const MAIN_SERVICES = [
-  { href: routes.service("hair-color"), label: "Hair Color", icon: Palette, also: [] },
-  { href: routes.service("hairstyle"), label: "Beard/Hair Style", icon: Scissors, also: [routes.service("beard")] },
-  { href: routes.service("eyewear"), label: "Eyewear", icon: Glasses, also: [] },
-  { href: routes.service("makeup"), label: "Makeup", icon: Brush, also: [] },
-  { href: routes.service("skincare"), label: "SkinCare", icon: Droplets, also: [] },
-] as const;
-
 const SHOP_CHILDREN = [
   { href: routes.shop, label: "Marketplace", icon: Store },
   { href: routes.trialRoom, label: "Trial room", icon: Sparkles },
 ] as const;
 
-const PRIMARY_NAV = [
-  { href: routes.wardrobe, label: "Wardrobe", icon: Shirt },
-  ...WARDROBE_CHILDREN,
-  { href: routes.shop, label: "Shop", icon: Store },
-  ...MAIN_SERVICES.map(({ href, label, icon }) => ({ href, label, icon })),
-  { href: routes.stylist, label: "Stylist", icon: MessageCircle },
-] as const;
+const SURFACE_ICONS: Record<PlatformSurfaceId, LucideIcon> = {
+  wardrobe: Shirt,
+  shop: Store,
+  stylist: MessageCircle,
+  hairstyle: Scissors,
+  beard: Scissors,
+  hair_color: Palette,
+  eyewear: Glasses,
+  makeup: Brush,
+  skincare: Droplets,
+};
+
+type ServiceNavItem = {
+  id: PlatformSurfaceId;
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  also: string[];
+};
+
+type PrimaryNavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+};
+
+type PlatformNav = {
+  wardrobeLive: boolean;
+  shopLive: boolean;
+  stylistLive: boolean;
+  mainServices: ServiceNavItem[];
+  primaryNav: PrimaryNavItem[];
+};
+
+function emptyPlatformNav(): PlatformNav {
+  return {
+    wardrobeLive: true,
+    shopLive: true,
+    stylistLive: true,
+    mainServices: [],
+    primaryNav: [
+      { href: routes.wardrobe, label: "Wardrobe", icon: Shirt },
+      ...WARDROBE_CHILDREN,
+    ],
+  };
+}
+
+function buildPlatformNav(
+  surfaces:
+    | {
+        nav: Array<{
+          id: PlatformSurfaceId;
+          label: string;
+          route: string;
+          alsoRoutes: string[];
+        }>;
+        byId: Record<string, "hidden" | "coming_soon" | "live">;
+      }
+    | undefined,
+): PlatformNav {
+  if (!surfaces) return emptyPlatformNav();
+  const wardrobeLive = surfaces.byId.wardrobe === "live";
+  const shopLive = surfaces.byId.shop === "live";
+  const stylistLive = surfaces.byId.stylist === "live";
+  const mainServices: ServiceNavItem[] = surfaces.nav
+    .filter((item) => !["wardrobe", "shop", "stylist"].includes(item.id))
+    .map((item) => ({
+      id: item.id,
+      href: item.route,
+      label: item.label,
+      icon: SURFACE_ICONS[item.id] ?? Sparkles,
+      also: item.alsoRoutes,
+    }));
+  const primaryNav: PrimaryNavItem[] = [];
+  if (wardrobeLive) {
+    primaryNav.push(
+      { href: routes.wardrobe, label: "Wardrobe", icon: Shirt },
+      ...WARDROBE_CHILDREN,
+    );
+  }
+  if (shopLive) {
+    primaryNav.push({ href: routes.shop, label: "Shop", icon: Store });
+  }
+  for (const service of mainServices) {
+    primaryNav.push({
+      href: service.href,
+      label: service.label,
+      icon: service.icon,
+    });
+  }
+  if (stylistLive) {
+    primaryNav.push({ href: routes.stylist, label: "Stylist", icon: MessageCircle });
+  }
+  return { wardrobeLive, shopLive, stylistLive, mainServices, primaryNav };
+}
 
 function isWardrobeSection(pathname: string): boolean {
   return (
@@ -86,14 +168,17 @@ function isActivePath(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function isMainService(pathname: string): boolean {
-  return MAIN_SERVICES.some(
+function isMainService(pathname: string, mainServices: ServiceNavItem[]): boolean {
+  return mainServices.some(
     (item) => pathname === item.href || item.also.some((href) => pathname === href),
   );
 }
 
-function isRootTab(pathname: string): boolean {
-  return isMainService(pathname) || PRIMARY_NAV.some((item) => pathname === item.href);
+function isRootTab(pathname: string, nav: PlatformNav): boolean {
+  return (
+    isMainService(pathname, nav.mainServices) ||
+    nav.primaryNav.some((item) => pathname === item.href)
+  );
 }
 
 function parentHref(pathname: string): string {
@@ -112,14 +197,14 @@ function parentHref(pathname: string): string {
   return routes.wardrobe;
 }
 
-function fallbackTitle(pathname: string): string {
-  const tab = PRIMARY_NAV.find((item) => pathname === item.href);
+function fallbackTitle(pathname: string, nav: PlatformNav): string {
+  const tab = nav.primaryNav.find((item) => pathname === item.href);
   if (tab) return tab.label;
   if (pathname === routes.newOutfit) return "New outfit";
   if (pathname.startsWith(`${routes.wardrobe}/`)) return "Piece";
   if (pathname.startsWith(`${routes.outfits}/`)) return "Outfit";
   if (pathname.startsWith(`${routes.stylist}/`)) return "Chat";
-  const service = MAIN_SERVICES.find(
+  const service = nav.mainServices.find(
     (item) => pathname === item.href || item.also.some((href) => pathname === href),
   );
   if (service) return service.label;
@@ -174,15 +259,17 @@ function AppFrame({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const me = useQuery(api.users.me);
-  const cartCount = useQuery(api.cart.count, me ? {} : "skip");
-  const trialCount = useQuery(api.trialRoom.count, me ? {} : "skip");
+  const surfaces = useQuery(api.platformSurfaces.listForUser, me ? {} : "skip");
+  const nav = buildPlatformNav(surfaces ?? undefined);
+  const cartCount = useQuery(api.cart.count, me && nav.shopLive ? {} : "skip");
+  const trialCount = useQuery(api.trialRoom.count, me && nav.shopLive ? {} : "skip");
   const onboarded = Boolean(me?.onboardedAt);
   const panel = useStylistPanel();
   const headerTitle = useAppHeaderTitle();
   const keyboardOpen = useKeyboardOpen();
   const showChrome = onboarded && !pathname.startsWith(routes.onboarding);
   const showTabs = showChrome && !keyboardOpen;
-  const detail = onboarded && !isRootTab(pathname);
+  const detail = onboarded && !isRootTab(pathname, nav);
   const chatImmersive = isChatRoute(pathname);
 
   async function signOut() {
@@ -207,6 +294,7 @@ function AppFrame({ children }: { children: ReactNode }) {
       {showChrome ? (
         <Sidebar
           pathname={pathname}
+          nav={nav}
           onSignOut={() => void signOut()}
         />
       ) : null}
@@ -224,7 +312,7 @@ function AppFrame({ children }: { children: ReactNode }) {
             ) : null}
             {detail ? (
               <p className="min-w-0 flex-1 truncate text-sm font-medium lg:hidden">
-                {headerTitle ?? fallbackTitle(pathname)}
+                {headerTitle ?? fallbackTitle(pathname, nav)}
               </p>
             ) : (
               <Link
@@ -239,7 +327,7 @@ function AppFrame({ children }: { children: ReactNode }) {
             )}
             {showChrome ? (
               <p className="hidden min-w-0 truncate text-sm font-medium lg:block">
-                {headerTitle ?? fallbackTitle(pathname)}
+                {headerTitle ?? fallbackTitle(pathname, nav)}
               </p>
             ) : null}
 
@@ -248,7 +336,7 @@ function AppFrame({ children }: { children: ReactNode }) {
                 <span className="text-sm text-mute">Loading…</span>
               ) : me ? (
                 <>
-                  {onboarded ? (
+                  {onboarded && nav.stylistLive ? (
                     <div className="hidden xl:block">
                       <Button
                         type="button"
@@ -272,7 +360,7 @@ function AppFrame({ children }: { children: ReactNode }) {
                   >
                     {me.balance.total} credits
                   </Link>
-                  {onboarded ? (
+                  {onboarded && nav.shopLive ? (
                     <>
                       <Link
                         href={routes.trialRoom}
@@ -340,30 +428,32 @@ function AppFrame({ children }: { children: ReactNode }) {
         </main>
       </div>
       </div>
-      {showTabs ? <BottomNav pathname={pathname} /> : null}
+      {showTabs ? <BottomNav pathname={pathname} nav={nav} /> : null}
     </div>
   );
 }
 
 function Sidebar({
   pathname,
+  nav,
   onSignOut,
 }: {
   pathname: string;
+  nav: PlatformNav;
   onSignOut: () => void;
 }) {
   return (
     <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-hairline bg-canvas lg:flex">
       <Link
-        href={routes.wardrobe}
+        href={nav.wardrobeLive ? routes.wardrobe : routes.home}
         className="flex h-14 shrink-0 items-center border-b border-hairline px-5 font-display text-xl font-medium uppercase tracking-tight"
       >
         WardrobeAI
       </Link>
       <nav aria-label="Main navigation" className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-4">
-        <WardrobeMenu pathname={pathname} />
-        <ShopMenu pathname={pathname} />
-        {MAIN_SERVICES.map((item) => (
+        {nav.wardrobeLive ? <WardrobeMenu pathname={pathname} /> : null}
+        {nav.shopLive ? <ShopMenu pathname={pathname} /> : null}
+        {nav.mainServices.map((item) => (
           <SidebarLink
             key={item.href}
             href={item.href}
@@ -375,12 +465,14 @@ function Sidebar({
             }
           />
         ))}
-        <SidebarLink
-          href={routes.stylist}
-          label="Stylist"
-          icon={MessageCircle}
-          active={isActivePath(pathname, routes.stylist)}
-        />
+        {nav.stylistLive ? (
+          <SidebarLink
+            href={routes.stylist}
+            label="Stylist"
+            icon={MessageCircle}
+            active={isActivePath(pathname, routes.stylist)}
+          />
+        ) : null}
       </nav>
       <div className="flex flex-col gap-1 border-t border-hairline px-3 py-4">
         <SidebarLink
@@ -573,15 +665,15 @@ function tabLabel(label: string): string {
   }
 }
 
-function BottomNav({ pathname }: { pathname: string }) {
+function BottomNav({ pathname, nav }: { pathname: string; nav: PlatformNav }) {
   return (
     <nav
       aria-label="Mobile navigation"
       className="fixed inset-x-0 bottom-0 z-30 w-full overflow-hidden border-t border-hairline bg-canvas pb-[env(safe-area-inset-bottom)] lg:hidden"
     >
       <div className="flex h-12 w-full overflow-x-auto overscroll-x-contain">
-        {PRIMARY_NAV.map((item) => {
-          const service = MAIN_SERVICES.find((entry) => entry.href === item.href);
+        {nav.primaryNav.map((item) => {
+          const service = nav.mainServices.find((entry) => entry.href === item.href);
           const active =
             isActivePath(pathname, item.href) ||
             Boolean(service?.also.some((href) => isActivePath(pathname, href))) ||
