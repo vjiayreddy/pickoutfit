@@ -93,6 +93,11 @@ export type ServiceDef = {
   route: string;
 };
 
+/**
+ * Catalog defaults for grooming/service profiles.
+ * Platform chrome visibility is owned by `PLATFORM_SURFACES` + DB overrides —
+ * prefer `effectiveSurfaceVisibility` for nav / route gates.
+ */
 export const SERVICES: Record<ServiceId, ServiceDef> = {
   wardrobe: {
     label: "Wardrobe",
@@ -107,7 +112,7 @@ export const SERVICES: Record<ServiceId, ServiceDef> = {
     blurb: "Try a cut on your fitting photo.",
     audience: ["masculine", "feminine", "neutral"],
     capabilities: ["preview", "shop"],
-    status: "live",
+    status: "coming_soon",
     route: "/services/hairstyle",
   },
   beard: {
@@ -115,7 +120,7 @@ export const SERVICES: Record<ServiceId, ServiceDef> = {
     blurb: "Try a beard on your fitting photo.",
     audience: ["masculine"],
     capabilities: ["preview", "shop"],
-    status: "live",
+    status: "coming_soon",
     route: "/services/beard",
   },
   skincare: {
@@ -138,10 +143,18 @@ export function servicesFor(presentation: Presentation): ServiceCard[] {
 }
 
 /** Extra help offered during onboarding. Wardrobe is already step 2. */
-export function optionalServicesFor(presentation: Presentation): ServiceCard[] {
-  return servicesFor(presentation).filter(
-    (service) => service.id !== "wardrobe" && service.status === "live",
-  );
+export function optionalServicesFor(
+  presentation: Presentation,
+  /** Platform overrides; when omitted, falls back to `SERVICES[id].status`. */
+  visibilityById?: Partial<Record<ServiceId, "hidden" | "coming_soon" | "live">>,
+): ServiceCard[] {
+  return servicesFor(presentation).filter((service) => {
+    if (service.id === "wardrobe") return false;
+    const visibility =
+      visibilityById?.[service.id] ??
+      (service.status === "live" ? "live" : "coming_soon");
+    return visibility === "live";
+  });
 }
 
 export function isServiceId(value: string): value is ServiceId {
@@ -152,7 +165,11 @@ export function isServiceId(value: string): value is ServiceId {
 export function isServiceAvailable(
   serviceId: ServiceId,
   user: { prefs: { presentation: Presentation } },
+  /** When set (from platform overrides), overrides `SERVICES[id].status`. */
+  visibility?: "hidden" | "coming_soon" | "live",
 ): boolean {
   const service = SERVICES[serviceId];
-  return service.status === "live" && service.audience.includes(user.prefs.presentation);
+  const effective =
+    visibility ?? (service.status === "live" ? "live" : "coming_soon");
+  return effective === "live" && service.audience.includes(user.prefs.presentation);
 }

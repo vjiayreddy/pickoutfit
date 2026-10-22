@@ -9,6 +9,7 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as adminSurfaces from "../adminSurfaces.js";
 import type * as adminVendors from "../adminVendors.js";
 import type * as agent from "../agent.js";
 import type * as agentShop from "../agentShop.js";
@@ -73,6 +74,7 @@ import type * as model_shop from "../model/shop.js";
 import type * as model_shopLooks from "../model/shopLooks.js";
 import type * as model_stats from "../model/stats.js";
 import type * as model_subscriptions from "../model/subscriptions.js";
+import type * as model_surfaces from "../model/surfaces.js";
 import type * as model_threads from "../model/threads.js";
 import type * as model_tryOnGarments from "../model/tryOnGarments.js";
 import type * as model_uploads from "../model/uploads.js";
@@ -83,6 +85,7 @@ import type * as model_vendorIngest from "../model/vendorIngest.js";
 import type * as model_vendors from "../model/vendors.js";
 import type * as orders from "../orders.js";
 import type * as outfits from "../outfits.js";
+import type * as platformSurfaces from "../platformSurfaces.js";
 import type * as productEmbeddings from "../productEmbeddings.js";
 import type * as products from "../products.js";
 import type * as razorpayWebhook from "../razorpayWebhook.js";
@@ -104,6 +107,7 @@ import type * as shared_products from "../shared/products.js";
 import type * as shared_reviews from "../shared/reviews.js";
 import type * as shared_services from "../shared/services.js";
 import type * as shared_shop from "../shared/shop.js";
+import type * as shared_surfaces from "../shared/surfaces.js";
 import type * as shared_validators from "../shared/validators.js";
 import type * as shared_variants from "../shared/variants.js";
 import type * as shared_vendors from "../shared/vendors.js";
@@ -141,6 +145,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  adminSurfaces: typeof adminSurfaces;
   adminVendors: typeof adminVendors;
   agent: typeof agent;
   agentShop: typeof agentShop;
@@ -205,6 +210,7 @@ declare const fullApi: ApiFromModules<{
   "model/shopLooks": typeof model_shopLooks;
   "model/stats": typeof model_stats;
   "model/subscriptions": typeof model_subscriptions;
+  "model/surfaces": typeof model_surfaces;
   "model/threads": typeof model_threads;
   "model/tryOnGarments": typeof model_tryOnGarments;
   "model/uploads": typeof model_uploads;
@@ -215,6 +221,7 @@ declare const fullApi: ApiFromModules<{
   "model/vendors": typeof model_vendors;
   orders: typeof orders;
   outfits: typeof outfits;
+  platformSurfaces: typeof platformSurfaces;
   productEmbeddings: typeof productEmbeddings;
   products: typeof products;
   razorpayWebhook: typeof razorpayWebhook;
@@ -236,6 +243,7 @@ declare const fullApi: ApiFromModules<{
   "shared/reviews": typeof shared_reviews;
   "shared/services": typeof shared_services;
   "shared/shop": typeof shared_shop;
+  "shared/surfaces": typeof shared_surfaces;
   "shared/validators": typeof shared_validators;
   "shared/variants": typeof shared_variants;
   "shared/vendors": typeof shared_vendors;

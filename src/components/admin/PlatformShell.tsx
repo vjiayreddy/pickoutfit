@@ -2,6 +2,7 @@
 
 import {
   LayoutDashboard,
+  Layers,
   LogOut,
   Menu,
   Store,
@@ -16,6 +17,7 @@ import { routes } from "@/lib/routes";
 
 const NAV = [
   { href: routes.admin, label: "Overview", icon: LayoutDashboard, exact: true },
+  { href: routes.adminServices, label: "Services", icon: Layers },
   { href: routes.adminVendors, label: "Vendors", icon: Store },
 ] as const;
 

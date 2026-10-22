@@ -384,16 +384,6 @@ function AddClothesInner() {
         </section>
       ) : null}
 
-      <p className="text-sm text-mute">
-        Ready pieces show up in{" "}
-        <Link href={routes.wardrobe} className="font-medium text-ink underline underline-offset-4">
-          your wardrobe
-        </Link>
-        .{" "}
-        <Link href={routes.gridDemo} className="font-medium text-ink underline underline-offset-4">
-          Grid demo
-        </Link>
-      </p>
     </div>
   );
 }

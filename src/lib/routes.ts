@@ -60,4 +60,5 @@ export const routes = {
   vendorSettings: "/vendor/settings",
   vendorBilling: "/vendor/settings/billing",
   adminVendors: "/admin/vendors",
+  adminServices: "/admin/services",
 } as const;

@@ -18,11 +18,7 @@ import {
   type HairStyle,
 } from "@convex/shared/grooming";
 import { categoryForService } from "@convex/shared/products";
-import {
-  isServiceAvailable,
-  isServiceId,
-  SERVICES,
-} from "@convex/shared/services";
+import { isServiceId, SERVICES } from "@convex/shared/services";
 import { shopSimilarVisible, storeLinks } from "@convex/shared/shop";
 import type { Presentation } from "@convex/shared/wardrobe";
 import { CreditQuote, useCreditQuote } from "@/components/common/CreditQuote";
@@ -35,29 +31,6 @@ import { routes } from "@/lib/routes";
 const PAGE_SIZE = 8;
 const GALLERY_PAGE = 24;
 const LOOK_PAGE = 24;
-
-const COMING_SOON_STUDIOS: Record<string, { title: string; blurb: string }> = {
-  "hair-color": {
-    title: "Hair Color",
-    blurb: "Preview a colour on your fitting photo.",
-  },
-  eyewear: {
-    title: "Eyewear",
-    blurb: "Try frames on your fitting photo.",
-  },
-  makeup: {
-    title: "Makeup",
-    blurb: "Try a makeup look on your fitting photo.",
-  },
-};
-
-const HUB_SERVICES = [
-  { label: "Hair Color", blurb: "Preview a colour on your fitting photo.", href: routes.service("hair-color"), live: false },
-  { label: "Beard/Hair Style", blurb: "Try a cut or a beard on your fitting photo.", href: routes.service("hairstyle"), live: true },
-  { label: "Eyewear", blurb: "Try frames on your fitting photo.", href: routes.service("eyewear"), live: false },
-  { label: "Makeup", blurb: "Try a makeup look on your fitting photo.", href: routes.service("makeup"), live: false },
-  { label: "SkinCare", blurb: "A routine matched to your skin and budget. Advice and products, no photo edit.", href: routes.service("skincare"), live: false },
-] as const;
 
 function ServiceCard({
   label,
@@ -101,6 +74,9 @@ function ServiceCard({
 }
 
 export function ServicesHub() {
+  const surfaces = useQuery(api.platformSurfaces.listForUser);
+  const hub = surfaces?.hub ?? [];
+
   return (
     <div className="space-y-8">
       <div>
@@ -111,21 +87,30 @@ export function ServicesHub() {
           Services
         </h1>
         <p className="mt-2 max-w-md text-sm text-mute sm:text-base">
-          Beard and hair style are ready. Colour, eyewear, makeup, and skincare are next.
+          Studios and advice beyond your wardrobe. Availability is set by the platform.
         </p>
       </div>
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {HUB_SERVICES.map((service) => (
-          <li key={service.label}>
-            <ServiceCard
-              label={service.label}
-              blurb={service.blurb}
-              muted={!service.live}
-              href={service.live ? service.href : undefined}
-            />
-          </li>
-        ))}
-      </ul>
+      {surfaces === undefined ? (
+        <div className="h-40 animate-pulse bg-soft-cloud" />
+      ) : hub.length === 0 ? (
+        <p className="text-sm text-mute">No extra services are available right now.</p>
+      ) : (
+        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {hub.map((service) => {
+            const live = service.visibility === "live";
+            return (
+              <li key={service.id}>
+                <ServiceCard
+                  label={service.label}
+                  blurb={service.blurb}
+                  muted={!live}
+                  href={live ? service.route : undefined}
+                />
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
@@ -149,18 +134,14 @@ function ServiceWithProducts({
 export function ServiceStudio({ serviceId }: { serviceId: string }) {
   const me = useQuery(api.users.me);
   const profiles = useQuery(api.services.listProfiles);
-  const comingSoon = COMING_SOON_STUDIOS[serviceId];
-  if (comingSoon) {
-    return (
-      <ServiceWithProducts serviceId={serviceId}>
-        <div className="space-y-3">
-          <h1 className="font-display text-4xl uppercase">{comingSoon.title}</h1>
-          <p className="text-sm text-mute">Coming soon. {comingSoon.blurb}</p>
-        </div>
-      </ServiceWithProducts>
-    );
+  const resolved = useQuery(api.platformSurfaces.resolveStudio, { slug: serviceId });
+
+  if (me === undefined || profiles === undefined || resolved === undefined) {
+    return <div className="h-64 animate-pulse bg-soft-cloud" />;
   }
-  if (!isServiceId(serviceId) || (serviceId !== "hairstyle" && serviceId !== "beard" && serviceId !== "skincare")) {
+  if (!me) return null;
+
+  if (resolved === null) {
     return (
       <p className="text-sm text-mute">
         That service is not available.{" "}
@@ -170,19 +151,26 @@ export function ServiceStudio({ serviceId }: { serviceId: string }) {
       </p>
     );
   }
-  if (me === undefined || profiles === undefined) {
-    return <div className="h-64 animate-pulse bg-soft-cloud" />;
+
+  if (resolved.visibility === "hidden") {
+    return (
+      <p className="text-sm text-mute">
+        That service is not available.{" "}
+        <Link href={routes.wardrobe} className="underline">
+          Back to wardrobe
+        </Link>
+      </p>
+    );
   }
-  if (!me) return null;
-  const service = SERVICES[serviceId];
-  if (service.status !== "live" || !isServiceAvailable(serviceId, me)) {
+
+  if (resolved.visibility === "coming_soon" || !resolved.available) {
     return (
       <ServiceWithProducts serviceId={serviceId}>
         <div className="space-y-3">
-          <h1 className="font-display text-4xl uppercase">{service.label}</h1>
+          <h1 className="font-display text-4xl uppercase">{resolved.label}</h1>
           <p className="text-sm text-mute">
-            {service.status === "coming_soon"
-              ? "Coming soon. Advice and products will live here, with no photo edit."
+            {resolved.visibility === "coming_soon"
+              ? `Coming soon. ${resolved.blurb}`
               : "This service is not part of your wardrobe."}
           </p>
           <Link href={routes.services} className="text-sm font-medium underline">
@@ -192,18 +180,23 @@ export function ServiceStudio({ serviceId }: { serviceId: string }) {
       </ServiceWithProducts>
     );
   }
-  if (serviceId !== "hairstyle" && serviceId !== "beard") {
+
+  if (
+    !isServiceId(resolved.id) ||
+    (resolved.id !== "hairstyle" && resolved.id !== "beard")
+  ) {
     return (
       <div className="space-y-3">
-        <h1 className="font-display text-4xl uppercase">{service.label}</h1>
+        <h1 className="font-display text-4xl uppercase">{resolved.label}</h1>
         <p className="text-sm text-mute">This preview is not available yet.</p>
       </div>
     );
   }
-  const profile = profiles.find((row) => row.serviceId === serviceId);
+
+  const profile = profiles.find((row) => row.serviceId === resolved.id);
   return (
     <Studio
-      serviceId={serviceId}
+      serviceId={resolved.id}
       presentation={me.prefs.presentation}
       profile={profile}
       hqUnlocked={me.balance.features.includes("hq_renders")}
