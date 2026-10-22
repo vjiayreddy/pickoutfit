@@ -537,7 +537,7 @@ function EditorForm({ productId, product }: { productId?: Id<"products">; produc
     if (!catalog) return;
     // Scope by this dimension's option ids — the same attribute can appear on multiple
     // recipes (e.g. Size + Men T Shirt Sizes), so catalog-wide lookup is ambiguous.
-    const typeOptionIds = new Set(type.options.map((option) => option.id));
+    const typeOptionIds = new Set(type.options.map((option) => option.id as string));
     setDraft((current) => ({
       ...current,
       variants: current.variants.map((row) => {
